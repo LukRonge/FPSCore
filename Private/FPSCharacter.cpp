@@ -487,20 +487,14 @@ void AFPSCharacter::Move(const FInputActionValue& Value)
 	}
 
 	// Get raw input from Enhanced Input (range -1 to 1, NOT unit length)
-	// W = (0, 1), D = (1, 0), W+D = (1, 1) with length 1.414
 	FVector2D RawInput = Value.Get<FVector2D>();
 
 	// Normalize to unit length for desired direction
-	// W+D: (1, 1) → (0.707, 0.707) with length 1.0
 	float InputMagnitude = RawInput.Size();
-
-	// Store previous smoothed vector for delta calculation
-	FVector2D PreviousSmoothedVector = SmoothedMovementVector;
-	FVector2D PreviousCurrentVector = CurrentMovementVector;
 
 	if (InputMagnitude > KINDA_SMALL_NUMBER)
 	{
-		// Store RAW normalized input (target for interpolation)
+		// Store normalized input
 		CurrentMovementVector = RawInput / InputMagnitude;
 	}
 	else
@@ -509,67 +503,10 @@ void AFPSCharacter::Move(const FInputActionValue& Value)
 		CurrentMovementVector = FVector2D::ZeroVector;
 	}
 
-	// Detect significant direction change (input change > 0.5 on either axis)
-	FVector2D InputDelta = CurrentMovementVector - PreviousCurrentVector;
-	bool bSignificantDirectionChange = (FMath::Abs(InputDelta.X) > 0.5f || FMath::Abs(InputDelta.Y) > 0.5f);
-
-	if (bSignificantDirectionChange)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[Move] DIRECTION CHANGE: From (%.3f, %.3f) → To (%.3f, %.3f) | Delta: (%.3f, %.3f)"),
-			PreviousCurrentVector.X, PreviousCurrentVector.Y,
-			CurrentMovementVector.X, CurrentMovementVector.Y,
-			InputDelta.X, InputDelta.Y);
-	}
-
-	// Interpolate on X and Y separately
-	SmoothedMovementVector.X = FMath::FInterpTo(
-		SmoothedMovementVector.X,
-		CurrentMovementVector.X,
-		DeltaSeconds,
-		DirectionChangeSpeed
-	);
-
-	SmoothedMovementVector.Y = FMath::FInterpTo(
-		SmoothedMovementVector.Y,
-		CurrentMovementVector.Y,
-		DeltaSeconds,
-		DirectionChangeSpeed
-	);
-
-	// Calculate delta between previous and current smoothed vector
-	FVector2D SmoothedDelta = SmoothedMovementVector - PreviousSmoothedVector;
-	float DeltaMagnitude = SmoothedDelta.Size();
-
-	// Log significant smoothing oscillations (delta > 0.05)
-	if (DeltaMagnitude > 0.05f)
-	{
-		UE_LOG(LogTemp, Display, TEXT("[Move] Smoothed: (%.3f, %.3f) | Target: (%.3f, %.3f) | Delta: (%.3f, %.3f) | DeltaMag: %.4f | DT: %.4f | InterpSpeed: %.2f"),
-			SmoothedMovementVector.X, SmoothedMovementVector.Y,
-			CurrentMovementVector.X, CurrentMovementVector.Y,
-			SmoothedDelta.X, SmoothedDelta.Y,
-			DeltaMagnitude,
-			DeltaSeconds,
-			DirectionChangeSpeed);
-	}
-
-	// On-screen debug for easy observation
-	if (GEngine && DeltaMagnitude > 0.001f)
-	{
-		GEngine->AddOnScreenDebugMessage(100, 0.0f, FColor::Yellow,
-			FString::Printf(TEXT("Current: (%.2f, %.2f) | Smoothed: (%.2f, %.2f) | Delta: %.3f"),
-				CurrentMovementVector.X, CurrentMovementVector.Y,
-				SmoothedMovementVector.X, SmoothedMovementVector.Y,
-				DeltaMagnitude));
-	}
-
 	// Apply sprint direction clamping if in sprint mode
 	if (CurrentMovementMode == EFPSMovementMode::Sprint && CMC)
 	{
-		float SprintMultiplier = GetSprintDirectionMultiplier(SmoothedMovementVector);
-
-		// Clamp sprint speed based on direction
-		// Forward/Forward-diagonal: full sprint speed
-		// Side/Back: reduced to jog speed
+		float SprintMultiplier = GetSprintDirectionMultiplier(CurrentMovementVector);
 		float ClampedSpeed = FMath::Lerp(JogSpeed, SprintSpeed, SprintMultiplier);
 		CMC->MaxWalkSpeed = ClampedSpeed;
 	}
@@ -578,8 +515,8 @@ void AFPSCharacter::Move(const FInputActionValue& Value)
 	const FVector ForwardDirection = GetActorForwardVector();
 	const FVector RightDirection = GetActorRightVector();
 
-	// Build 3D world-space movement direction using SMOOTHED vector
-	const FVector MovementDirection = (ForwardDirection * SmoothedMovementVector.Y) + (RightDirection * SmoothedMovementVector.X);
+	// Build 3D world-space movement direction
+	const FVector MovementDirection = (ForwardDirection * CurrentMovementVector.Y) + (RightDirection * CurrentMovementVector.X);
 
 	// Add movement input - CMC handles acceleration, speed limiting, and network replication
 	AddMovementInput(MovementDirection, 1.0f);
@@ -588,19 +525,7 @@ void AFPSCharacter::Move(const FInputActionValue& Value)
 void AFPSCharacter::MoveCanceled(const FInputActionValue& Value)
 {
 	// Called when all movement keys are released
-	// Reset movement vectors to prevent interpolation from stale direction
-
-	// DEBUG: Movement canceled
-	UE_LOG(LogTemp, Warning, TEXT("[MoveCanceled] Resetting movement vectors | Previous Smoothed: (%.3f, %.3f)"),
-		SmoothedMovementVector.X, SmoothedMovementVector.Y);
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(101, 1.0f, FColor::Red, TEXT("Movement CANCELED"));
-	}
-
 	CurrentMovementVector = FVector2D::ZeroVector;
-	SmoothedMovementVector = FVector2D::ZeroVector;
 }
 
 void AFPSCharacter::WalkPressed()

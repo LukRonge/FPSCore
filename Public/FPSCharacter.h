@@ -113,11 +113,6 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Animation")
 	FVector2D CurrentMovementVector = FVector2D::ZeroVector;
 
-	// Smoothed movement vector (interpolated from CurrentMovementVector)
-	// INPUT Convention: X=right, Y=forward (same as CurrentMovementVector)
-	UPROPERTY(BlueprintReadOnly, Category = "Animation")
-	FVector2D SmoothedMovementVector = FVector2D::ZeroVector;
-
 	// Look control
 	UPROPERTY(BlueprintReadWrite, ReplicatedUsing = OnRep_IsDeath, Category = "Look")
 	bool bIsDeath = false;
@@ -202,10 +197,6 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Movement")
 	float CrouchSpeed = 150.0f;
-
-	// Direction change interpolation speed
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Movement")
-	float DirectionChangeSpeed = 6.0f;
 
 	// Current movement mode (replicated for animations)
 	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_CurrentMovementMode, Category = "Movement")
