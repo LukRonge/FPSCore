@@ -60,7 +60,7 @@ AFPSCharacter::AFPSCharacter()
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(Neck_01);
 	Camera->SetRelativeLocation(FVector(15.0f, 0.0f, 0.0f));
-	Camera->bUsePawnControlRotation = true;
+	Camera->bUsePawnControlRotation = false;  // Camera follows spine hierarchy rotations
 
 	// Create Arms mesh component (first person)
 	Arms = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Arms"));
@@ -173,7 +173,9 @@ void AFPSCharacter::BeginPlay()
 	// Initialize movement speed with current mode (uses Blueprint-configured speeds)
 	UpdateMovementSpeed(CurrentMovementMode);
 
-	if (HasAuthority())
+	// Setup first-person hands (only for locally controlled player)
+	// This handles initial weapon positioning in first-person view
+	if (IsLocallyControlled())
 	{
 		SetupHandsLocation();
 	}
@@ -201,8 +203,7 @@ void AFPSCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	DOREPLIFETIME(AFPSCharacter, bIsDeath);
 	DOREPLIFETIME(AFPSCharacter, bIsAiming);
 
-	// Replicate animation data
-	DOREPLIFETIME(AFPSCharacter, HandsOffset);
+	// NOTE: HandsOffset is NOT replicated - it's local to owning client for first-person arms only
 }
 
 void AFPSCharacter::Tick(float DeltaTime)
@@ -218,27 +219,88 @@ void AFPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
+	// DEBUG: SetupPlayerInputComponent called
+	UE_LOG(LogTemp, Warning, TEXT("[SetupPlayerInputComponent] Called for %s"), *GetName());
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Purple,
+			TEXT("[SetupPlayerInputComponent] Called"));
+	}
+
 	// Bind Enhanced Input actions
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
 	{
+		// DEBUG: EnhancedInputComponent OK
+		UE_LOG(LogTemp, Display, TEXT("[SetupPlayerInputComponent] EnhancedInputComponent OK"));
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green,
+				TEXT("[SetupPlayerInputComponent] EnhancedInputComponent OK"));
+		}
+
+		// Clear any existing bindings for this object to prevent duplicates
+		EnhancedInputComponent->ClearBindingsForObject(this);
+
 		// DEBUG: Check Input Actions
+		UE_LOG(LogTemp, Warning, TEXT("[SetupPlayerInputComponent] IA_Look_Yaw: %s | IA_Look_Pitch: %s | IA_Move: %s"),
+			IA_Look_Yaw ? *IA_Look_Yaw->GetName() : TEXT("NULL"),
+			IA_Look_Pitch ? *IA_Look_Pitch->GetName() : TEXT("NULL"),
+			IA_Move ? *IA_Move->GetName() : TEXT("NULL"));
+
 		if (GEngine)
 		{
 			GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan,
-				FString::Printf(TEXT("IA_Look: %s | IA_Move: %s"),
-				IA_Look ? TEXT("SET") : TEXT("NULL"),
+				FString::Printf(TEXT("IA_Look_Yaw: %s | IA_Look_Pitch: %s | IA_Move: %s"),
+				IA_Look_Yaw ? TEXT("SET") : TEXT("NULL"),
+				IA_Look_Pitch ? TEXT("SET") : TEXT("NULL"),
 				IA_Move ? TEXT("SET") : TEXT("NULL")));
 		}
 
-		if (IA_Look)
+		// Bind separate Yaw and Pitch actions
+		if (IA_Look_Yaw)
 		{
-			EnhancedInputComponent->BindAction(IA_Look, ETriggerEvent::Triggered, this, &AFPSCharacter::Look);
+			EnhancedInputComponent->BindAction(IA_Look_Yaw, ETriggerEvent::Triggered, this, &AFPSCharacter::LookYaw);
+			UE_LOG(LogTemp, Display, TEXT("[Binding] IA_Look_Yaw -> LookYaw BOUND"));
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green,
+					TEXT("[Binding] IA_Look_Yaw -> LookYaw BOUND"));
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("[Binding] IA_Look_Yaw is NULL - NOT BOUND!"));
+		}
+
+		if (IA_Look_Pitch)
+		{
+			EnhancedInputComponent->BindAction(IA_Look_Pitch, ETriggerEvent::Triggered, this, &AFPSCharacter::LookPitch);
+			UE_LOG(LogTemp, Display, TEXT("[Binding] IA_Look_Pitch -> LookPitch BOUND"));
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green,
+					TEXT("[Binding] IA_Look_Pitch -> LookPitch BOUND"));
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("[Binding] IA_Look_Pitch is NULL - NOT BOUND!"));
 		}
 
 		if (IA_Move)
 		{
 			EnhancedInputComponent->BindAction(IA_Move, ETriggerEvent::Triggered, this, &AFPSCharacter::Move);
 			EnhancedInputComponent->BindAction(IA_Move, ETriggerEvent::Canceled, this, &AFPSCharacter::MoveCanceled);
+			UE_LOG(LogTemp, Display, TEXT("[Binding] IA_Move -> Move/MoveCanceled BOUND"));
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green,
+					TEXT("[Binding] IA_Move -> Move/MoveCanceled BOUND"));
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("[Binding] IA_Move is NULL - NOT BOUND!"));
 		}
 
 		if (IA_Walk)
@@ -258,6 +320,24 @@ void AFPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 			EnhancedInputComponent->BindAction(IA_Crouch, ETriggerEvent::Started, this, &AFPSCharacter::CrouchPressed);
 			EnhancedInputComponent->BindAction(IA_Crouch, ETriggerEvent::Completed, this, &AFPSCharacter::CrouchReleased);
 		}
+
+		// DEBUG: Bindings complete
+		UE_LOG(LogTemp, Warning, TEXT("[SetupPlayerInputComponent] ALL BINDINGS COMPLETE"));
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow,
+				TEXT("[SetupPlayerInputComponent] ALL BINDINGS COMPLETE"));
+		}
+	}
+	else
+	{
+		// DEBUG: Failed to cast to EnhancedInputComponent
+		UE_LOG(LogTemp, Error, TEXT("[SetupPlayerInputComponent] FAILED to cast to EnhancedInputComponent!"));
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Red,
+				TEXT("[SetupPlayerInputComponent] FAILED to cast to EnhancedInputComponent!"));
+		}
 	}
 }
 
@@ -265,7 +345,8 @@ void AFPSCharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
 
-	Client_Possessed();
+	// Camera is now set up in FPSPlayerController::OnPossess()
+	// No need for Client RPC
 }
 
 void AFPSCharacter::UnPossessed()
@@ -286,11 +367,8 @@ void AFPSCharacter::UpdatePitch(float Y)
 	{
 		Pitch = NewPitch;
 
-		// Update spine component rotations (base 90° Yaw + pitch)
-		Spine_03->SetRelativeRotation(FRotator(0.0f, 90.0f + (Pitch * 0.4f), 0.0f));
-		Spine_04->SetRelativeRotation(FRotator(0.0f, Pitch * 0.5f, 0.0f));
-		Spine_05->SetRelativeRotation(FRotator(0.0f, Pitch * 0.6f, 0.0f));
-		Neck_01->SetRelativeRotation(FRotator(0.0f, Pitch * 0.2f, 0.0f));
+		// Update spine component rotations (visual feedback)
+		UpdateSpineRotations();
 
 		// Send to server if we're a client
 		if (!HasAuthority())
@@ -302,41 +380,61 @@ void AFPSCharacter::UpdatePitch(float Y)
 
 void AFPSCharacter::Server_UpdatePitch_Implementation(float NewPitch)
 {
-	// Server receives pitch from client and replicates to other clients
+	// Server receives pitch from client and validates
 	Pitch = FMath::ClampAngle(NewPitch, -45.0f, 45.0f);
 
-	// Update server's spine components
-	Spine_03->SetRelativeRotation(FRotator(0.0f, 90.0f + (Pitch * 0.4f), 0.0f));
-	Spine_04->SetRelativeRotation(FRotator(0.0f, Pitch * 0.5f, 0.0f));
-	Spine_05->SetRelativeRotation(FRotator(0.0f, Pitch * 0.6f, 0.0f));
-	Neck_01->SetRelativeRotation(FRotator(0.0f, Pitch * 0.2f, 0.0f));
+	// Update spine components on server
+	// Note: Pitch property replicates to other clients → triggers OnRep_Pitch
+	UpdateSpineRotations();
+}
+
+void AFPSCharacter::UpdateSpineRotations()
+{
+	// Helper function to update spine component rotations based on current Pitch
+	// Called from: UpdatePitch, Server_UpdatePitch, OnRep_Pitch
+	//
+	// Pitch is distributed across spine bones for natural upper body rotation:
+	// - Spine_03: 40% Pitch influence (base rotation 90° Yaw is constant)
+	// - Spine_04: 50% Pitch
+	// - Spine_05: 60% Pitch
+	// - Neck_01:  20% Pitch
+	//
+	// FRotator parameter order: (Pitch, Yaw, Roll)
+	// Spine hierarchy simulates spine curve so player looks ahead of feet when looking down
+
+	Spine_03->SetRelativeRotation(FRotator(Pitch * 0.4f, 90.0f, 0.0f));
+	Spine_04->SetRelativeRotation(FRotator(Pitch * 0.5f, 0.0f, 0.0f));
+	Spine_05->SetRelativeRotation(FRotator(Pitch * 0.6f, 0.0f, 0.0f));
+	Neck_01->SetRelativeRotation(FRotator(Pitch * 0.2f, 0.0f, 0.0f));
 }
 
 void AFPSCharacter::SetupHandsLocation()
 {
+	// This function should ONLY run on locally controlled client
+	// Arms mesh is OnlyOwnerSee - other players don't need this
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	// Calculate hands offset based on active item
 	if (ActiveItem && ActiveItem->Implements<UHoldableItemInterface>())
 	{
-		// Get hands offset from active item via interface
 		HandsOffset = IHoldableItemInterface::Execute_GetHandsOffset(ActiveItem);
 	}
 	else
 	{
-		// No active item, use default offset
 		HandsOffset = DefaultHandsOffset;
 	}
 
-	// Always set arms location and call client RPC
-	Arms->SetRelativeLocation(HandsOffset);
-	Client_SetupHandsLocation(HandsOffset);
+	// Apply to first-person arms mesh
+	if (Arms)
+	{
+		Arms->SetRelativeLocation(HandsOffset);
+	}
 }
 
-void AFPSCharacter::Client_SetupHandsLocation_Implementation(FVector Offset)
-{
-	HandsOffset = Offset;
-	Arms->SetRelativeLocation(HandsOffset);
-}
-
-void AFPSCharacter::Look(const FInputActionValue& Value)
+void AFPSCharacter::LookYaw(const FInputActionValue& Value)
 {
 	// Check if character is dead
 	if (bIsDeath)
@@ -344,8 +442,8 @@ void AFPSCharacter::Look(const FInputActionValue& Value)
 		return;
 	}
 
-	// Get the 2D look input value (X = mouse X, Y = mouse Y)
-	FVector2D LookAxisVector = Value.Get<FVector2D>();
+	// Get yaw input (float value from Mouse X axis)
+	float YawValue = Value.Get<float>();
 
 	// Enhanced Input sensitivity scaling
 	float Sensitivity = 0.5f;
@@ -354,7 +452,30 @@ void AFPSCharacter::Look(const FInputActionValue& Value)
 		Sensitivity *= 0.5f; // Half sensitivity when aiming
 	}
 
-	AddControllerYawInput(LookAxisVector.X * Sensitivity);
+	// Update yaw (horizontal camera rotation) - LEFT/RIGHT mouse movement
+	AddControllerYawInput(YawValue * Sensitivity);
+}
+
+void AFPSCharacter::LookPitch(const FInputActionValue& Value)
+{
+	// Check if character is dead
+	if (bIsDeath)
+	{
+		return;
+	}
+
+	// Get pitch input (float value from Mouse Y axis)
+	float PitchValue = Value.Get<float>();
+
+	// Enhanced Input sensitivity scaling
+	float Sensitivity = 0.5f;
+	if (bIsAiming)
+	{
+		Sensitivity *= 0.5f; // Half sensitivity when aiming
+	}
+
+	// Update pitch (vertical camera rotation + upper body aim) - UP/DOWN mouse movement
+	UpdatePitch(PitchValue * Sensitivity);
 }
 
 void AFPSCharacter::Move(const FInputActionValue& Value)
@@ -373,6 +494,10 @@ void AFPSCharacter::Move(const FInputActionValue& Value)
 	// W+D: (1, 1) → (0.707, 0.707) with length 1.0
 	float InputMagnitude = RawInput.Size();
 
+	// Store previous smoothed vector for delta calculation
+	FVector2D PreviousSmoothedVector = SmoothedMovementVector;
+	FVector2D PreviousCurrentVector = CurrentMovementVector;
+
 	if (InputMagnitude > KINDA_SMALL_NUMBER)
 	{
 		// Store RAW normalized input (target for interpolation)
@@ -382,6 +507,18 @@ void AFPSCharacter::Move(const FInputActionValue& Value)
 	{
 		// No input
 		CurrentMovementVector = FVector2D::ZeroVector;
+	}
+
+	// Detect significant direction change (input change > 0.5 on either axis)
+	FVector2D InputDelta = CurrentMovementVector - PreviousCurrentVector;
+	bool bSignificantDirectionChange = (FMath::Abs(InputDelta.X) > 0.5f || FMath::Abs(InputDelta.Y) > 0.5f);
+
+	if (bSignificantDirectionChange)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Move] DIRECTION CHANGE: From (%.3f, %.3f) → To (%.3f, %.3f) | Delta: (%.3f, %.3f)"),
+			PreviousCurrentVector.X, PreviousCurrentVector.Y,
+			CurrentMovementVector.X, CurrentMovementVector.Y,
+			InputDelta.X, InputDelta.Y);
 	}
 
 	// Interpolate on X and Y separately
@@ -398,6 +535,32 @@ void AFPSCharacter::Move(const FInputActionValue& Value)
 		DeltaSeconds,
 		DirectionChangeSpeed
 	);
+
+	// Calculate delta between previous and current smoothed vector
+	FVector2D SmoothedDelta = SmoothedMovementVector - PreviousSmoothedVector;
+	float DeltaMagnitude = SmoothedDelta.Size();
+
+	// Log significant smoothing oscillations (delta > 0.05)
+	if (DeltaMagnitude > 0.05f)
+	{
+		UE_LOG(LogTemp, Display, TEXT("[Move] Smoothed: (%.3f, %.3f) | Target: (%.3f, %.3f) | Delta: (%.3f, %.3f) | DeltaMag: %.4f | DT: %.4f | InterpSpeed: %.2f"),
+			SmoothedMovementVector.X, SmoothedMovementVector.Y,
+			CurrentMovementVector.X, CurrentMovementVector.Y,
+			SmoothedDelta.X, SmoothedDelta.Y,
+			DeltaMagnitude,
+			DeltaSeconds,
+			DirectionChangeSpeed);
+	}
+
+	// On-screen debug for easy observation
+	if (GEngine && DeltaMagnitude > 0.001f)
+	{
+		GEngine->AddOnScreenDebugMessage(100, 0.0f, FColor::Yellow,
+			FString::Printf(TEXT("Current: (%.2f, %.2f) | Smoothed: (%.2f, %.2f) | Delta: %.3f"),
+				CurrentMovementVector.X, CurrentMovementVector.Y,
+				SmoothedMovementVector.X, SmoothedMovementVector.Y,
+				DeltaMagnitude));
+	}
 
 	// Apply sprint direction clamping if in sprint mode
 	if (CurrentMovementMode == EFPSMovementMode::Sprint && CMC)
@@ -426,6 +589,16 @@ void AFPSCharacter::MoveCanceled(const FInputActionValue& Value)
 {
 	// Called when all movement keys are released
 	// Reset movement vectors to prevent interpolation from stale direction
+
+	// DEBUG: Movement canceled
+	UE_LOG(LogTemp, Warning, TEXT("[MoveCanceled] Resetting movement vectors | Previous Smoothed: (%.3f, %.3f)"),
+		SmoothedMovementVector.X, SmoothedMovementVector.Y);
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(101, 1.0f, FColor::Red, TEXT("Movement CANCELED"));
+	}
+
 	CurrentMovementVector = FVector2D::ZeroVector;
 	SmoothedMovementVector = FVector2D::ZeroVector;
 }
@@ -498,61 +671,24 @@ void AFPSCharacter::UpdateMovementSpeed(EFPSMovementMode NewMode)
 	}
 }
 
-void AFPSCharacter::Client_Possessed_Implementation()
-{
-	// Delay camera setup by one frame to ensure actor is fully initialized
-	// This prevents race conditions during possession
-	GetWorld()->GetTimerManager().SetTimerForNextTick(this, &AFPSCharacter::SetupCamera);
-}
-
-void AFPSCharacter::SetupCamera()
-{
-	// Ensure we're on the local client and camera component is valid
-	if (!IsLocallyControlled() || !Camera)
-	{
-		return;
-	}
-
-	// Get controller and cast to FPSPlayerController
-	if (AFPSPlayerController* FPSController = Cast<AFPSPlayerController>(GetController()))
-	{
-		// Set view target with blend to self
-		FPSController->SetViewTargetWithBlend(this, 0.0f);
-	}
-}
-
 void AFPSCharacter::OnRep_Pitch()
 {
 	// Called on clients when Pitch replicates from server
 	// Update spine component rotations based on replicated Pitch value
+	// Skip for locally controlled (already updated in UpdatePitch)
 	if (!IsLocallyControlled())
 	{
-		Spine_03->SetRelativeRotation(FRotator(0.0f, 90.0f + (Pitch * 0.4f), 0.0f));
-		Spine_04->SetRelativeRotation(FRotator(0.0f, Pitch * 0.5f, 0.0f));
-		Spine_05->SetRelativeRotation(FRotator(0.0f, Pitch * 0.6f, 0.0f));
-		Neck_01->SetRelativeRotation(FRotator(0.0f, Pitch * 0.2f, 0.0f));
+		UpdateSpineRotations();
 	}
 }
 
 void AFPSCharacter::OnRep_ActiveItem()
 {
 	// Called on clients when ActiveItem changes
-	// Update hands location based on new active item
+	// Update first-person hands position (only for locally controlled player)
 	if (!HasAuthority())
 	{
-		if (ActiveItem && ActiveItem->Implements<UHoldableItemInterface>())
-		{
-			HandsOffset = IHoldableItemInterface::Execute_GetHandsOffset(ActiveItem);
-		}
-		else
-		{
-			HandsOffset = DefaultHandsOffset;
-		}
-
-		if (Arms)
-		{
-			Arms->SetRelativeLocation(HandsOffset);
-		}
+		SetupHandsLocation();  // Reuse shared logic, handles IsLocallyControlled check
 	}
 }
 

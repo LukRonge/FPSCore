@@ -36,7 +36,8 @@ protected:
 	void InitializeSpineComponents();
 
 	// Enhanced Input callbacks
-	void Look(const FInputActionValue& Value);
+	void LookYaw(const FInputActionValue& Value);
+	void LookPitch(const FInputActionValue& Value);
 	void Move(const FInputActionValue& Value);
 	void MoveCanceled(const FInputActionValue& Value);
 	void WalkPressed();
@@ -69,6 +70,10 @@ protected:
 	UFUNCTION(Server, Unreliable)
 	void Server_UpdatePitch(float NewPitch);
 
+	// Helper function to update spine rotations based on current Pitch
+	// Called from UpdatePitch, Server_UpdatePitch, and OnRep_Pitch
+	void UpdateSpineRotations();
+
 public:
 	virtual void Tick(float DeltaTime) override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
@@ -79,21 +84,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Animation")
 	void UpdatePitch(float Y);
 
-	// Hands setup - runs on authority only
+	// Hands setup - updates first-person arms position based on active item
+	// Only runs on locally controlled client (Arms mesh is OnlyOwnerSee)
 	UFUNCTION(BlueprintCallable, Category = "Animation")
 	void SetupHandsLocation();
-
-	// Hands setup - runs on owning client only
-	UFUNCTION(Client, Reliable)
-	void Client_SetupHandsLocation(FVector Offset);
-
-	// Possession - runs on owning client only
-	UFUNCTION(Client, Reliable)
-	void Client_Possessed();
-
-	// Camera setup
-	UFUNCTION(BlueprintCallable, Category = "Camera")
-	void SetupCamera();
 
 	// OnRep callbacks
 	UFUNCTION()
@@ -141,8 +135,9 @@ public:
 	UPROPERTY(BlueprintReadWrite, ReplicatedUsing = OnRep_ActiveItem, Category = "Inventory")
 	AActor* ActiveItem = nullptr;
 
-	// Hands offset
-	UPROPERTY(BlueprintReadWrite, Replicated, Category = "Animation")
+	// Hands offset (LOCAL ONLY - not replicated, used for first-person arms positioning)
+	// Only relevant for locally controlled player (Arms mesh is OnlyOwnerSee)
+	UPROPERTY(BlueprintReadWrite, Category = "Animation")
 	FVector HandsOffset = FVector::ZeroVector;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
@@ -178,7 +173,10 @@ public:
 
 	// Enhanced Input Actions
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-	UInputAction* IA_Look;
+	UInputAction* IA_Look_Yaw;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* IA_Look_Pitch;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	UInputAction* IA_Move;

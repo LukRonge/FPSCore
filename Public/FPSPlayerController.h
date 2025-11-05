@@ -20,6 +20,9 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	// Setup Enhanced Input mapping context
+	void SetupInputMapping();
+
 public:
 	virtual void Tick(float DeltaTime) override;
 	virtual void SetupInputComponent() override;
