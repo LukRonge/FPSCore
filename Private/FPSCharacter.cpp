@@ -219,88 +219,27 @@ void AFPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-	// DEBUG: SetupPlayerInputComponent called
-	UE_LOG(LogTemp, Warning, TEXT("[SetupPlayerInputComponent] Called for %s"), *GetName());
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Purple,
-			TEXT("[SetupPlayerInputComponent] Called"));
-	}
-
 	// Bind Enhanced Input actions
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
 	{
-		// DEBUG: EnhancedInputComponent OK
-		UE_LOG(LogTemp, Display, TEXT("[SetupPlayerInputComponent] EnhancedInputComponent OK"));
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green,
-				TEXT("[SetupPlayerInputComponent] EnhancedInputComponent OK"));
-		}
-
 		// Clear any existing bindings for this object to prevent duplicates
 		EnhancedInputComponent->ClearBindingsForObject(this);
-
-		// DEBUG: Check Input Actions
-		UE_LOG(LogTemp, Warning, TEXT("[SetupPlayerInputComponent] IA_Look_Yaw: %s | IA_Look_Pitch: %s | IA_Move: %s"),
-			IA_Look_Yaw ? *IA_Look_Yaw->GetName() : TEXT("NULL"),
-			IA_Look_Pitch ? *IA_Look_Pitch->GetName() : TEXT("NULL"),
-			IA_Move ? *IA_Move->GetName() : TEXT("NULL"));
-
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan,
-				FString::Printf(TEXT("IA_Look_Yaw: %s | IA_Look_Pitch: %s | IA_Move: %s"),
-				IA_Look_Yaw ? TEXT("SET") : TEXT("NULL"),
-				IA_Look_Pitch ? TEXT("SET") : TEXT("NULL"),
-				IA_Move ? TEXT("SET") : TEXT("NULL")));
-		}
 
 		// Bind separate Yaw and Pitch actions
 		if (IA_Look_Yaw)
 		{
 			EnhancedInputComponent->BindAction(IA_Look_Yaw, ETriggerEvent::Triggered, this, &AFPSCharacter::LookYaw);
-			UE_LOG(LogTemp, Display, TEXT("[Binding] IA_Look_Yaw -> LookYaw BOUND"));
-			if (GEngine)
-			{
-				GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green,
-					TEXT("[Binding] IA_Look_Yaw -> LookYaw BOUND"));
-			}
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("[Binding] IA_Look_Yaw is NULL - NOT BOUND!"));
 		}
 
 		if (IA_Look_Pitch)
 		{
 			EnhancedInputComponent->BindAction(IA_Look_Pitch, ETriggerEvent::Triggered, this, &AFPSCharacter::LookPitch);
-			UE_LOG(LogTemp, Display, TEXT("[Binding] IA_Look_Pitch -> LookPitch BOUND"));
-			if (GEngine)
-			{
-				GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green,
-					TEXT("[Binding] IA_Look_Pitch -> LookPitch BOUND"));
-			}
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("[Binding] IA_Look_Pitch is NULL - NOT BOUND!"));
 		}
 
 		if (IA_Move)
 		{
 			EnhancedInputComponent->BindAction(IA_Move, ETriggerEvent::Triggered, this, &AFPSCharacter::Move);
 			EnhancedInputComponent->BindAction(IA_Move, ETriggerEvent::Canceled, this, &AFPSCharacter::MoveCanceled);
-			UE_LOG(LogTemp, Display, TEXT("[Binding] IA_Move -> Move/MoveCanceled BOUND"));
-			if (GEngine)
-			{
-				GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green,
-					TEXT("[Binding] IA_Move -> Move/MoveCanceled BOUND"));
-			}
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("[Binding] IA_Move is NULL - NOT BOUND!"));
 		}
 
 		if (IA_Walk)
@@ -319,24 +258,6 @@ void AFPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		{
 			EnhancedInputComponent->BindAction(IA_Crouch, ETriggerEvent::Started, this, &AFPSCharacter::CrouchPressed);
 			EnhancedInputComponent->BindAction(IA_Crouch, ETriggerEvent::Completed, this, &AFPSCharacter::CrouchReleased);
-		}
-
-		// DEBUG: Bindings complete
-		UE_LOG(LogTemp, Warning, TEXT("[SetupPlayerInputComponent] ALL BINDINGS COMPLETE"));
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow,
-				TEXT("[SetupPlayerInputComponent] ALL BINDINGS COMPLETE"));
-		}
-	}
-	else
-	{
-		// DEBUG: Failed to cast to EnhancedInputComponent
-		UE_LOG(LogTemp, Error, TEXT("[SetupPlayerInputComponent] FAILED to cast to EnhancedInputComponent!"));
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Red,
-				TEXT("[SetupPlayerInputComponent] FAILED to cast to EnhancedInputComponent!"));
 		}
 	}
 }
@@ -624,10 +545,6 @@ void AFPSCharacter::OnRep_IsDeath()
 	if (bIsDeath)
 	{
 		// Death logic - can be extended in Blueprint
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Character died (replicated)"));
-		}
 	}
 }
 
