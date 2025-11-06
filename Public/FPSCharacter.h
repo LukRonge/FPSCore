@@ -87,6 +87,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Animation")
 	void SetupHandsLocation();
 
+	// Link default animation layer to all character meshes
+	UFUNCTION(BlueprintCallable, Category = "Animation")
+	void LinkDefaultLayer();
+
+	// Unlink default animation layer from all character meshes
+	UFUNCTION(BlueprintCallable, Category = "Animation")
+	void UnlinkDefaultLayer();
+
 	// OnRep callbacks
 	UFUNCTION()
 	void OnRep_Pitch();
@@ -135,6 +143,10 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
 	FVector DefaultHandsOffset = FVector::ZeroVector;
+
+	// Default animation layer class to link/unlink dynamically
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Animation")
+	TSubclassOf<UAnimInstance> DefaultAnimLayer;
 
 	// Character Movement Component (cached reference)
 	UPROPERTY()

@@ -43,6 +43,10 @@ AFPSCharacter::AFPSCharacter()
 	GetMesh()->SetOnlyOwnerSee(false);
 	GetMesh()->SetOwnerNoSee(true);
 
+	// Ensure animations tick on simulated proxies (remote clients)
+	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	GetMesh()->SetComponentTickEnabled(true);
+
 	// Create skeleton hierarchy scene components
 	Spine_03 = CreateDefaultSubobject<USceneComponent>(TEXT("spine_03"));
 	Spine_03->SetupAttachment(GetMesh());
@@ -173,9 +177,7 @@ void AFPSCharacter::BeginPlay()
 	// Initialize movement speed with current mode (uses Blueprint-configured speeds)
 	UpdateMovementSpeed(CurrentMovementMode);
 
-	// NOTE: SetupHandsLocation() is now called in Client_OnPossessed()
-	// This ensures proper timing after possession completes
-	// BeginPlay() may run before possession, causing IsLocallyControlled() to be FALSE
+	LinkDefaultLayer();
 }
 
 void AFPSCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -270,6 +272,9 @@ void AFPSCharacter::PossessedBy(AController* NewController)
 	{
 		Client_OnPossessed();
 	}
+
+	// NOTE: Animation layer linking for simulated proxies is handled in PostNetInit()
+	// This ensures proper timing after the actor is fully replicated to clients
 }
 
 void AFPSCharacter::UnPossessed()
@@ -298,6 +303,10 @@ void AFPSCharacter::Client_OnPossessed_Implementation()
 
 	// Setup first-person hands position
 	SetupHandsLocation();
+
+	// Link animation layer LOCALLY on owning client
+	// This ensures immediate visual setup without waiting for multicast
+	LinkDefaultLayer();
 
 	// Ensure controller has input mapping and camera setup
 	if (AFPSPlayerController* PC = Cast<AFPSPlayerController>(GetController()))
@@ -390,10 +399,31 @@ void AFPSCharacter::SetupHandsLocation()
 	}
 
 	// Apply to first-person arms mesh
-	if (Arms)
+	Arms->SetRelativeLocation(HandsOffset);
+}
+
+void AFPSCharacter::LinkDefaultLayer()
+{
+	MeshAnimInstance->LinkAnimClassLayers(DefaultAnimLayer);
+	LegsAnimInstance->LinkAnimClassLayers(DefaultAnimLayer);
+	ArmsAnimInstance->LinkAnimClassLayers(DefaultAnimLayer);
+}
+
+void AFPSCharacter::UnlinkDefaultLayer()
+{
+	// Check if we have a valid animation layer class
+	if (!DefaultAnimLayer)
 	{
-		Arms->SetRelativeLocation(HandsOffset);
+		UE_LOG(LogTemp, Warning, TEXT("[UnlinkDefaultLayer] DefaultAnimLayer is NULL - cannot unlink"));
+		return;
 	}
+
+	// Unlink animation layer from all character meshes
+	GetMesh()->GetAnimInstance()->UnlinkAnimClassLayers(DefaultAnimLayer);
+	Legs->GetAnimInstance()->UnlinkAnimClassLayers(DefaultAnimLayer);
+	Arms->GetAnimInstance()->UnlinkAnimClassLayers(DefaultAnimLayer);
+
+	UE_LOG(LogTemp, Display, TEXT("[UnlinkDefaultLayer] Unlinked from Mesh, Legs, and Arms"));
 }
 
 void AFPSCharacter::LookYaw(const FInputActionValue& Value)

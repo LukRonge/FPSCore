@@ -18,7 +18,8 @@ public class FPSCore : ModuleRules
 				"EnhancedInput",
 				"NetCore",
 				"OnlineSubsystem",
-				"OnlineSubsystemUtils"
+				"OnlineSubsystemUtils",
+				"UMG"
 			}
 		);
 
