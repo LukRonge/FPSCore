@@ -20,10 +20,10 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	// Setup Enhanced Input mapping context
-	void SetupInputMapping();
-
 public:
+	// Setup Enhanced Input mapping context
+	// Public so it can be called from Client_OnPossessed RPC
+	void SetupInputMapping();
 	virtual void Tick(float DeltaTime) override;
 	virtual void SetupInputComponent() override;
 	virtual void OnPossess(APawn* InPawn) override;

@@ -55,13 +55,6 @@ protected:
 	// Left/Right/Back/Back-Left/Back-Right: reduced sprint speed
 	float GetSprintDirectionMultiplier(const FVector2D& MovementInput) const;
 
-	// Get normalized movement vector for Animation Blueprint
-	// Returns velocity in local space, normalized, and scaled by movement mode
-	// Convention: X=forward, Y=right (matches Unreal actor space & BlendSpace standard)
-	// Walk = 1x, Jog = 2x, Sprint = 3x (clamped to 2x for side/back movement)
-	UFUNCTION(BlueprintPure, Category = "Animation")
-	FVector2D GetAnimMovementVector() const;
-
 	// Server RPC to change movement mode
 	UFUNCTION(Server, Reliable)
 	void Server_SetMovementMode(EFPSMovementMode NewMode);
@@ -69,6 +62,11 @@ protected:
 	// Server RPC to update pitch
 	UFUNCTION(Server, Unreliable)
 	void Server_UpdatePitch(float NewPitch);
+
+	// Client RPC to setup camera, input, and hands on owning client
+	// This ensures proper setup for listen server remote clients
+	UFUNCTION(Client, Reliable)
+	void Client_OnPossessed();
 
 	// Helper function to update spine rotations based on current Pitch
 	// Called from UpdatePitch, Server_UpdatePitch, and OnRep_Pitch

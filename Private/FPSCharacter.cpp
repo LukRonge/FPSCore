@@ -173,12 +173,9 @@ void AFPSCharacter::BeginPlay()
 	// Initialize movement speed with current mode (uses Blueprint-configured speeds)
 	UpdateMovementSpeed(CurrentMovementMode);
 
-	// Setup first-person hands (only for locally controlled player)
-	// This handles initial weapon positioning in first-person view
-	if (IsLocallyControlled())
-	{
-		SetupHandsLocation();
-	}
+	// NOTE: SetupHandsLocation() is now called in Client_OnPossessed()
+	// This ensures proper timing after possession completes
+	// BeginPlay() may run before possession, causing IsLocallyControlled() to be FALSE
 }
 
 void AFPSCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -266,13 +263,57 @@ void AFPSCharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
 
-	// Camera is now set up in FPSPlayerController::OnPossess()
-	// No need for Client RPC
+	// Call Client RPC to ensure proper setup on owning client
+	// This is critical for listen server remote clients where OnPossess()
+	// runs on server with IsLocalController() = FALSE
+	if (AFPSPlayerController* PC = Cast<AFPSPlayerController>(NewController))
+	{
+		Client_OnPossessed();
+	}
 }
 
 void AFPSCharacter::UnPossessed()
 {
 	Super::UnPossessed();
+}
+
+void AFPSCharacter::Client_OnPossessed_Implementation()
+{
+	// This runs ONLY on the owning client
+	// Ensures proper setup for listen server remote clients
+
+	if (!IsLocallyControlled())
+	{
+		// Safety check - should never happen for Client RPC
+		UE_LOG(LogTemp, Error, TEXT("[Client_OnPossessed] Called but NOT locally controlled!"));
+		return;
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("[Client_OnPossessed] Setting up local client for: %s"), *GetName());
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
+			FString::Printf(TEXT("[Client_OnPossessed] Setting up: %s"), *GetName()));
+	}
+
+	// Setup first-person hands position
+	SetupHandsLocation();
+
+	// Ensure controller has input mapping and camera setup
+	if (AFPSPlayerController* PC = Cast<AFPSPlayerController>(GetController()))
+	{
+		// Setup input mapping context
+		PC->SetupInputMapping();
+
+		// Set view target to this character's camera
+		PC->SetViewTarget(this);
+
+		UE_LOG(LogTemp, Display, TEXT("[Client_OnPossessed] Controller setup complete"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Client_OnPossessed] Controller cast failed"));
+	}
 }
 
 void AFPSCharacter::UpdatePitch(float Y)
@@ -580,73 +621,3 @@ float AFPSCharacter::GetSprintDirectionMultiplier(const FVector2D& MovementInput
 	}
 }
 
-FVector2D AFPSCharacter::GetAnimMovementVector() const
-{
-	if (!CMC)
-	{
-		return FVector2D::ZeroVector;
-	}
-
-	// NOTE: This function uses DIFFERENT coordinate convention than input!
-	// - INPUT convention (SmoothedMovementVector): X=right, Y=forward
-	// - ANIM BLENDSPACE convention (return value): X=forward, Y=right
-	//
-	// This is intentional because Unreal BlendSpace standard is:
-	//   Horizontal Axis (X-param) = Forward/Backward movement
-	//   Vertical Axis (Y-param) = Right/Left movement
-
-	// Get world velocity from Character Movement Component
-	FVector WorldVelocity = GetVelocity();
-
-	// Convert to local space (relative to actor rotation)
-	// Unreal coordinate system: X=forward, Y=right, Z=up
-	FVector LocalVelocity = GetActorRotation().UnrotateVector(WorldVelocity);
-
-	// Extract 2D movement for AnimBP BlendSpace
-	// AnimBP BlendSpace convention: X=forward, Y=right (matches Unreal actor space)
-	FVector2D MovementVector(LocalVelocity.X, LocalVelocity.Y);
-
-	// Normalize direction
-	float Speed = MovementVector.Size();
-	if (Speed < KINDA_SMALL_NUMBER)
-	{
-		return FVector2D::ZeroVector;
-	}
-
-	FVector2D NormalizedDirection = MovementVector / Speed;
-
-	// Determine multiplier based on movement mode
-	float Multiplier = 1.0f;
-
-	switch (CurrentMovementMode)
-	{
-		case EFPSMovementMode::Walk:
-			Multiplier = 1.0f;
-			break;
-
-		case EFPSMovementMode::Jog:
-			Multiplier = 2.0f;
-			break;
-
-		case EFPSMovementMode::Sprint:
-			// Check if moving forward (X > 0.3 in AnimBP convention)
-			if (NormalizedDirection.X > 0.3f)
-			{
-				// Full sprint for forward movement
-				Multiplier = 3.0f;
-			}
-			else
-			{
-				// Clamp to jog for side/back movement
-				Multiplier = 2.0f;
-			}
-			break;
-
-		case EFPSMovementMode::Crouch:
-			Multiplier = 1.0f;
-			break;
-	}
-
-	// Return normalized direction scaled by multiplier
-	return NormalizedDirection * Multiplier;
-}
