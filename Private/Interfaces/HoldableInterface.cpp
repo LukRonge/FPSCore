@@ -1,3 +1,3 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "HoldableItemInterface.h"
+#include "Interfaces/HoldableInterface.h"

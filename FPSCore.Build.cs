@@ -19,7 +19,9 @@ public class FPSCore : ModuleRules
 				"NetCore",
 				"OnlineSubsystem",
 				"OnlineSubsystemUtils",
-				"UMG"
+				"UMG",
+				"ChaosVehicles",
+				"GameplayTags"
 			}
 		);
 

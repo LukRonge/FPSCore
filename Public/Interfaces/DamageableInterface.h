@@ -1,0 +1,43 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "UObject/Interface.h"
+#include "DamageableInterface.generated.h"
+
+UINTERFACE(MinimalAPI, Blueprintable)
+class UDamageableInterface : public UInterface
+{
+	GENERATED_BODY()
+};
+
+/**
+ * Interface for objects that can take damage
+ * Implemented by Characters, Vehicles, Destructible objects
+ */
+class FPSCORE_API IDamageableInterface
+{
+	GENERATED_BODY()
+
+public:
+	// Apply damage to this object
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Damageable")
+	void TakeDamage(float Damage, AActor* DamageCauser, const FHitResult& Hit);
+
+	// Get array of components that can receive damage (for hitbox detection)
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Damageable")
+	TArray<UPrimitiveComponent*> GetDamageableComponents();
+
+	// Get current health value
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Damageable")
+	float GetHealth();
+
+	// Get maximum health value
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Damageable")
+	float GetMaxHealth();
+
+	// Check if object is dead
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Damageable")
+	bool IsDead();
+};
