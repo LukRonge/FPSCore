@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "ChaosWheeledVehicle.h"
+#include "WheeledVehiclePawn.h"
 #include "ChaosWheeledVehicleMovementComponent.h"
 #include "InputActionValue.h"
 #include "Camera/CameraComponent.h"
@@ -27,7 +27,7 @@
  * Base vehicle class for multiplayer wheeled vehicles
  */
 UCLASS()
-class FPSCORE_API ABaseVehicle : public AChaosWheeledVehicle
+class FPSCORE_API ABaseVehicle : public AWheeledVehiclePawn
 {
 	GENERATED_BODY()
 

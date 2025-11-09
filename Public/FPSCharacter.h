@@ -46,6 +46,8 @@ protected:
 	void SprintReleased();
 	void CrouchPressed();
 	void CrouchReleased();
+	void InteractPressed();
+	void DropPressed();
 
 	// Movement speed control
 	void UpdateMovementSpeed(EFPSMovementMode NewMode);
@@ -102,6 +104,13 @@ public:
 	UFUNCTION()
 	void OnRep_ActiveItem();
 
+	// Setup active item locally (mesh attachment, animations, HUD)
+	// Called from:
+	// - EquipItem() on SERVER
+	// - OnRep_ActiveItem() on CLIENTS
+	// This follows MULTIPLAYER_GUIDELINES.md OnRep pattern
+	void SetupActiveItemLocal();
+
 	UFUNCTION()
 	void OnRep_IsDeath();
 
@@ -132,9 +141,45 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Look")
 	float LookSpeed = 100.0f;
 
-	// Active item
+	// ============================================
+	// INVENTORY SYSTEM
+	// ============================================
+
+	// Inventory component (manages item storage)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+	class UInventoryComponent* InventoryComp;
+
+	// Currently equipped item (active in hands)
 	UPROPERTY(BlueprintReadWrite, ReplicatedUsing = OnRep_ActiveItem, Category = "Inventory")
 	AActor* ActiveItem = nullptr;
+
+	// Server RPC to pickup item from world
+	UFUNCTION(Server, Reliable)
+	void Server_PickupItem(AActor* Item);
+
+	// Core pickup logic (SERVER ONLY - called by Server RPC)
+	void PickupItem(AActor* Item);
+
+	// Equip item from inventory into hands
+	UFUNCTION(BlueprintCallable, Category = "Inventory")
+	void EquipItem(AActor* Item);
+
+	// Unequip current item (holster)
+	UFUNCTION(BlueprintCallable, Category = "Inventory")
+	void UnequipCurrentItem();
+
+	// Switch to item at inventory index (Server RPC)
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Inventory")
+	void Server_SwitchToItemAtIndex(int32 Index);
+
+	// Switch to item at inventory index (local execution)
+	void SwitchToItemAtIndex(int32 Index);
+
+	// Drop item from inventory back to world
+	UFUNCTION(Server, Reliable)
+	void Server_DropItem(AActor* Item);
+
+	void DropItem(AActor* Item);
 
 	// Hands offset (LOCAL ONLY - not replicated, used for first-person arms positioning)
 	// Only relevant for locally controlled player (Arms mesh is OnlyOwnerSee)
@@ -151,6 +196,10 @@ public:
 	// Character Movement Component (cached reference)
 	UPROPERTY()
 	class UCharacterMovementComponent* CMC;
+
+	// Player Controller (cached reference)
+	UPROPERTY()
+	class AFPSPlayerController* CachedPlayerController;
 
 	// Scene components for skeleton hierarchy
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -195,6 +244,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	UInputAction* IA_Crouch;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* IA_Interact;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* IA_Drop;
+
 	// Movement speeds
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Movement")
 	float WalkSpeed = 150.0f;
@@ -211,4 +266,20 @@ public:
 	// Current movement mode (replicated for animations)
 	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_CurrentMovementMode, Category = "Movement")
 	EFPSMovementMode CurrentMovementMode = EFPSMovementMode::Jog;
+
+	// ============================================
+	// INTERACTION SYSTEM
+	// ============================================
+
+	// Interaction trace distance from camera (in cm)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction")
+	float InteractionDistance = 200.0f;
+
+	// Last actor we looked at (for clearing HUD when looking away)
+	UPROPERTY()
+	AActor* LastInteractableActor = nullptr;
+
+	// Perform interaction trace from camera
+	// Checks for IInteractableInterface and updates PlayerController HUD
+	void CheckInteractionTrace();
 };

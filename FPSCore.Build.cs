@@ -21,7 +21,8 @@ public class FPSCore : ModuleRules
 				"OnlineSubsystemUtils",
 				"UMG",
 				"ChaosVehicles",
-				"GameplayTags"
+				"GameplayTags",
+				"Niagara"
 			}
 		);
 

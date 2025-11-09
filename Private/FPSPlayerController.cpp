@@ -4,6 +4,7 @@
 #include "FPSCharacter.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
+#include "GameFramework/HUD.h"
 
 AFPSPlayerController::AFPSPlayerController()
 {
@@ -156,4 +157,90 @@ void AFPSPlayerController::OnPossess(APawn* InPawn)
 void AFPSPlayerController::OnUnPossess()
 {
 	Super::OnUnPossess();
+}
+
+// ============================================
+// PLAYER HUD INTERFACE IMPLEMENTATION
+// ============================================
+
+void AFPSPlayerController::UpdateHealth_Implementation(float Health)
+{
+	// Delegate to HUD widget if it implements PlayerHUDInterface
+	AHUD* HUD = GetHUD();
+	if (HUD && HUD->Implements<UPlayerHUDInterface>())
+	{
+		IPlayerHUDInterface::Execute_UpdateHealth(HUD, Health);
+	}
+}
+
+float AFPSPlayerController::GetHealth_Implementation()
+{
+	// Delegate to HUD widget if it implements PlayerHUDInterface
+	AHUD* HUD = GetHUD();
+	if (HUD && HUD->Implements<UPlayerHUDInterface>())
+	{
+		return IPlayerHUDInterface::Execute_GetHealth(HUD);
+	}
+
+	return 0.0f;
+}
+
+void AFPSPlayerController::AddDamageEffect_Implementation()
+{
+	// Delegate to HUD widget if it implements PlayerHUDInterface
+	AHUD* HUD = GetHUD();
+	if (HUD && HUD->Implements<UPlayerHUDInterface>())
+	{
+		IPlayerHUDInterface::Execute_AddDamageEffect(HUD);
+	}
+}
+
+void AFPSPlayerController::UpdateActiveWeapon_Implementation(AActor* ActiveWeapon)
+{
+	// Delegate to HUD widget if it implements PlayerHUDInterface
+	AHUD* HUD = GetHUD();
+	if (HUD && HUD->Implements<UPlayerHUDInterface>())
+	{
+		IPlayerHUDInterface::Execute_UpdateActiveWeapon(HUD, ActiveWeapon);
+	}
+}
+
+void AFPSPlayerController::UpdateCrossHair_Implementation(bool IsAim, float LeanAlpha)
+{
+	// Delegate to HUD widget if it implements PlayerHUDInterface
+	AHUD* HUD = GetHUD();
+	if (HUD && HUD->Implements<UPlayerHUDInterface>())
+	{
+		IPlayerHUDInterface::Execute_UpdateCrossHair(HUD, IsAim, LeanAlpha);
+	}
+}
+
+void AFPSPlayerController::SetCrossHair_Implementation(TSubclassOf<UUserWidget> CrossHairWidgetClass, TSubclassOf<UUserWidget> AimCrossHairWidgetClass)
+{
+	// Delegate to HUD widget if it implements PlayerHUDInterface
+	AHUD* HUD = GetHUD();
+	if (HUD && HUD->Implements<UPlayerHUDInterface>())
+	{
+		IPlayerHUDInterface::Execute_SetCrossHair(HUD, CrossHairWidgetClass, AimCrossHairWidgetClass);
+	}
+}
+
+void AFPSPlayerController::SetHUDVisibility_Implementation(bool Visibility)
+{
+	// Delegate to HUD widget if it implements PlayerHUDInterface
+	AHUD* HUD = GetHUD();
+	if (HUD && HUD->Implements<UPlayerHUDInterface>())
+	{
+		IPlayerHUDInterface::Execute_SetHUDVisibility(HUD, Visibility);
+	}
+}
+
+void AFPSPlayerController::UpdateItemInfo_Implementation(const FString& Info)
+{
+	// Delegate to HUD widget if it implements PlayerHUDInterface
+	AHUD* HUD = GetHUD();
+	if (HUD && HUD->Implements<UPlayerHUDInterface>())
+	{
+		IPlayerHUDInterface::Execute_UpdateItemInfo(HUD, Info);
+	}
 }

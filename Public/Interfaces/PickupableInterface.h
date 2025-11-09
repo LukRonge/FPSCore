@@ -7,12 +7,9 @@
 #include "Core/InteractionContext.h"
 #include "PickupableInterface.generated.h"
 
-class UInventoryComponent;
-class UItemDataAsset;
-
 /**
  * CAPABILITY: Pickupable
- * Interface for items that can be picked up from world and added to inventory
+ * Interface for items that can be picked up from world
  *
  * Implemented by: Weapons, Ammo boxes, Consumables, Quest items
  * Design: Query-Command pattern (CanBePicked + OnPicked)
@@ -35,21 +32,11 @@ public:
 
 	// Called when item is picked up (SERVER ONLY)
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Pickupable")
-	void OnPicked(UInventoryComponent* Inventory, const FInteractionContext& Ctx);
-	virtual void OnPicked_Implementation(UInventoryComponent* Inventory, const FInteractionContext& Ctx) { }
+	void OnPicked(APawn* Picker, const FInteractionContext& Ctx);
+	virtual void OnPicked_Implementation(APawn* Picker, const FInteractionContext& Ctx) { }
 
 	// Called when item is dropped back to world (SERVER ONLY)
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Pickupable")
 	void OnDropped(const FInteractionContext& Ctx);
 	virtual void OnDropped_Implementation(const FInteractionContext& Ctx) { }
-
-	// Get item data asset (name, icon, weight, stack size)
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Pickupable")
-	UItemDataAsset* GetItemData() const;
-	virtual UItemDataAsset* GetItemData_Implementation() const { return nullptr; }
-
-	// Get pickup sound
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Pickupable")
-	USoundBase* GetPickupSound() const;
-	virtual USoundBase* GetPickupSound_Implementation() const { return nullptr; }
 };

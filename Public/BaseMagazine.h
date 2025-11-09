@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Core/AmmoCaliberTypes.h"
+#include "Components/PrimitiveComponent.h"
 #include "BaseMagazine.generated.h"
 
 /**
@@ -48,6 +49,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Magazine")
 	FTransform MagazineHandTransform;
 
+	// First-person primitive type (controls mesh visibility for owner)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Magazine")
+	EFirstPersonPrimitiveType FirstPersonPrimitiveType = EFirstPersonPrimitiveType::None;
+
 	// ============================================
 	// SIMPLE API
 	// ============================================
@@ -65,4 +70,11 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Magazine")
 	void RemoveAmmo();
+
+	/**
+	 * Initialize first-person primitive type visibility settings
+	 * Sets OnlyOwnerSee/OwnerNoSee on all skeletal and static mesh components
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Magazine")
+	void InitFPSType();
 };

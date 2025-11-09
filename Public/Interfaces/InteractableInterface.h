@@ -46,8 +46,5 @@ public:
 	FText GetInteractionText(FGameplayTag Verb, const FInteractionContext& Ctx) const;
 	virtual FText GetInteractionText_Implementation(FGameplayTag Verb, const FInteractionContext& Ctx) const { return FText::GetEmpty(); }
 
-	// Get interaction distance (how close player needs to be)
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
-	float GetInteractionDistance() const;
-	virtual float GetInteractionDistance_Implementation() const { return 300.0f; }
+
 };
