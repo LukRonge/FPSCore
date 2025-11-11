@@ -102,7 +102,7 @@ public:
 	void OnRep_Pitch();
 
 	UFUNCTION()
-	void OnRep_ActiveItem();
+	void OnRep_ActiveItem(AActor* OldActiveItem);
 
 	// Setup active item locally (mesh attachment, animations, HUD)
 	// Called from:
@@ -110,6 +110,18 @@ public:
 	// - OnRep_ActiveItem() on CLIENTS
 	// This follows MULTIPLAYER_GUIDELINES.md OnRep pattern
 	void SetupActiveItemLocal();
+
+	// Detach item meshes from character and re-attach to item root
+	// LOCAL operation - called on both server and clients
+	// Follows MULTIPLAYER_GUIDELINES.md OnRep pattern
+	void DetachItemMeshes(AActor* Item);
+
+	// Calculate drop transform and impulse for item
+	// Called from DropItem() to determine where item spawns and how much force to apply
+	// Can be overridden in Blueprint for custom drop behavior
+	UFUNCTION(BlueprintNativeEvent, Category = "Inventory")
+	void GetDropTransformAndImpulse(AActor* Item, FTransform& OutTransform, FVector& OutImpulse);
+	virtual void GetDropTransformAndImpulse_Implementation(AActor* Item, FTransform& OutTransform, FVector& OutImpulse);
 
 	UFUNCTION()
 	void OnRep_IsDeath();
@@ -180,6 +192,28 @@ public:
 	void Server_DropItem(AActor* Item);
 
 	void DropItem(AActor* Item);
+
+	// ============================================
+	// DROP PARAMETERS (Blueprint Configurable)
+	// ============================================
+
+	// How far forward (in cm) from character to drop items
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
+	float DropForwardDistance = 100.0f;
+
+	// How high (in cm) from character feet to drop items
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
+	float DropUpwardOffset = 50.0f;
+
+	// Upward component of throw direction (0.0 = horizontal, 1.0 = 45° upward arc)
+	// Higher values create more arcing throws
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	float DropUpwardArc = 0.5f;
+
+	// Default impulse strength for dropped items (in Newtons)
+	// Item can override this via IPickupableInterface::OnDropped()
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
+	float DefaultDropImpulseStrength = 200.0f;
 
 	// Hands offset (LOCAL ONLY - not replicated, used for first-person arms positioning)
 	// Only relevant for locally controlled player (Arms mesh is OnlyOwnerSee)

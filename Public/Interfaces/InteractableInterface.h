@@ -36,7 +36,10 @@ public:
 	bool CanInteract(FGameplayTag Verb, const FInteractionContext& Ctx) const;
 	virtual bool CanInteract_Implementation(FGameplayTag Verb, const FInteractionContext& Ctx) const { return true; }
 
-	// Perform interaction with specific verb (SERVER ONLY)
+	// Perform interaction with specific verb
+	// Can be called from client-side (e.g., InteractPressed() input handler)
+	// Implementation should delegate to Server RPC internally if state changes are needed
+	// Example: BaseWeapon::Interact() calls Character->Server_PickupItem() for network-safe pickup
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
 	void Interact(FGameplayTag Verb, const FInteractionContext& Ctx);
 	virtual void Interact_Implementation(FGameplayTag Verb, const FInteractionContext& Ctx) { }

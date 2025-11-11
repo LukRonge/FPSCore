@@ -15,7 +15,19 @@ void ABaseMagazine::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Initialize FPS type visibility settings
+	// ============================================
+	// INITIAL SETUP
+	// ============================================
+	// Call InitFPSType() to set initial FirstPersonPrimitiveType and visibility flags
+	//
+	// IMPORTANT: Owner chain may not be correct yet:
+	// - If weapon is spawned in world (pickup): Weapon->GetOwner() = nullptr
+	// - If weapon is pre-equipped: Weapon->GetOwner() = Character ✅
+	//
+	// InitFPSType() will be called AGAIN from FPSCharacter::SetupActiveItemLocal()
+	// when weapon is equipped (runs on ALL machines via OnRep pattern)
+	// This ensures visibility is correct regardless of spawn scenario
+
 	InitFPSType();
 }
 
@@ -43,6 +55,24 @@ void ABaseMagazine::RemoveAmmo()
 	CurrentAmmo = FMath::Max(0, CurrentAmmo - 1);
 }
 
+void ABaseMagazine::SetupOwnerAndVisibility(APawn* NewOwner, EFirstPersonPrimitiveType Type)
+{
+	// Set owner (always set, even if nullptr to clear old owner)
+	// This is critical for drop scenario: SetOwner(nullptr) clears old owner
+	SetOwner(NewOwner);
+
+	// Set visibility type
+	//FirstPersonPrimitiveType = Type;
+
+	// Apply to all mesh components
+	//InitFPSType();
+
+	UE_LOG(LogTemp, Log, TEXT("✓ BaseMagazine::SetupOwnerAndVisibility() - %s | Owner: %s | Type: %s"),
+		*GetName(),
+		NewOwner ? *NewOwner->GetName() : TEXT("nullptr"),
+		*UEnum::GetValueAsString(Type));
+}
+
 void ABaseMagazine::InitFPSType()
 {
 	// If type is None, skip initialization
@@ -50,6 +80,12 @@ void ABaseMagazine::InitFPSType()
 	{
 		return;
 	}
+
+	// ============================================
+	// COMBINED APPROACH: SetFirstPersonPrimitiveType() + Classic Visibility Flags
+	// ============================================
+	// Use both modern UE5 API and classic visibility flags for maximum compatibility
+	// Owner chain: Character → Weapon → Magazine (ChildActor)
 
 	bool bOnlyOwnerSee = false;
 	bool bOwnerNoSee = false;
@@ -81,8 +117,18 @@ void ABaseMagazine::InitFPSType()
 	{
 		if (SkeletalMesh)
 		{
+			// Set modern UE5 API
+			SkeletalMesh->SetFirstPersonPrimitiveType(FirstPersonPrimitiveType);
+
+			// Set classic visibility flags
 			SkeletalMesh->SetOnlyOwnerSee(bOnlyOwnerSee);
 			SkeletalMesh->SetOwnerNoSee(bOwnerNoSee);
+
+			UE_LOG(LogTemp, Log, TEXT("BaseMagazine::InitFPSType() - SkeletalMesh: %s | Type: %s | OnlyOwnerSee: %s | OwnerNoSee: %s"),
+				*SkeletalMesh->GetName(),
+				*UEnum::GetValueAsString(FirstPersonPrimitiveType),
+				bOnlyOwnerSee ? TEXT("true") : TEXT("false"),
+				bOwnerNoSee ? TEXT("true") : TEXT("false"));
 		}
 	}
 
@@ -94,8 +140,28 @@ void ABaseMagazine::InitFPSType()
 	{
 		if (StaticMesh)
 		{
+			// Set modern UE5 API
+			StaticMesh->SetFirstPersonPrimitiveType(FirstPersonPrimitiveType);
+
+			// Set classic visibility flags
 			StaticMesh->SetOnlyOwnerSee(bOnlyOwnerSee);
 			StaticMesh->SetOwnerNoSee(bOwnerNoSee);
+
+			UE_LOG(LogTemp, Log, TEXT("BaseMagazine::InitFPSType() - StaticMesh: %s | Type: %s | OnlyOwnerSee: %s | OwnerNoSee: %s"),
+				*StaticMesh->GetName(),
+				*UEnum::GetValueAsString(FirstPersonPrimitiveType),
+				bOnlyOwnerSee ? TEXT("true") : TEXT("false"),
+				bOwnerNoSee ? TEXT("true") : TEXT("false"));
 		}
+	}
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan,
+			FString::Printf(TEXT("✓ BaseMagazine::InitFPSType() - %s | Type: %s | OnlyOwnerSee: %s | OwnerNoSee: %s"),
+				*GetName(),
+				*UEnum::GetValueAsString(FirstPersonPrimitiveType),
+				bOnlyOwnerSee ? TEXT("true") : TEXT("false"),
+				bOwnerNoSee ? TEXT("true") : TEXT("false")));
 	}
 }

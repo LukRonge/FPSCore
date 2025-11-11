@@ -105,6 +105,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	AActor* GetFirstItemOfClass(TSubclassOf<AActor> ItemClass) const;
 
+	/**
+	 * Get next holdable item from inventory (excluding specified item)
+	 * Used for auto-equip after dropping active item
+	 * @param ExcludeItem - Item to exclude from search (typically current active item)
+	 * @return Next holdable item, or nullptr if none found
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Inventory")
+	AActor* GetNextHoldableItem(AActor* ExcludeItem = nullptr) const;
+
 	// ============================================
 	// EVENTS / DELEGATES
 	// ============================================

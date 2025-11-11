@@ -2,6 +2,7 @@
 
 #include "Components/InventoryComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "Interfaces/HoldableInterface.h"
 
 UInventoryComponent::UInventoryComponent()
 {
@@ -192,4 +193,26 @@ bool UInventoryComponent::CanAddItem_Implementation(AActor* Item) const
 	// Default implementation - allow all items
 	// Override in Blueprint or derived classes for custom validation
 	return true;
+}
+
+AActor* UInventoryComponent::GetNextHoldableItem(AActor* ExcludeItem) const
+{
+	// Iterate through inventory to find next holdable item
+	for (AActor* Item : Items)
+	{
+		// Skip invalid items or excluded item
+		if (!Item || Item == ExcludeItem)
+		{
+			continue;
+		}
+
+		// Check if item implements IHoldableInterface
+		if (Item->Implements<UHoldableInterface>())
+		{
+			return Item;
+		}
+	}
+
+	// No holdable item found
+	return nullptr;
 }
