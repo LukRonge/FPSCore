@@ -48,6 +48,8 @@ protected:
 	void CrouchReleased();
 	void InteractPressed();
 	void DropPressed();
+	void UseStarted();
+	void UseStopped();
 
 	// Movement speed control
 	void UpdateMovementSpeed(EFPSMovementMode NewMode);
@@ -283,6 +285,9 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	UInputAction* IA_Drop;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* IA_Shoot;
 
 	// Movement speeds
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Movement")

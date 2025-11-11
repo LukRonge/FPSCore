@@ -11,6 +11,7 @@
 #include "Interfaces/HoldableInterface.h"
 #include "Interfaces/InteractableInterface.h"
 #include "Interfaces/PickupableInterface.h"
+#include "Interfaces/UsableInterface.h"
 #include "Interfaces/PlayerHUDInterface.h"
 #include "Core/FPSGameplayTags.h"
 #include "EnhancedInputComponent.h"
@@ -252,6 +253,13 @@ void AFPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		if (IA_Drop)
 		{
 			EnhancedInputComponent->BindAction(IA_Drop, ETriggerEvent::Started, this, &AFPSCharacter::DropPressed);
+		}
+
+		if (IA_Shoot)
+		{
+			EnhancedInputComponent->BindAction(IA_Shoot, ETriggerEvent::Started, this, &AFPSCharacter::UseStarted);
+			EnhancedInputComponent->BindAction(IA_Shoot, ETriggerEvent::Completed, this, &AFPSCharacter::UseStopped);
+			EnhancedInputComponent->BindAction(IA_Shoot, ETriggerEvent::Canceled, this, &AFPSCharacter::UseStopped);
 		}
 	}
 }
@@ -555,6 +563,129 @@ void AFPSCharacter::DropPressed()
 	}
 }
 
+void AFPSCharacter::UseStarted()
+{
+	UE_LOG(LogTemp, Warning, TEXT("[IA_Shoot Started] UseStarted() called - IsLocallyControlled: %s"),
+		IsLocallyControlled() ? TEXT("YES") : TEXT("NO"));
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green,
+			FString::Printf(TEXT("▶ [IA_Shoot Started] UseStarted() - LocalControl: %s"),
+				IsLocallyControlled() ? TEXT("YES") : TEXT("NO")));
+	}
+
+	// Only locally controlled players can use items
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	// Check if we have an active item
+	if (!ActiveItem || !ActiveItem->Implements<UUsableInterface>())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[UseStarted] No active item or item doesn't implement IUsableInterface"));
+
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Orange,
+				TEXT("⚠ No active usable item"));
+		}
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[UseStarted] Active item: %s"), *ActiveItem->GetName());
+
+	// Build use context with aim info
+	FUseContext Ctx;
+	Ctx.Controller = GetController();
+	Ctx.Pawn = this;
+
+	// Get camera aim info
+	if (CachedPlayerController)
+	{
+		FVector CameraLocation;
+		FRotator CameraRotation;
+		CachedPlayerController->GetPlayerViewPoint(CameraLocation, CameraRotation);
+
+		Ctx.AimLocation = CameraLocation;
+		Ctx.AimDirection = CameraRotation.Vector();
+	}
+	else
+	{
+		Ctx.AimLocation = GetActorLocation();
+		Ctx.AimDirection = GetActorForwardVector();
+	}
+
+	// Check if item can be used
+	if (!IUsableInterface::Execute_CanUse(ActiveItem, Ctx))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[UseStarted] CanUse returned false"));
+
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red,
+				TEXT("✗ Item cannot be used right now"));
+		}
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[UseStarted] Calling IUsableInterface::Execute_UseStart()"));
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan,
+			FString::Printf(TEXT("✓ UseStart: %s"), *ActiveItem->GetName()));
+	}
+
+	// Call UseStart via interface (will trigger Server RPC internally)
+	IUsableInterface::Execute_UseStart(ActiveItem, Ctx);
+}
+
+void AFPSCharacter::UseStopped()
+{
+	UE_LOG(LogTemp, Warning, TEXT("[IA_Shoot Stopped] UseStopped() called - IsLocallyControlled: %s"),
+		IsLocallyControlled() ? TEXT("YES") : TEXT("NO"));
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow,
+			FString::Printf(TEXT("■ [IA_Shoot Stopped] UseStopped() - LocalControl: %s"),
+				IsLocallyControlled() ? TEXT("YES") : TEXT("NO")));
+	}
+
+	// Only locally controlled players can use items
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	// Check if we have an active item
+	if (!ActiveItem || !ActiveItem->Implements<UUsableInterface>())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[UseStopped] No active item or item doesn't implement IUsableInterface"));
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[UseStopped] Active item: %s"), *ActiveItem->GetName());
+
+	// Build use context
+	FUseContext Ctx;
+	Ctx.Controller = GetController();
+	Ctx.Pawn = this;
+
+	UE_LOG(LogTemp, Log, TEXT("[UseStopped] Calling IUsableInterface::Execute_UseStop()"));
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Magenta,
+			FString::Printf(TEXT("✓ UseStop: %s"), *ActiveItem->GetName()));
+	}
+
+	// Call UseStop via interface (will trigger Server RPC internally)
+	IUsableInterface::Execute_UseStop(ActiveItem, Ctx);
+}
+
 void AFPSCharacter::Server_SetMovementMode_Implementation(EFPSMovementMode NewMode)
 {
 	UpdateMovementSpeed(NewMode);
@@ -705,66 +836,70 @@ void AFPSCharacter::DetachItemMeshes(AActor* Item)
 
 	// TPS mesh - enable physics for drop (inverse of equip)
 	// CRITICAL: Collision MUST be enabled BEFORE SimulatePhysics!
+	// CRITICAL: On SERVER, skip physics setup here - DropItem() handles it after DetachFromActor()
+	//           This prevents warning: "DetachFromActor resets collision but leaves physics ON"
 
 	if (TPSMeshComp && TPSMeshComp->IsA<UPrimitiveComponent>())
 	{
 		UPrimitiveComponent* TPSPrim = Cast<UPrimitiveComponent>(TPSMeshComp);
 		if (TPSPrim)
 		{
-			// Enable collision FIRST (required for physics simulation)
-			TPSPrim->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-			// Enable physics SECOND (requires collision to be enabled)
-			TPSPrim->SetSimulatePhysics(true);
-
-			// Apply impulse on CLIENTS ONLY (server applies it in DropItem)
+			// ONLY enable physics on CLIENTS (server handles it in DropItem after DetachFromActor)
 			if (!HasAuthority())
 			{
-				// Verify physics is simulating before applying impulse
-				if (TPSPrim->IsSimulatingPhysics())
+				// On replicated components, component-level collision settings cannot be changed by clients
+				// Use BodyInstance directly which works correctly
+				if (USkeletalMeshComponent* SkelMesh = Cast<USkeletalMeshComponent>(TPSMeshComp))
 				{
-					// Calculate throw direction: forward + upward arc
-					FVector ThrowDirection = GetActorForwardVector() + FVector(0, 0, DropUpwardArc);
-					ThrowDirection.Normalize();
-
-					// Calculate impulse: throw direction * strength + character velocity
-					FVector ThrowImpulse = ThrowDirection * DefaultDropImpulseStrength;
-					FVector CharacterVelocity = GetVelocity();
-					FVector FinalImpulse = ThrowImpulse + CharacterVelocity;
-
-					// Apply impulse to TPS mesh
-					TPSPrim->AddImpulse(FinalImpulse, NAME_None, true);
-
-					UE_LOG(LogTemp, Log, TEXT("[%s] ✓ Applied drop impulse: %s | Impulse: %s"),
-						*MachineRole, *Item->GetName(), *FinalImpulse.ToString());
-
-					if (GEngine)
+					// Disable replication temporarily to allow changes
+					bool bWasReplicated = SkelMesh->GetIsReplicated();
+					if (bWasReplicated)
 					{
-						GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan,
-							FString::Printf(TEXT("[%s] ✓ Applied drop impulse: %s"), *MachineRole, *FinalImpulse.ToString()));
+						SkelMesh->SetIsReplicated(false);
+					}
+
+					// Set collision and physics via BodyInstance
+					SkelMesh->BodyInstance.SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+					SkelMesh->SetSimulatePhysics(true);
+
+					// Re-enable replication for network sync
+					if (bWasReplicated)
+					{
+						SkelMesh->SetIsReplicated(true);
 					}
 				}
 				else
 				{
-					UE_LOG(LogTemp, Warning, TEXT("[%s] ✗ Physics NOT simulating on TPS mesh after SetSimulatePhysics: %s | CollisionEnabled: %d"),
-						*MachineRole, *Item->GetName(), (int32)TPSPrim->GetCollisionEnabled());
+					TPSPrim->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+					TPSPrim->SetSimulatePhysics(true);
+				}
+
+				// Apply impulse
+				if (TPSPrim->IsSimulatingPhysics())
+				{
+					FVector ThrowDirection = GetActorForwardVector() + FVector(0, 0, DropUpwardArc);
+					ThrowDirection.Normalize();
+					FVector ThrowImpulse = ThrowDirection * DefaultDropImpulseStrength;
+					FVector CharacterVelocity = GetVelocity();
+					FVector FinalImpulse = ThrowImpulse + CharacterVelocity;
+
+					// Use BodyInstance.AddImpulse() - works with BodyInstance collision settings
+					if (USkeletalMeshComponent* SkelMesh = Cast<USkeletalMeshComponent>(TPSMeshComp))
+					{
+						SkelMesh->BodyInstance.AddImpulse(FinalImpulse, true);
+					}
+					else
+					{
+						TPSPrim->AddImpulse(FinalImpulse, NAME_None, true);
+					}
 				}
 			}
-			else
-			{
-				UE_LOG(LogTemp, Log, TEXT("[%s] Physics enabled on TPS mesh (impulse will be applied in DropItem): %s"),
-					*MachineRole, *Item->GetName());
-			}
+			// On SERVER, skip physics setup - DropItem() handles it after DetachFromActor()
 		}
 	}
 
 	// Enable collision on item actor
 	Item->SetActorEnableCollision(true);
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan,
-			FString::Printf(TEXT("[%s] ✓ DetachItemMeshes() - %s (physics enabled)"), *MachineRole, *Item->GetName()));
-	}
 }
 
 void AFPSCharacter::GetDropTransformAndImpulse_Implementation(AActor* Item, FTransform& OutTransform, FVector& OutImpulse)
@@ -1501,18 +1636,7 @@ void AFPSCharacter::DropItem(AActor* Item)
 		// Set drop location and rotation
 		Item->SetActorTransform(DropTransform);
 
-		// 6. Notify item via PickupableInterface (item-specific behavior)
-		if (Item->Implements<UPickupableInterface>())
-		{
-			FInteractionContext Ctx;
-			Ctx.Controller = GetController();
-			Ctx.Pawn = this;
-			Ctx.Instigator = this;
-
-			IPickupableInterface::Execute_OnDropped(Item, Ctx);
-		}
-
-		// 7. Apply drop impulse to item's physics mesh (includes character velocity)
+		// 6. Setup physics BEFORE calling OnDropped (prevents warning from SetIsReplicated)
 		// Get the TPS mesh (physics-enabled mesh for dropped items)
 		UMeshComponent* TPSMeshComp = nullptr;
 		if (Item->Implements<UHoldableInterface>())
@@ -1525,83 +1649,33 @@ void AFPSCharacter::DropItem(AActor* Item)
 			UPrimitiveComponent* TPSPrim = Cast<UPrimitiveComponent>(TPSMeshComp);
 			if (TPSPrim)
 			{
-				// CRITICAL: DetachFromActor() resets collision to NoCollision but leaves physics ON
-				// This causes warning: "CollisionEnabled must be QueryAndPhysics for AddImpulse"
-				// Solution: Disable physics FIRST, then set collision, then enable physics again
-
-				// 1. Disable physics FIRST (clears invalid state from DetachFromActor)
+				// DetachFromActor() resets collision to NoCollision - fix before enabling physics
 				TPSPrim->SetSimulatePhysics(false);
-
-				// 2. Set collision SECOND (now safe)
 				TPSPrim->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-
-				// 3. Verify collision was actually set
-				ECollisionEnabled::Type ActualCollision = TPSPrim->GetCollisionEnabled();
-				if (ActualCollision != ECollisionEnabled::QueryAndPhysics)
-				{
-					UE_LOG(LogTemp, Error, TEXT("[SERVER] ✗ Failed to set collision! Expected=3, Actual=%d"), (int32)ActualCollision);
-					// Force set again
-					TPSPrim->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-					ActualCollision = TPSPrim->GetCollisionEnabled();
-					UE_LOG(LogTemp, Warning, TEXT("[SERVER] After force set: %d"), (int32)ActualCollision);
-				}
-
-				// 4. Enable physics THIRD (now collision is correct)
 				TPSPrim->SetSimulatePhysics(true);
-
-				// 5. Apply impulse (now both collision and physics are valid)
 				TPSPrim->AddImpulse(DropImpulse, NAME_None, true);
-
-				UE_LOG(LogTemp, Log, TEXT("[SERVER] ✓ Applied drop impulse to %s: %s"), *TPSMeshComp->GetName(), *DropImpulse.ToString());
-
-				if (GEngine)
-				{
-					GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
-						FString::Printf(TEXT("✓ Applied impulse: %s"), *DropImpulse.ToString()));
-				}
-			}
-			else
-			{
-				UE_LOG(LogTemp, Error, TEXT("[SERVER] ✗ TPSMeshComp is NOT UPrimitiveComponent!"));
 			}
 		}
-		else
+
+		// 7. Notify item via PickupableInterface
+		if (Item->Implements<UPickupableInterface>())
 		{
-			UE_LOG(LogTemp, Error, TEXT("[SERVER] ✗ No TPSMeshComp found on item!"));
+			FInteractionContext Ctx;
+			Ctx.Controller = GetController();
+			Ctx.Pawn = this;
+			Ctx.Instigator = this;
+
+			IPickupableInterface::Execute_OnDropped(Item, Ctx);
 		}
 
 		// 8. Auto-equip next holdable item from inventory
-		// If inventory still has holdable items, equip the next one
-		// If no holdable items remain, default anim layer already restored in UnequipCurrentItem()
 		if (InventoryComp)
 		{
 			AActor* NextItem = InventoryComp->GetNextHoldableItem(nullptr);
 			if (NextItem)
 			{
 				EquipItem(NextItem);
-
-				if (GEngine)
-				{
-					GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan,
-						FString::Printf(TEXT("✓ Auto-equipped next item: %s"), *NextItem->GetName()));
-				}
 			}
-			else
-			{
-				// No more holdable items - default anim layer already linked in UnequipCurrentItem()
-				if (GEngine)
-				{
-					GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow,
-						TEXT("✓ No more holdable items - unarmed state"));
-				}
-			}
-		}
-
-		// Debug: Confirm drop
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
-				FString::Printf(TEXT("✓ Dropped: %s | Inventory size: %d"), *Item->GetName(), InventoryComp->GetItemCount()));
 		}
 	}
 }

@@ -21,6 +21,7 @@
 #include "Interfaces/PickupableInterface.h"
 #include "Interfaces/HoldableInterface.h"
 #include "Interfaces/SightInterface.h"
+#include "Interfaces/UsableInterface.h"
 #include "BaseWeapon.generated.h"
 
 class ABaseMagazine;
@@ -29,7 +30,7 @@ class UFireComponent;
 class USightComponent;
 
 UCLASS()
-class FPSCORE_API ABaseWeapon : public AActor, public IInteractableInterface, public IPickupableInterface, public IHoldableInterface, public ISightInterface
+class FPSCORE_API ABaseWeapon : public AActor, public IInteractableInterface, public IPickupableInterface, public IHoldableInterface, public ISightInterface, public IUsableInterface
 {
 	GENERATED_BODY()
 
@@ -252,24 +253,31 @@ public:
 	EAmmoCaliberType AcceptedCaliberType = EAmmoCaliberType::NATO_556x45mm;
 
 	// ============================================
-	// FIRE API (Called by FPSCharacter)
+	// USABLE INTERFACE (Item usage - shoot, aim, etc.)
 	// ============================================
 
-	/**
-	 * Trigger shoot (fire button pressed)
-	 * Called by FPSCharacter when IA_Shoot input Started/Ongoing
-	 * Delegates to FireComponent->TriggerPulled()
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Weapon|Fire")
-	void TriggerShoot();
+	// Check if weapon can be used right now
+	virtual bool CanUse_Implementation(const FUseContext& Ctx) const override;
 
-	/**
-	 * Trigger release (fire button released)
-	 * Called by FPSCharacter when IA_Shoot input Completed/Canceled
-	 * Delegates to FireComponent->TriggerReleased()
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Weapon|Fire")
-	void TriggerRelease();
+	// Called when use input STARTED (IA_Use pressed - shoot started)
+	virtual void UseStart_Implementation(const FUseContext& Ctx) override;
+
+	// Called every frame while use input HELD (optional - for continuous actions)
+	virtual void UseTick_Implementation(const FUseContext& Ctx) override;
+
+	// Called when use input STOPPED (IA_Use released - shoot stopped)
+	virtual void UseStop_Implementation(const FUseContext& Ctx) override;
+
+	// Check if weapon is currently being used
+	virtual bool IsUsing_Implementation() const override;
+
+	// ============================================
+	// SERVER RPC (Multiplayer)
+	// ============================================
+
+	// Server RPC for shoot action (true = pressed, false = released)
+	UFUNCTION(Server, Reliable)
+	void Server_Shoot(bool bPressed);
 
 	// ============================================
 	// INTERACTABLE INTERFACE

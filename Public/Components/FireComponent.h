@@ -111,6 +111,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Fire")
 	virtual bool CanFire() const;
 
+	/**
+	 * Check if trigger is currently held down
+	 */
+	UFUNCTION(BlueprintPure, Category = "Fire")
+	bool IsTriggerHeld() const { return bTriggerHeld; }
+
 	// ============================================
 	// FIRE HELPERS
 	// ============================================
