@@ -2,6 +2,9 @@
 
 #include "Components/BallisticsComponent.h"
 #include "Data/AmmoTypeDataAsset.h"
+#include "Kismet/GameplayStatics.h"
+#include "NiagaraSystem.h"
+#include "DrawDebugHelpers.h"
 
 UBallisticsComponent::UBallisticsComponent()
 {
@@ -9,6 +12,13 @@ UBallisticsComponent::UBallisticsComponent()
 
 	// NOT replicated - this is a pure utility component
 	SetIsReplicatedByDefault(false);
+
+	// Initialize current ammo type
+	CurrentAmmoType = nullptr;
+
+	// Initialize CaliberDataMap with default ammo types
+	TSoftObjectPtr<UAmmoTypeDataAsset> AmmoType_556NATO(FSoftObjectPath(TEXT("/Script/FPSCore.AmmoTypeDataAsset'/FPSCore/Blueprints/AmmoTypes/AmmoType_5_56x45mm_NATO.AmmoType_5_56x45mm_NATO'")));
+	CaliberDataMap.Add(EAmmoCaliberType::NATO_556x45mm, AmmoType_556NATO);
 }
 
 void UBallisticsComponent::BeginPlay()
@@ -32,11 +42,10 @@ void UBallisticsComponent::Shoot(FVector Location, FVector Direction)
 		return;
 	}
 
-	// Load caliber data
-	UAmmoTypeDataAsset* CaliberData = CaliberDataAsset.LoadSynchronous();
-	if (!CaliberData)
+	// Validate CurrentAmmoType
+	if (!CurrentAmmoType)
 	{
-		UE_LOG(LogTemp, Error, TEXT("BallisticsComponent::Shoot() - No CaliberDataAsset assigned!"));
+		UE_LOG(LogTemp, Error, TEXT("BallisticsComponent::Shoot() - No CurrentAmmoType set! Call InitAmmoType() first."));
 		return;
 	}
 
@@ -44,37 +53,360 @@ void UBallisticsComponent::Shoot(FVector Location, FVector Direction)
 	UE_LOG(LogTemp, Log, TEXT("BallisticsComponent::Shoot() - Location: %s, Direction: %s, Caliber: %s"),
 		*Location.ToString(),
 		*Direction.ToString(),
-		*CaliberData->AmmoName.ToString());
+		*CurrentAmmoType->AmmoName.ToString());
 
 	// ============================================
-	// TODO: PROJECTILE SPAWNING (Next step)
+	// STEP 1: LINE TRACE SETUP
 	// ============================================
-	// 1. Spawn projectile actor at Location
-	// 2. Apply initial velocity: Direction * MuzzleVelocity
-	// 3. Set projectile properties from CaliberData:
-	//    - Mass (for physics simulation)
-	//    - Drag coefficient (for bullet drop)
-	//    - Damage
-	//    - Penetration power
-	//    - Impact VFX map
-	// 4. Enable physics simulation with custom trajectory
 
-	// ============================================
-	// TEMPORARY: Visual feedback for testing
-	// ============================================
-	if (GEngine)
+	// Calculate end point
+	FVector End = Location + (Direction * MaxTraceDistance);
+
+	// Setup trace parameters
+	FCollisionQueryParams TraceParams;
+	TraceParams.bTraceComplex = false;
+	TraceParams.AddIgnoredActor(GetOwner()); // Ignore weapon/character owner
+	if (GetOwner()->GetOwner())
 	{
-		FString DebugText = FString::Printf(TEXT("SHOOT! Caliber: %s | Velocity: %.0f m/s | Damage: %.1f"),
-			*CaliberData->AmmoName.ToString(),
-			CaliberData->MuzzleVelocity,
-			CaliberData->Damage);
-
-		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, DebugText);
+		TraceParams.AddIgnoredActor(GetOwner()->GetOwner()); // Ignore character holding weapon
 	}
 
-	// TODO: Spawn muzzle flash VFX
-	// TODO: Spawn shell ejection
-	// TODO: Play fire sound
+	// Perform multi-line trace
+	TArray<FHitResult> HitResults;
+	bool bHit = GetWorld()->LineTraceMultiByChannel(
+		HitResults,
+		Location,
+		End,
+		ECC_GameTraceChannel2, // Projectile channel
+		TraceParams
+	);
+
+	// Draw debug line trace (visible for 2 seconds)
+	DrawDebugLine(
+		GetWorld(),
+		Location,
+		bHit ? HitResults[0].ImpactPoint : End,
+		bHit ? FColor::Red : FColor::Green,
+		false,
+		2.0f,
+		0,
+		2.0f // Thickness
+	);
+
+	if (!bHit || HitResults.Num() == 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("BallisticsComponent::Shoot() - No hits detected"));
+
+		// Display miss message
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(
+				-1,
+				2.0f,
+				FColor::Green,
+				TEXT("❌ MISS - No hit detected")
+			);
+		}
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("BallisticsComponent::Shoot() - Hit %d objects"), HitResults.Num());
+
+	// Display hit count on screen
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(
+			-1,
+			2.0f,
+			FColor::Orange,
+			FString::Printf(TEXT("🎯 HIT %d object(s)"), HitResults.Num())
+		);
+	}
+
+	// ============================================
+	// STEP 2: PROCESS HIT RESULTS
+	// ============================================
+
+	// Initialize ballistic variables from CurrentAmmoType
+	float Speed = CurrentAmmoType->MuzzleVelocity;
+	float Mass = CurrentAmmoType->ProjectileMass;
+	float Penetration = CurrentAmmoType->PenetrationPower;
+	float DropFactor = CurrentAmmoType->DragCoefficient;
+	float KineticEnergy = 0.0f;
+
+	// Track last hit location for distance calculation
+	FVector LastHitLocation = Location; // Start from muzzle location
+
+	// Process each hit
+	for (int32 HitIndex = 0; HitIndex < HitResults.Num(); HitIndex++)
+	{
+		const FHitResult& Hit = HitResults[HitIndex];
+
+		// Process hit (returns false if bullet stopped)
+		bool bContinue = ProcessHit(Hit, HitIndex, Speed, Mass, Penetration, DropFactor, KineticEnergy, Direction, LastHitLocation);
+
+		if (!bContinue)
+		{
+			UE_LOG(LogTemp, Log, TEXT("BallisticsComponent::Shoot() - Bullet stopped at hit %d"), HitIndex);
+			break;
+		}
+
+		// Update last hit location for next iteration
+		LastHitLocation = Hit.ImpactPoint;
+	}
+}
+
+// ============================================
+// HIT PROCESSING
+// ============================================
+
+bool UBallisticsComponent::ProcessHit(
+	const FHitResult& Hit,
+	int32 HitIndex,
+	float& Speed,
+	float& Mass,
+	float& Penetration,
+	float DropFactor,
+	float& KineticEnergy,
+	const FVector& Direction,
+	const FVector& LastHitLocation)
+{
+	// ============================================
+	// Extract hit data
+	// ============================================
+	AActor* HitActor = Hit.GetActor();
+	FVector ImpactPoint = Hit.ImpactPoint;
+	FVector ImpactNormal = Hit.ImpactNormal;
+	UPhysicalMaterial* PhysMaterial = Hit.PhysMaterial.Get();
+	FName BoneName = Hit.BoneName;
+
+	if (!HitActor)
+	{
+		return true; // Skip invalid hits but continue
+	}
+
+	// ============================================
+	// FIRST HIT: Initialize kinetic energy
+	// ============================================
+	if (HitIndex == 0)
+	{
+		// Calculate initial kinetic energy: KE = (m * v²) / 2
+		// Simplified: (mass_grams / 1000) * (speed_m/s² / 1000)
+		KineticEnergy = (Mass / 1000.0f) * (Speed * Speed / 1000.0f);
+
+		UE_LOG(LogTemp, Log, TEXT("ProcessHit() - First Hit: Speed=%.1f m/s, Mass=%.2f g, Penetration=%.3f, KE=%.1f J"),
+			Speed, Mass, Penetration, KineticEnergy);
+	}
+
+	// ============================================
+	// DISTANCE DECAY: Apply air resistance
+	// ============================================
+
+	// Calculate distance traveled since last hit (or from muzzle if first hit)
+	float DistanceTraveled = (ImpactPoint - LastHitLocation).Size();
+
+	// Apply distance decay (air resistance, drag)
+	ApplyDistanceDecay(Speed, Mass, DropFactor, KineticEnergy, DistanceTraveled);
+
+	UE_LOG(LogTemp, Log, TEXT("ProcessHit() - Hit[%d]: Actor=%s, Location=%s, KE=%.1f J (AFTER distance decay, BEFORE penetration)"),
+		HitIndex, *HitActor->GetName(), *ImpactPoint.ToString(), KineticEnergy);
+
+	// ============================================
+	// STEP 3: Broadcast Impact Event (for visual effects)
+	// ============================================
+
+	// Get material name for VFX lookup
+	FName MaterialName;
+	bool bIsThin = IsThinMaterial(PhysMaterial, MaterialName);
+
+	// Display physics material on screen
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(
+			-1,
+			2.0f,
+			FColor::Yellow,
+			FString::Printf(TEXT("💥 HIT[%d]: %s %s"),
+				HitIndex,
+				*MaterialName.ToString(),
+				bIsThin ? TEXT("(THIN)") : TEXT("(SOLID)"))
+		);
+	}
+
+	// Lookup VFX from CurrentAmmoType on server
+	UNiagaraSystem* ImpactVFX = CurrentAmmoType->GetImpactVFX(MaterialName);
+
+	if (ImpactVFX && OnImpactDetected.IsBound())
+	{
+		// Broadcast event to weapon (SERVER ONLY)
+		// Weapon will call Multicast RPC to spawn effects on all clients
+		OnImpactDetected.Broadcast(
+			ImpactVFX,
+			FVector_NetQuantize(ImpactPoint),
+			FVector_NetQuantizeNormal(ImpactNormal)
+		);
+
+		UE_LOG(LogTemp, Log, TEXT("ProcessHit() - Broadcasted impact event: Material=%s, VFX=%s"),
+			*MaterialName.ToString(), *ImpactVFX->GetName());
+	}
+
+	// ============================================
+	// STEP 4: Apply Damage
+	// ============================================
+
+	// Calculate damage scaled by kinetic energy
+	// BaseDamage from CurrentAmmoType, scaled by remaining kinetic energy
+	float FinalDamage = CurrentAmmoType->Damage * KineticEnergy;
+
+	// Apply point damage to hit actor
+	if (FinalDamage > 0.0f)
+	{
+		UGameplayStatics::ApplyPointDamage(
+			HitActor,
+			FinalDamage,
+			Direction,
+			Hit,
+			GetOwner()->GetInstigatorController(),
+			GetOwner(),
+			UDamageType::StaticClass()
+		);
+
+		UE_LOG(LogTemp, Log, TEXT("ProcessHit() - Applied Damage: %.1f (BaseDamage: %.1f * KE: %.1f) to %s"),
+			FinalDamage, CurrentAmmoType->Damage, KineticEnergy, *HitActor->GetName());
+	}
+
+	// ============================================
+	// STEP 5: Apply Physics Impulse
+	// ============================================
+
+	// Get hit component (mesh/primitive component that was hit)
+	UPrimitiveComponent* HitComponent = Hit.GetComponent();
+
+	if (HitComponent && HitComponent->IsSimulatingPhysics(BoneName))
+	{
+		// Calculate impulse: Direction * (Mass * Speed * 0.01)
+		// Scale factor 0.01 converts realistic physics to game-feel physics
+		FVector Impulse = Direction * (Mass * Speed * 0.01f);
+
+		// Apply impulse at impact point on specific bone
+		HitComponent->AddImpulseAtLocation(
+			Impulse,
+			ImpactPoint,
+			BoneName
+		);
+
+		UE_LOG(LogTemp, Log, TEXT("ProcessHit() - Applied Impulse: %s (Magnitude: %.1f) to %s at bone %s"),
+			*Impulse.ToString(), Impulse.Size(), *HitComponent->GetName(), *BoneName.ToString());
+	}
+
+	// ============================================
+	// PENETRATION LOSS: Apply after damage/impulse
+	// ============================================
+
+	// Apply penetration loss (reduces KE, Mass, Speed for NEXT hit)
+	bool bCanContinue = ApplyPenetrationLoss(Speed, Mass, Penetration, DropFactor, KineticEnergy, PhysMaterial);
+
+	if (!bCanContinue)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ProcessHit() - Bullet stopped after penetration loss at hit %d"), HitIndex);
+		return false; // Bullet stopped - don't process further hits
+	}
+
+	return true; // Continue processing next hits
+}
+
+bool UBallisticsComponent::IsThinMaterial(UPhysicalMaterial* PhysMaterial, FName& OutMaterialName) const
+{
+	// Default material name if no PhysMaterial provided
+	if (!PhysMaterial)
+	{
+		OutMaterialName = FName(TEXT("Default"));
+		return false; // Default is solid material
+	}
+
+	// Get material name from PhysicalMaterial
+	OutMaterialName = PhysMaterial->GetFName();
+
+	// Check if material name contains "Thin" substring
+	FString MaterialNameStr = OutMaterialName.ToString();
+	bool bIsThin = MaterialNameStr.Contains(TEXT("Thin"), ESearchCase::IgnoreCase);
+
+	return bIsThin;
+}
+
+void UBallisticsComponent::ApplyDistanceDecay(
+	float& Speed,
+	float& Mass,
+	float DropFactor,
+	float& KineticEnergy,
+	float Distance)
+{
+	if (Distance <= 0.0f)
+	{
+		return; // No distance traveled, no decay
+	}
+
+	// Convert distance from cm to meters for realistic calculations
+	float DistanceMeters = Distance / 100.0f;
+
+	// Apply exponential velocity decay based on drag coefficient
+	// Formula: v(d) = v0 * exp(-DragCoefficient * distance / 1000)
+	// Divide by 1000 to scale for reasonable game distances
+	float DecayFactor = FMath::Exp(-DropFactor * DistanceMeters / 1000.0f);
+	Speed *= DecayFactor;
+
+	// Recalculate kinetic energy after speed change
+	// Mass stays the same (no fragmentation in air)
+	KineticEnergy = (Mass / 1000.0f) * (Speed * Speed / 1000.0f);
+
+	UE_LOG(LogTemp, Log, TEXT("ApplyDistanceDecay() - Distance: %.1f m, DecayFactor: %.3f, Speed: %.1f m/s, KE: %.1f J"),
+		DistanceMeters, DecayFactor, Speed, KineticEnergy);
+}
+
+bool UBallisticsComponent::ApplyPenetrationLoss(
+	float& Speed,
+	float& Mass,
+	float& Penetration,
+	float DropFactor,
+	float& KineticEnergy,
+	UPhysicalMaterial* PhysMaterial)
+{
+	// Get material name and check if thin
+	FName MaterialName;
+	bool bIsThin = IsThinMaterial(PhysMaterial, MaterialName);
+
+	if (bIsThin)
+	{
+		// Thin materials: light penetration loss, no fragmentation
+		Penetration *= (KineticEnergy * 0.5f);
+		// Mass stays the same (no projectile deformation)
+	}
+	else
+	{
+		// Solid materials: heavy penetration loss, projectile fragments
+		Penetration *= (KineticEnergy * 0.5f);
+		Mass *= 0.85f; // Projectile deformation/fragmentation
+	}
+
+	// Apply velocity drop (exponential decay)
+	Speed *= DropFactor;
+
+	// Recalculate kinetic energy after velocity/mass changes
+	KineticEnergy = (Mass / 1000.0f) * (Speed * Speed / 1000.0f);
+
+	UE_LOG(LogTemp, Log, TEXT("ApplyPenetrationLoss() - Material=%s, Thin=%s, Speed=%.1f m/s, Mass=%.2f g, Penetration=%.3f, KE=%.1f J"),
+		*MaterialName.ToString(),
+		bIsThin ? TEXT("Yes") : TEXT("No"),
+		Speed, Mass, Penetration, KineticEnergy);
+
+	// Check penetration threshold - bullet stopped
+	if (Penetration <= 0.002f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ApplyPenetrationLoss() - Bullet stopped (Penetration <= 0.002)"));
+		return false; // Bullet stopped
+	}
+
+	return true; // Bullet can continue
 }
 
 // ============================================
@@ -117,6 +449,50 @@ float UBallisticsComponent::CalculateKineticEnergy() const
 	float Velocity = CaliberData->MuzzleVelocity;
 
 	return 0.5f * Mass * Velocity * Velocity;
+}
+
+// ============================================
+// CALIBER DATA LOOKUP
+// ============================================
+
+bool UBallisticsComponent::InitAmmoType(EAmmoCaliberType CaliberType)
+{
+	if (const TSoftObjectPtr<UAmmoTypeDataAsset>* FoundAsset = CaliberDataMap.Find(CaliberType))
+	{
+		CurrentAmmoType = FoundAsset->LoadSynchronous();
+
+		if (CurrentAmmoType)
+		{
+			UE_LOG(LogTemp, Log, TEXT("BallisticsComponent::InitAmmoType() - Loaded caliber: %s"),
+				*CurrentAmmoType->AmmoName.ToString());
+			return true;
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("BallisticsComponent::InitAmmoType() - Failed to load asset for caliber type '%s'"),
+				*UEnum::GetValueAsString(CaliberType));
+			return false;
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("BallisticsComponent::InitAmmoType() - Caliber type '%s' not found in CaliberDataMap!"),
+		*UEnum::GetValueAsString(CaliberType));
+
+	CurrentAmmoType = nullptr;
+	return false;
+}
+
+UAmmoTypeDataAsset* UBallisticsComponent::GetAmmoDataForCaliber(EAmmoCaliberType CaliberType) const
+{
+	if (const TSoftObjectPtr<UAmmoTypeDataAsset>* FoundAsset = CaliberDataMap.Find(CaliberType))
+	{
+		return FoundAsset->LoadSynchronous();
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("BallisticsComponent::GetAmmoDataForCaliber() - Caliber type '%s' not found in CaliberDataMap!"),
+		*UEnum::GetValueAsString(CaliberType));
+
+	return nullptr;
 }
 
 // ============================================

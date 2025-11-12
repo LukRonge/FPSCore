@@ -61,12 +61,34 @@ public:
 	float FireRate = 600.0f;
 
 	// Weapon spread/accuracy (degrees)
-	// 0 = perfect accuracy, higher = more spread
+	// Base spread cone angle - 0 = perfect accuracy, higher = more spread
 	// Example: 0.5 degrees = tight grouping, 5.0 degrees = shotgun spread
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
 	float Spread = 0.5f;
 
-	// Recoil intensity multiplier
+	// Recoil base angle (degrees)
+	// Base vertical recoil kick per shot
+	// Example: 0.5 degrees = light recoil, 2.0 degrees = heavy recoil
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
+	float Recoil = 0.5f;
+
+	// Random spread variation minimum (degrees)
+	// Adds unpredictable variation to each shot
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
+	float RandomSpreadMin = 0.0f;
+
+	// Random spread variation maximum (degrees)
+	// Maximum random spread variation per shot
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
+	float RandomSpreadMax = 0.2f;
+
+	// Movement spread multiplier
+	// How much owner velocity affects spread (0 = no effect, 1.0 = full effect)
+	// Formula: MovementSpread = (OwnerVelocity.Size() / 100.0) * MovementSpreadMultiplier
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
+	float MovementSpreadMultiplier = 0.5f;
+
+	// Recoil intensity multiplier (legacy - for camera shake)
 	// Applied to camera/mesh rotation after each shot
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
 	float RecoilScale = 1.0f;
@@ -130,20 +152,6 @@ public:
 	 */
 	UFUNCTION(BlueprintPure, Category = "Fire")
 	FVector ApplySpread(FVector Direction) const;
-
-	/**
-	 * Get muzzle location in world space
-	 * Uses weapon mesh "muzzle" socket
-	 */
-	UFUNCTION(BlueprintPure, Category = "Fire")
-	FVector GetMuzzleLocation() const;
-
-	/**
-	 * Get muzzle forward direction
-	 * Uses weapon mesh "muzzle" socket rotation
-	 */
-	UFUNCTION(BlueprintPure, Category = "Fire")
-	FVector GetMuzzleDirection() const;
 
 	/**
 	 * Get time between shots in seconds

@@ -31,6 +31,10 @@ ABaseWeapon::ABaseWeapon()
 
 	BallisticsComponent = CreateDefaultSubobject<UBallisticsComponent>(TEXT("BallisticsComponent"));
 
+	// Fire component - default to nullptr, will be created in Blueprint as specific subclass
+	// (USemiAutoFireComponent, UFullAutoFireComponent, or UBurstFireComponent)
+	FireComponent = nullptr;
+
 	FPSMagazineComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("FPSMagazineComponent"));
 	FPSMagazineComponent->SetupAttachment(FPSMesh, FName("magazine"));
 
@@ -53,6 +57,12 @@ void ABaseWeapon::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// Find FireComponent if it was added in Blueprint
+	if (!FireComponent)
+	{
+		FireComponent = FindComponentByClass<UFireComponent>();
+	}
+
 	// SERVER-ONLY initialization
 	if (HasAuthority() && TPSMagazineComponent->GetChildActor())
 	{
@@ -66,6 +76,10 @@ void ABaseWeapon::BeginPlay()
 			{
 				FireComponent->BallisticsComponent = BallisticsComponent;
 			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::BeginPlay() - FireComponent not found! Add FireComponent in Blueprint."));
 		}
 	}
 }
@@ -284,4 +298,47 @@ FName ABaseWeapon::GetAttachSocket_Implementation() const
 TSubclassOf<UAnimInstance> ABaseWeapon::GetAnimLayer_Implementation() const
 {
 	return AnimLayer;
+}
+
+// ============================================
+// IMPACT EFFECTS (Multiplayer)
+// ============================================
+
+void ABaseWeapon::HandleImpactDetected(
+	TSoftObjectPtr<UNiagaraSystem> ImpactVFX,
+	FVector_NetQuantize Location,
+	FVector_NetQuantizeNormal Normal)
+{
+	// This runs on SERVER only (where ballistics are calculated)
+	if (HasAuthority())
+	{
+		// Replicate to all clients via Multicast RPC
+		Multicast_SpawnImpactEffect(ImpactVFX, Location, Normal);
+	}
+}
+
+void ABaseWeapon::Multicast_SpawnImpactEffect_Implementation(
+	const TSoftObjectPtr<UNiagaraSystem>& ImpactVFX,
+	FVector_NetQuantize Location,
+	FVector_NetQuantizeNormal Normal)
+{
+	// Runs on SERVER and ALL CLIENTS
+	// Load VFX asset (synchronous for simplicity)
+	UNiagaraSystem* VFX = ImpactVFX.LoadSynchronous();
+
+	if (VFX)
+	{
+		// Spawn Niagara system at impact point
+		// Normal.Rotation() creates rotation from surface normal
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			GetWorld(),
+			VFX,
+			Location,
+			Normal.Rotation(),
+			FVector(1.0f),  // Scale
+			true,           // Auto destroy
+			true,           // Auto activate
+			ENCPoolMethod::None
+		);
+	}
 }

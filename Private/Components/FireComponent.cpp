@@ -74,66 +74,35 @@ FVector UFireComponent::ApplySpread(FVector Direction) const
 	// Normalize input direction
 	Direction.Normalize();
 
-	// Convert spread from degrees to radians
-	float SpreadRadians = FMath::DegreesToRadians(Spread);
+	// Calculate random spread variation
+	float RandomSpread = FMath::RandRange(RandomSpreadMin, RandomSpreadMax);
 
-	// Generate random spread within cone
-	// Using random cone distribution for realistic spread pattern
+	// Calculate movement-based spread
+	float MovementSpread = 0.0f;
+	if (AActor* Owner = GetOwner())
+	{
+		// Get owner velocity
+		FVector Velocity = Owner->GetVelocity();
+		float Speed = Velocity.Size();
+
+		// Scale spread by movement speed (cm/s to spread degrees)
+		// Formula: (Speed / 100.0) * Multiplier
+		MovementSpread = (Speed / 100.0f) * MovementSpreadMultiplier;
+	}
+
+	// Combine all spread components
+	// ConeHalfAngle = Recoil + Spread + RandomSpread + MovementSpread
+	float TotalSpread = Recoil + Spread + RandomSpread + MovementSpread;
+
+	// Convert total spread from degrees to radians
+	float SpreadRadians = FMath::DegreesToRadians(TotalSpread);
+
+	// Generate random direction within cone
 	FVector SpreadDirection = UKismetMathLibrary::RandomUnitVectorInConeInRadians(Direction, SpreadRadians);
 
 	return SpreadDirection;
 }
 
-FVector UFireComponent::GetMuzzleLocation() const
-{
-	ABaseWeapon* Weapon = Cast<ABaseWeapon>(GetOwner());
-	if (!Weapon)
-	{
-		return FVector::ZeroVector;
-	}
-
-	// Get FPS mesh (owner sees this)
-	USkeletalMeshComponent* WeaponMesh = Weapon->FPSMesh;
-	if (!WeaponMesh)
-	{
-		return FVector::ZeroVector;
-	}
-
-	// Get muzzle socket location
-	if (WeaponMesh->DoesSocketExist(FName("muzzle")))
-	{
-		return WeaponMesh->GetSocketLocation(FName("muzzle"));
-	}
-
-	// Fallback: Weapon mesh origin
-	return WeaponMesh->GetComponentLocation();
-}
-
-FVector UFireComponent::GetMuzzleDirection() const
-{
-	ABaseWeapon* Weapon = Cast<ABaseWeapon>(GetOwner());
-	if (!Weapon)
-	{
-		return FVector::ForwardVector;
-	}
-
-	// Get FPS mesh (owner sees this)
-	USkeletalMeshComponent* WeaponMesh = Weapon->FPSMesh;
-	if (!WeaponMesh)
-	{
-		return FVector::ForwardVector;
-	}
-
-	// Get muzzle socket rotation
-	if (WeaponMesh->DoesSocketExist(FName("muzzle")))
-	{
-		FRotator MuzzleRotation = WeaponMesh->GetSocketRotation(FName("muzzle"));
-		return MuzzleRotation.Vector();
-	}
-
-	// Fallback: Weapon mesh forward
-	return WeaponMesh->GetForwardVector();
-}
 
 // ============================================
 // FIRE IMPLEMENTATION
@@ -155,27 +124,74 @@ void UFireComponent::Fire()
 		return;
 	}
 
+	// Get weapon owner (character/pawn)
+	// GetOwner() returns BaseWeapon, then we get the weapon's owner
+	AActor* WeaponActor = GetOwner();
+	if (!WeaponActor)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FireComponent::Fire() - WeaponActor is null!"));
+		return;
+	}
+
+	AActor* WeaponOwner = WeaponActor->GetOwner();
+	if (!WeaponOwner)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FireComponent::Fire() - Weapon has no owner!"));
+		return;
+	}
+
+	// Get view center point (camera/eyes location) and direction
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	WeaponOwner->GetActorEyesViewPoint(ViewLocation, ViewRotation);
+
+	// Convert rotation to direction vector
+	FVector ViewDirection = ViewRotation.Vector();
+
+	// Display debug info on screen
+	if (GEngine)
+	{
+		FString OwnerName = WeaponOwner->GetName();
+		FString WeaponName = WeaponActor->GetName();
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
+			FString::Printf(TEXT("Fire! Weapon: %s | Owner: %s"), *WeaponName, *OwnerName));
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan,
+			FString::Printf(TEXT("Location: %s"), *ViewLocation.ToString()));
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
+			FString::Printf(TEXT("Direction: %s"), *ViewDirection.ToString()));
+	}
+
 	// 1. Consume ammo
 	ConsumeAmmo();
 
-	// 2. Get muzzle location and direction
-	FVector MuzzleLocation = GetMuzzleLocation();
-	FVector MuzzleDirection = GetMuzzleDirection();
-
-	// 3. Apply spread
-	FVector Direction = ApplySpread(MuzzleDirection);
-
-	// 4. Call BallisticsComponent->Shoot()
+	// 2. Call BallisticsComponent to shoot
 	if (BallisticsComponent)
 	{
-		BallisticsComponent->Shoot(MuzzleLocation, Direction);
+		BallisticsComponent->Shoot(ViewLocation, ViewDirection);
 	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("FireComponent::Fire() - BallisticsComponent is null!"));
+	}
+
+	//// 2. Get muzzle location and direction
+	//FVector CameraLoc = FVector::Zero();
+	//FRotator CameraRot = FRotator::Zero();
+
+
+	//Owner->GetActorEyesViewPoint(CameraLoc, CameraRot);
+
+	//// 3. Apply spread
+	//FVector Direction = ApplySpread(MuzzleDirection);
+
+	//// 4. Call BallisticsComponent->Shoot()
+	//if (BallisticsComponent)
+	//{
+	//	BallisticsComponent->Shoot(CameraLoc, Direction);
+	//}
 
 	// 5. Apply recoil
 	ApplyRecoil();
-
-	UE_LOG(LogTemp, Log, TEXT("FireComponent::Fire() - Shot fired! Ammo remaining: %d"),
-		CurrentMagazine ? CurrentMagazine->CurrentAmmo : 0);
 }
 
 void UFireComponent::ConsumeAmmo()

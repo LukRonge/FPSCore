@@ -58,7 +58,7 @@ public:
 
 	// Fire component (fire mode mechanics: semi-auto, full-auto, burst)
 	// Set in Blueprint: USemiAutoFireComponent, UFullAutoFireComponent, or UBurstFireComponent
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Components")
 	UFireComponent* FireComponent;
 
 	// Sight component (handles sight configuration, aiming calculations)
@@ -271,6 +271,35 @@ public:
 	// Check if weapon is currently being used
 	virtual bool IsUsing_Implementation() const override;
 
+	// ============================================
+	// IMPACT EFFECTS (Multiplayer)
+	// ============================================
+
+protected:
+	/**
+	 * Callback for ballistics impact events (SERVER ONLY)
+	 * Called when BallisticsComponent detects impact
+	 * Triggers Multicast RPC to spawn effects on all clients
+	 */
+	UFUNCTION()
+	void HandleImpactDetected(
+		TSoftObjectPtr<UNiagaraSystem> ImpactVFX,
+		FVector_NetQuantize Location,
+		FVector_NetQuantizeNormal Normal
+	);
+
+	/**
+	 * Multicast RPC for spawning impact effects on all clients
+	 * Spawns Niagara system (includes particles, sound, decals)
+	 */
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_SpawnImpactEffect(
+		const TSoftObjectPtr<UNiagaraSystem>& ImpactVFX,
+		FVector_NetQuantize Location,
+		FVector_NetQuantizeNormal Normal
+	);
+
+public:
 	// ============================================
 	// SERVER RPC (Multiplayer)
 	// ============================================

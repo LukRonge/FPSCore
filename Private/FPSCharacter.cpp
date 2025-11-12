@@ -565,16 +565,6 @@ void AFPSCharacter::DropPressed()
 
 void AFPSCharacter::UseStarted()
 {
-	UE_LOG(LogTemp, Warning, TEXT("[IA_Shoot Started] UseStarted() called - IsLocallyControlled: %s"),
-		IsLocallyControlled() ? TEXT("YES") : TEXT("NO"));
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green,
-			FString::Printf(TEXT("▶ [IA_Shoot Started] UseStarted() - LocalControl: %s"),
-				IsLocallyControlled() ? TEXT("YES") : TEXT("NO")));
-	}
-
 	// Only locally controlled players can use items
 	if (!IsLocallyControlled())
 	{
@@ -584,76 +574,26 @@ void AFPSCharacter::UseStarted()
 	// Check if we have an active item
 	if (!ActiveItem || !ActiveItem->Implements<UUsableInterface>())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[UseStarted] No active item or item doesn't implement IUsableInterface"));
-
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Orange,
-				TEXT("⚠ No active usable item"));
-		}
 		return;
 	}
-
-	UE_LOG(LogTemp, Log, TEXT("[UseStarted] Active item: %s"), *ActiveItem->GetName());
 
 	// Build use context with aim info
 	FUseContext Ctx;
 	Ctx.Controller = GetController();
 	Ctx.Pawn = this;
 
-	// Get camera aim info
-	if (CachedPlayerController)
-	{
-		FVector CameraLocation;
-		FRotator CameraRotation;
-		CachedPlayerController->GetPlayerViewPoint(CameraLocation, CameraRotation);
-
-		Ctx.AimLocation = CameraLocation;
-		Ctx.AimDirection = CameraRotation.Vector();
-	}
-	else
-	{
-		Ctx.AimLocation = GetActorLocation();
-		Ctx.AimDirection = GetActorForwardVector();
-	}
-
 	// Check if item can be used
 	if (!IUsableInterface::Execute_CanUse(ActiveItem, Ctx))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[UseStarted] CanUse returned false"));
-
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red,
-				TEXT("✗ Item cannot be used right now"));
-		}
 		return;
 	}
-
-	UE_LOG(LogTemp, Log, TEXT("[UseStarted] Calling IUsableInterface::Execute_UseStart()"));
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan,
-			FString::Printf(TEXT("✓ UseStart: %s"), *ActiveItem->GetName()));
-	}
-
+	
 	// Call UseStart via interface (will trigger Server RPC internally)
 	IUsableInterface::Execute_UseStart(ActiveItem, Ctx);
 }
 
 void AFPSCharacter::UseStopped()
 {
-	UE_LOG(LogTemp, Warning, TEXT("[IA_Shoot Stopped] UseStopped() called - IsLocallyControlled: %s"),
-		IsLocallyControlled() ? TEXT("YES") : TEXT("NO"));
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow,
-			FString::Printf(TEXT("■ [IA_Shoot Stopped] UseStopped() - LocalControl: %s"),
-				IsLocallyControlled() ? TEXT("YES") : TEXT("NO")));
-	}
-
 	// Only locally controlled players can use items
 	if (!IsLocallyControlled())
 	{
@@ -663,24 +603,13 @@ void AFPSCharacter::UseStopped()
 	// Check if we have an active item
 	if (!ActiveItem || !ActiveItem->Implements<UUsableInterface>())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[UseStopped] No active item or item doesn't implement IUsableInterface"));
 		return;
 	}
-
-	UE_LOG(LogTemp, Log, TEXT("[UseStopped] Active item: %s"), *ActiveItem->GetName());
 
 	// Build use context
 	FUseContext Ctx;
 	Ctx.Controller = GetController();
 	Ctx.Pawn = this;
-
-	UE_LOG(LogTemp, Log, TEXT("[UseStopped] Calling IUsableInterface::Execute_UseStop()"));
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Magenta,
-			FString::Printf(TEXT("✓ UseStop: %s"), *ActiveItem->GetName()));
-	}
 
 	// Call UseStop via interface (will trigger Server RPC internally)
 	IUsableInterface::Execute_UseStop(ActiveItem, Ctx);
