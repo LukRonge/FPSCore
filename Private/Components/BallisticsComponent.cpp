@@ -5,6 +5,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "NiagaraSystem.h"
 #include "DrawDebugHelpers.h"
+#include "Interfaces/BallisticsHandlerInterface.h"
 
 UBallisticsComponent::UBallisticsComponent()
 {
@@ -35,11 +36,13 @@ void UBallisticsComponent::Shoot(FVector Location, FVector Direction)
 		return;
 	}
 
-	// ✅ NEW: Broadcast shot fired event BEFORE line trace
+	// ✅ Notify owner via IBallisticsHandlerInterface
 	// This allows BaseWeapon to spawn muzzle flash immediately
-	if (OnShotFired.IsBound())
+	AActor* OwnerActor = GetOwner();
+	if (OwnerActor && OwnerActor->Implements<UBallisticsHandlerInterface>())
 	{
-		OnShotFired.Broadcast(
+		IBallisticsHandlerInterface::Execute_HandleShotFired(
+			OwnerActor,
 			FVector_NetQuantize(Location),
 			FVector_NetQuantizeNormal(Direction)
 		);
@@ -140,18 +143,23 @@ bool UBallisticsComponent::ProcessHit(
 
 	DrawDebugSphere(GetWorld(), ImpactPoint, SphereRadius, 12, SphereColor, false, 3.0f, 0, 2.0f);
 
-	// Broadcast impact VFX
+	// Notify owner via IBallisticsHandlerInterface for impact VFX
 	FName MaterialName;
 	bool bIsThin = IsThinMaterial(PhysMaterial, MaterialName);
 	UNiagaraSystem* ImpactVFX = CurrentAmmoType->GetImpactVFX(MaterialName);
 
-	if (ImpactVFX && OnImpactDetected.IsBound())
+	if (ImpactVFX)
 	{
-		OnImpactDetected.Broadcast(
-			ImpactVFX,
-			FVector_NetQuantize(ImpactPoint),
-			FVector_NetQuantizeNormal(ImpactNormal)
-		);
+		AActor* OwnerActor = GetOwner();
+		if (OwnerActor && OwnerActor->Implements<UBallisticsHandlerInterface>())
+		{
+			IBallisticsHandlerInterface::Execute_HandleImpactDetected(
+				OwnerActor,
+				ImpactVFX,
+				FVector_NetQuantize(ImpactPoint),
+				FVector_NetQuantizeNormal(ImpactNormal)
+			);
+		}
 	}
 
 	// Apply damage

@@ -9,21 +9,6 @@
 class UBallisticsComponent;
 
 /**
- * Delegate for ammo consumption callback
- * Called when FireComponent needs to consume one round
- * BaseWeapon binds this to handle actual ammo removal from magazine
- */
-DECLARE_DELEGATE(FOnAmmoConsumeDelegate);
-
-/**
- * Delegate for ammo availability check callback
- * Called when FireComponent needs to check if ammo is available
- * BaseWeapon binds this to check magazine ammo count
- * @return True if ammo available, false otherwise
- */
-DECLARE_DELEGATE_RetVal(bool, FOnCanFireAmmoCheckDelegate);
-
-/**
  * Fire Component (Abstract Base Class)
  * Handles fire mechanics, rate limiting, spread, recoil, and ammo consumption
  *
@@ -33,7 +18,7 @@ DECLARE_DELEGATE_RetVal(bool, FOnCanFireAmmoCheckDelegate);
  * - Fire rate management (RPM timing)
  * - Spread application (accuracy)
  * - Recoil generation
- * - Ammo consumption (via delegate callback - zero coupling!)
+ * - Ammo consumption (via IAmmoConsumerInterface)
  * - Trigger state management
  * - Call BallisticsComponent->Shoot()
  *
@@ -41,12 +26,12 @@ DECLARE_DELEGATE_RetVal(bool, FOnCanFireAmmoCheckDelegate);
  * - Ballistic calculations (→ BallisticsComponent)
  * - Projectile spawning (→ BallisticsComponent)
  * - Magazine replication (→ BaseWeapon)
- * - Direct magazine access (→ Delegate callbacks)
+ * - Direct magazine access (→ Uses IAmmoConsumerInterface)
  *
  * ARCHITECTURE:
  * - Abstract base class - subclass for each fire mode
  * - NOT replicated - fire logic runs on server via RPC
- * - Zero coupling to Magazine (uses delegate callbacks)
+ * - Decoupled from Magazine (uses IAmmoConsumerInterface)
  * - References BallisticsComponent (sibling component)
  *
  * FIRE MODES (Subclasses):
@@ -115,26 +100,6 @@ public:
 	// Ballistics component reference (sibling component)
 	UPROPERTY(BlueprintReadWrite, Category = "Fire|References")
 	UBallisticsComponent* BallisticsComponent = nullptr;
-
-	// ============================================
-	// DELEGATE CALLBACKS (Bound by BaseWeapon)
-	// ============================================
-
-	/**
-	 * Callback to consume one round of ammo
-	 * BaseWeapon binds this to: CurrentMagazine->RemoveAmmo()
-	 * Called by Fire() after successful shot
-	 */
-	FOnAmmoConsumeDelegate OnAmmoConsume;
-
-	/**
-	 * Callback to check if weapon can fire
-	 * BaseWeapon binds this to check all fire conditions:
-	 * - Magazine exists and has ammo
-	 * - Weapon is not reloading
-	 * Called by CanFire() before allowing shot
-	 */
-	FOnCanFireAmmoCheckDelegate OnCanFireAmmoCheck;
 
 	// ============================================
 	// FIRE CONTROL API (Called by BaseWeapon)
@@ -210,13 +175,6 @@ protected:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fire")
 	virtual void Fire();
-
-	/**
-	 * Consume one round from magazine
-	 * Calls Magazine->RemoveAmmo()
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Fire")
-	void ConsumeAmmo();
 
 	/**
 	 * Apply recoil to weapon/camera

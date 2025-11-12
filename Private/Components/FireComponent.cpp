@@ -5,6 +5,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Interfaces/ViewPointProviderInterface.h"
+#include "Interfaces/AmmoConsumerInterface.h"
 
 UFireComponent::UFireComponent()
 {
@@ -40,26 +41,28 @@ void UFireComponent::TriggerReleased()
 
 bool UFireComponent::CanFire() const
 {
-	// ✅ Check all fire conditions via delegate callback (zero coupling!)
-	// BaseWeapon checks: ammo availability, reload state, etc.
-	if (OnCanFireAmmoCheck.IsBound())
+	// Check ballistics component is valid
+	if (!BallisticsComponent)
 	{
-		if (!OnCanFireAmmoCheck.Execute())
+		UE_LOG(LogTemp, Warning, TEXT("FireComponent::CanFire() - BallisticsComponent is null!"));
+		return false;
+	}
+
+	// ✅ Check ammo via IAmmoConsumerInterface
+	AActor* WeaponActor = GetOwner(); // BaseWeapon
+	if (WeaponActor && WeaponActor->Implements<UAmmoConsumerInterface>())
+	{
+		int32 CurrentAmmo = IAmmoConsumerInterface::Execute_GetClip(WeaponActor);
+
+		if (CurrentAmmo <= 0)
 		{
+			UE_LOG(LogTemp, Verbose, TEXT("FireComponent::CanFire() - No ammo (Clip: %d)"), CurrentAmmo);
 			return false;
 		}
 	}
 	else
 	{
-		// Delegate not bound - weapon not properly initialized
-		UE_LOG(LogTemp, Warning, TEXT("FireComponent::CanFire() - OnCanFireAmmoCheck delegate not bound!"));
-		return false;
-	}
-
-	// Check ballistics component is valid
-	if (!BallisticsComponent)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("FireComponent::CanFire() - BallisticsComponent is null!"));
+		UE_LOG(LogTemp, Warning, TEXT("FireComponent::CanFire() - Owner does not implement IAmmoConsumerInterface!"));
 		return false;
 	}
 
@@ -164,8 +167,26 @@ void UFireComponent::Fire()
 	// Convert rotation to direction vector
 	FVector ViewDirection = ViewRotation.Vector();
 
-	// 1. Consume ammo
-	ConsumeAmmo();
+	// 1. Consume ammo via IAmmoConsumerInterface
+	if (WeaponActor->Implements<UAmmoConsumerInterface>())
+	{
+		FUseContext Ctx;
+		Ctx.Controller = WeaponOwner->GetInstigatorController();
+		Ctx.Pawn = Cast<APawn>(WeaponOwner);
+
+		int32 Consumed = IAmmoConsumerInterface::Execute_ConsumeAmmo(WeaponActor, 1, Ctx);
+
+		if (Consumed <= 0)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("FireComponent::Fire() - Failed to consume ammo!"));
+			return;
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("FireComponent::Fire() - Owner does not implement IAmmoConsumerInterface!"));
+		return;
+	}
 
 	// 2. Call BallisticsComponent to shoot
 	if (BallisticsComponent)
@@ -177,22 +198,8 @@ void UFireComponent::Fire()
 		UE_LOG(LogTemp, Error, TEXT("FireComponent::Fire() - BallisticsComponent is null!"));
 	}
 
-	// 5. Apply recoil
+	// 3. Apply recoil
 	ApplyRecoil();
-}
-
-void UFireComponent::ConsumeAmmo()
-{
-	// Consume ammo via delegate callback (zero coupling!)
-	// BaseWeapon handles: CurrentMagazine->RemoveAmmo()
-	if (OnAmmoConsume.IsBound())
-	{
-		OnAmmoConsume.Execute();
-	}
-	else
-	{
-		UE_LOG(LogTemp, Warning, TEXT("FireComponent::ConsumeAmmo() - OnAmmoConsume delegate not bound!"));
-	}
 }
 
 void UFireComponent::ApplyRecoil()

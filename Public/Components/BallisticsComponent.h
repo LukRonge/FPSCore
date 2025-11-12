@@ -12,36 +12,6 @@ class ABaseMagazine;
 class UNiagaraSystem;
 
 /**
- * Delegate for shot fired event
- * Broadcasted when shot is fired from weapon (SERVER ONLY)
- * Used by weapon to spawn muzzle flash, play sound, animate recoil
- *
- * @param MuzzleLocation - Location where shot originated (quantized for bandwidth savings)
- * @param Direction - Direction of shot (normalized, quantized for bandwidth savings)
- */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
-	FOnShotFired,
-	FVector_NetQuantize, MuzzleLocation,
-	FVector_NetQuantizeNormal, Direction
-);
-
-/**
- * Delegate for impact detection
- * Broadcasted when projectile hits a surface (SERVER ONLY)
- * Used by weapon to spawn visual effects via Multicast RPC
- *
- * @param ImpactVFX - Niagara system to spawn (looked up from CurrentAmmoType->ImpactVFXMap)
- * @param Location - Impact location (quantized for bandwidth savings)
- * @param Normal - Impact surface normal (quantized for bandwidth savings)
- */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
-	FOnImpactDetected,
-	TSoftObjectPtr<UNiagaraSystem>, ImpactVFX,
-	FVector_NetQuantize, Location,
-	FVector_NetQuantizeNormal, Normal
-);
-
-/**
  * Ballistics Component
  * Pure ballistic physics and projectile spawning component
  *
@@ -51,17 +21,19 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
  * - Shoot(Location, Direction) - spawn projectile with ballistic trajectory
  * - Load CaliberDataAsset (mass, velocity, drag, damage, effects)
  * - Calculate bullet drop, kinetic energy, penetration
- * - Apply impact VFX based on surface material
+ * - Notify owner via IBallisticsHandlerInterface (shots/impacts)
  *
  * DOES NOT:
  * - Fire rate management (→ FireComponent)
  * - Spread/recoil application (→ FireComponent)
  * - Ammo consumption (→ FireComponent)
  * - Magazine management (→ BaseWeapon)
+ * - Visual effects (→ BaseWeapon via IBallisticsHandlerInterface)
  *
  * ARCHITECTURE:
  * - NOT replicated - pure utility component
  * - Called by FireComponent after fire mechanics are processed
+ * - Notifies owner (BaseWeapon) via IBallisticsHandlerInterface
  * - Server authority for projectile spawning
  */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -93,34 +65,6 @@ public:
 	// Currently active ammo type (set via InitAmmoType)
 	UPROPERTY(BlueprintReadOnly, Category = "Ballistics")
 	UAmmoTypeDataAsset* CurrentAmmoType;
-
-	// ============================================
-	// EVENTS
-	// ============================================
-
-	/**
-	 * Event broadcasted when shot is fired (SERVER ONLY)
-	 * Weapon should bind to this to spawn muzzle flash via Multicast RPC
-	 *
-	 * Usage in BaseWeapon:
-	 * - BeginPlay(): BallisticsComponent->OnShotFired.AddDynamic(this, &ABaseWeapon::HandleShotFired)
-	 * - HandleShotFired(): Multicast_PlayMuzzleFlash(Location, Direction)
-	 * - Multicast_PlayMuzzleFlash_Implementation(): UNiagaraFunctionLibrary::SpawnSystemAtLocation()
-	 */
-	UPROPERTY(BlueprintAssignable, Category = "Ballistics|Events")
-	FOnShotFired OnShotFired;
-
-	/**
-	 * Event broadcasted when impact is detected (SERVER ONLY)
-	 * Weapon should bind to this to spawn visual effects via Multicast RPC
-	 *
-	 * Usage in BaseWeapon:
-	 * - BeginPlay(): BallisticsComponent->OnImpactDetected.AddDynamic(this, &ABaseWeapon::HandleImpactDetected)
-	 * - HandleImpactDetected(): Multicast_SpawnImpactEffect(VFX, Location, Normal)
-	 * - Multicast_SpawnImpactEffect_Implementation(): UNiagaraFunctionLibrary::SpawnSystemAtLocation()
-	 */
-	UPROPERTY(BlueprintAssignable, Category = "Ballistics|Events")
-	FOnImpactDetected OnImpactDetected;
 
 	// ============================================
 	// CALIBER DATA MANAGEMENT

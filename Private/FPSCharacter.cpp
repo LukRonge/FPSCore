@@ -625,15 +625,7 @@ void AFPSCharacter::UseStarted()
 
 	// Build use context with aim info
 	FUseContext Ctx;
-	Ctx.Controller = GetController();
-	Ctx.Pawn = this;
 
-	// Check if item can be used
-	if (!IUsableInterface::Execute_CanUse(ActiveItem, Ctx))
-	{
-		return;
-	}
-	
 	// Call UseStart via interface (will trigger Server RPC internally)
 	IUsableInterface::Execute_UseStart(ActiveItem, Ctx);
 }
@@ -654,8 +646,6 @@ void AFPSCharacter::UseStopped()
 
 	// Build use context
 	FUseContext Ctx;
-	Ctx.Controller = GetController();
-	Ctx.Pawn = this;
 
 	// Call UseStop via interface (will trigger Server RPC internally)
 	IUsableInterface::Execute_UseStop(ActiveItem, Ctx);

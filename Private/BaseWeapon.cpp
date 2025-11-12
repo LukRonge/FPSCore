@@ -68,38 +68,34 @@ void ABaseWeapon::BeginPlay()
 	{
 		CurrentMagazine = Cast<ABaseMagazine>(TPSMagazineComponent->GetChildActor());
 
-		if (FireComponent)
+		if (FireComponent && BallisticsComponent)
 		{
-			// ✅ REFACTORED: Bind delegate callbacks (zero coupling!)
-			FireComponent->OnAmmoConsume.BindUObject(this, &ABaseWeapon::ConsumeAmmoFromMagazine);
-			FireComponent->OnCanFireAmmoCheck.BindUObject(this, &ABaseWeapon::CheckMagazineAmmo);
+			// Set sibling component reference
+			FireComponent->BallisticsComponent = BallisticsComponent;
 
-			if (BallisticsComponent)
+			// Initialize ballistics with magazine's caliber type
+			if (CurrentMagazine)
 			{
-				// Set sibling component reference
-				FireComponent->BallisticsComponent = BallisticsComponent;
-
-				// ✅ CRITICAL FIX: Bind ballistics events
-				BallisticsComponent->OnShotFired.AddDynamic(this, &ABaseWeapon::HandleShotFired);
-				BallisticsComponent->OnImpactDetected.AddDynamic(this, &ABaseWeapon::HandleImpactDetected);
-
-				// Initialize ballistics with magazine's caliber type
-				if (CurrentMagazine)
+				bool bSuccess = BallisticsComponent->InitAmmoType(CurrentMagazine->AmmoType);
+				if (!bSuccess)
 				{
-					bool bSuccess = BallisticsComponent->InitAmmoType(CurrentMagazine->AmmoType);
-					if (!bSuccess)
-					{
-						UE_LOG(LogTemp, Error, TEXT("BaseWeapon::BeginPlay() - Failed to initialize ammo type for caliber: %s"),
-							*UEnum::GetValueAsString(CurrentMagazine->AmmoType));
-					}
+					UE_LOG(LogTemp, Error, TEXT("BaseWeapon::BeginPlay() - Failed to initialize ammo type for caliber: %s"),
+						*UEnum::GetValueAsString(CurrentMagazine->AmmoType));
 				}
-
-				UE_LOG(LogTemp, Log, TEXT("BaseWeapon::BeginPlay() - BallisticsComponent initialized and events bound"));
 			}
+
+			UE_LOG(LogTemp, Log, TEXT("BaseWeapon::BeginPlay() - Components initialized (using interfaces)"));
 		}
 		else
 		{
-			UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::BeginPlay() - FireComponent not found! Add FireComponent in Blueprint."));
+			if (!FireComponent)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::BeginPlay() - FireComponent not found! Add FireComponent in Blueprint."));
+			}
+			if (!BallisticsComponent)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::BeginPlay() - BallisticsComponent not found!"));
+			}
 		}
 	}
 }
@@ -132,23 +128,6 @@ void ABaseWeapon::SetOwner(AActor* NewOwner)
 	{
 		TPSMagazineComponent->GetChildActor()->SetOwner(NewOwner);
 	}
-}
-
-bool ABaseWeapon::CanUse_Implementation(const FUseContext& Ctx) const
-{
-	// Check if weapon is equipped
-	if (!IsEquipped_Implementation())
-	{
-		return false;
-	}
-
-	// Check if can fire
-	if (FireComponent)
-	{
-		return FireComponent->CanFire();
-	}
-
-	return false;
 }
 
 void ABaseWeapon::UseStart_Implementation(const FUseContext& Ctx)
@@ -321,60 +300,10 @@ TSubclassOf<UAnimInstance> ABaseWeapon::GetAnimLayer_Implementation() const
 }
 
 // ============================================
-// FIRE COMPONENT CALLBACKS (Server authority)
+// BALLISTICS HANDLER INTERFACE IMPLEMENTATION
 // ============================================
 
-void ABaseWeapon::ConsumeAmmoFromMagazine()
-{
-	// SERVER ONLY
-	if (!HasAuthority())
-	{
-		UE_LOG(LogTemp, Error, TEXT("BaseWeapon::ConsumeAmmoFromMagazine() - Called on CLIENT! Should only run on server."));
-		return;
-	}
-
-	if (CurrentMagazine)
-	{
-		CurrentMagazine->RemoveAmmo();
-
-		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::ConsumeAmmoFromMagazine() - Ammo: %d/%d"),
-			CurrentMagazine->CurrentAmmo, CurrentMagazine->MaxCapacity);
-
-		// TODO: Trigger UI update event
-		// OnAmmoChanged.Broadcast(CurrentMagazine->CurrentAmmo, CurrentMagazine->MaxCapacity);
-	}
-	else
-	{
-		UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::ConsumeAmmoFromMagazine() - CurrentMagazine is null!"));
-	}
-}
-
-bool ABaseWeapon::CheckMagazineAmmo() const
-{
-	// ✅ Check all fire conditions (ammo + reload state)
-
-	// 1. Check if weapon is reloading
-	if (IsReload)
-	{
-		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::CheckMagazineAmmo() - Weapon is reloading"));
-		return false;
-	}
-
-	// 2. Check if magazine exists and has ammo
-	if (!CurrentMagazine || CurrentMagazine->CurrentAmmo <= 0)
-	{
-		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::CheckMagazineAmmo() - No ammo available"));
-		return false;
-	}
-
-	return true;
-}
-
-// ============================================
-// MUZZLE EFFECTS (Multiplayer)
-// ============================================
-
-void ABaseWeapon::HandleShotFired(
+void ABaseWeapon::HandleShotFired_Implementation(
 	FVector_NetQuantize MuzzleLocation,
 	FVector_NetQuantizeNormal Direction)
 {
@@ -385,6 +314,23 @@ void ABaseWeapon::HandleShotFired(
 		Multicast_PlayMuzzleFlash(MuzzleLocation, Direction);
 	}
 }
+
+void ABaseWeapon::HandleImpactDetected_Implementation(
+	const TSoftObjectPtr<UNiagaraSystem>& ImpactVFX,
+	FVector_NetQuantize Location,
+	FVector_NetQuantizeNormal Normal)
+{
+	// SERVER ONLY
+	if (HasAuthority())
+	{
+		// Replicate to all clients via Multicast RPC
+		Multicast_SpawnImpactEffect(ImpactVFX, Location, Normal);
+	}
+}
+
+// ============================================
+// MUZZLE EFFECTS (Multiplayer)
+// ============================================
 
 void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
 	FVector_NetQuantize MuzzleLocation,
@@ -461,23 +407,6 @@ void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
 	// 4. Shell ejection (TODO: Implement)
 }
 
-// ============================================
-// IMPACT EFFECTS (Multiplayer)
-// ============================================
-
-void ABaseWeapon::HandleImpactDetected(
-	TSoftObjectPtr<UNiagaraSystem> ImpactVFX,
-	FVector_NetQuantize Location,
-	FVector_NetQuantizeNormal Normal)
-{
-	// This runs on SERVER only (where ballistics are calculated)
-	if (HasAuthority())
-	{
-		// Replicate to all clients via Multicast RPC
-		Multicast_SpawnImpactEffect(ImpactVFX, Location, Normal);
-	}
-}
-
 void ABaseWeapon::Multicast_SpawnImpactEffect_Implementation(
 	const TSoftObjectPtr<UNiagaraSystem>& ImpactVFX,
 	FVector_NetQuantize Location,
@@ -508,4 +437,69 @@ void ABaseWeapon::Multicast_SpawnImpactEffect_Implementation(
 		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_SpawnImpactEffect() - Impact VFX spawned at %s, Normal: %s, Rotation: %s"),
 			*Location.ToString(), *Normal.ToString(), *ImpactRotation.ToString());
 	}
+}
+
+// ============================================
+// AMMO CONSUMER INTERFACE IMPLEMENTATION
+// ============================================
+
+FName ABaseWeapon::GetAmmoType_Implementation() const
+{
+	if (CurrentMagazine)
+	{
+		return FName(*UEnum::GetValueAsString(CurrentMagazine->AmmoType));
+	}
+	return NAME_None;
+}
+
+int32 ABaseWeapon::GetClip_Implementation() const
+{
+	return CurrentMagazine ? CurrentMagazine->CurrentAmmo : 0;
+}
+
+int32 ABaseWeapon::GetClipSize_Implementation() const
+{
+	return CurrentMagazine ? CurrentMagazine->MaxCapacity : 0;
+}
+
+int32 ABaseWeapon::GetTotalAmmo_Implementation() const
+{
+	// TODO: Implement reserve ammo system
+	return 0;
+}
+
+int32 ABaseWeapon::ConsumeAmmo_Implementation(int32 Requested, const FUseContext& Ctx)
+{
+	// SERVER ONLY
+	if (!HasAuthority())
+	{
+		UE_LOG(LogTemp, Error, TEXT("BaseWeapon::ConsumeAmmo() - Called on CLIENT! This should only run on server."));
+		return 0;
+	}
+
+	if (!CurrentMagazine || CurrentMagazine->CurrentAmmo <= 0)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::ConsumeAmmo() - No ammo available"));
+		return 0;
+	}
+
+	// Check if reloading
+	if (IsReload)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::ConsumeAmmo() - Weapon is reloading"));
+		return 0;
+	}
+
+	// Consume requested amount (or all remaining if less available)
+	int32 AmmoToConsume = FMath::Min(Requested, CurrentMagazine->CurrentAmmo);
+
+	for (int32 i = 0; i < AmmoToConsume; i++)
+	{
+		CurrentMagazine->RemoveAmmo();
+	}
+
+	UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::ConsumeAmmo() - Consumed %d rounds, remaining: %d"),
+		AmmoToConsume, CurrentMagazine->CurrentAmmo);
+
+	return AmmoToConsume;
 }

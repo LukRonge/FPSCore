@@ -22,6 +22,8 @@
 #include "Interfaces/HoldableInterface.h"
 #include "Interfaces/SightInterface.h"
 #include "Interfaces/UsableInterface.h"
+#include "Interfaces/AmmoConsumerInterface.h"
+#include "Interfaces/BallisticsHandlerInterface.h"
 #include "BaseWeapon.generated.h"
 
 class ABaseMagazine;
@@ -30,7 +32,7 @@ class UFireComponent;
 class USightComponent;
 
 UCLASS()
-class FPSCORE_API ABaseWeapon : public AActor, public IInteractableInterface, public IPickupableInterface, public IHoldableInterface, public ISightInterface, public IUsableInterface
+class FPSCORE_API ABaseWeapon : public AActor, public IInteractableInterface, public IPickupableInterface, public IHoldableInterface, public ISightInterface, public IUsableInterface, public IAmmoConsumerInterface, public IBallisticsHandlerInterface
 {
 	GENERATED_BODY()
 
@@ -256,9 +258,6 @@ public:
 	// USABLE INTERFACE (Item usage - shoot, aim, etc.)
 	// ============================================
 
-	// Check if weapon can be used right now
-	virtual bool CanUse_Implementation(const FUseContext& Ctx) const override;
-
 	// Called when use input STARTED (IA_Use pressed - shoot started)
 	virtual void UseStart_Implementation(const FUseContext& Ctx) override;
 
@@ -272,43 +271,35 @@ public:
 	virtual bool IsUsing_Implementation() const override;
 
 	// ============================================
-	// FIRE COMPONENT CALLBACKS (Server authority)
+	// BALLISTICS HANDLER INTERFACE
 	// ============================================
 
-protected:
 	/**
-	 * Callback for FireComponent to consume ammo (SERVER ONLY)
-	 * Called when shot is fired, removes one round from magazine
-	 * Bound to: FireComponent->OnAmmoConsume
+	 * Handle shot fired event (SERVER ONLY)
+	 * Called by BallisticsComponent when shot is fired
+	 * Triggers Multicast RPC to spawn muzzle flash on all clients
 	 */
-	UFUNCTION()
-	void ConsumeAmmoFromMagazine();
+	virtual void HandleShotFired_Implementation(
+		FVector_NetQuantize MuzzleLocation,
+		FVector_NetQuantizeNormal Direction
+	) override;
 
 	/**
-	 * Callback for FireComponent to check if weapon can fire (SERVER ONLY)
-	 * Called before allowing shot, checks all fire conditions:
-	 * - Magazine exists and has ammo
-	 * - Weapon is not reloading
-	 * Bound to: FireComponent->OnCanFireAmmoCheck
-	 * @return True if can fire, false otherwise
+	 * Handle impact detected event (SERVER ONLY)
+	 * Called by BallisticsComponent when impact is detected
+	 * Triggers Multicast RPC to spawn impact effects on all clients
 	 */
-	UFUNCTION()
-	bool CheckMagazineAmmo() const;
+	virtual void HandleImpactDetected_Implementation(
+		const TSoftObjectPtr<UNiagaraSystem>& ImpactVFX,
+		FVector_NetQuantize Location,
+		FVector_NetQuantizeNormal Normal
+	) override;
 
 	// ============================================
 	// MUZZLE EFFECTS (Multiplayer)
 	// ============================================
 
-	/**
-	 * Callback for shot fired events (SERVER ONLY)
-	 * Called when BallisticsComponent fires a shot
-	 * Triggers Multicast RPC to spawn muzzle flash on all clients
-	 */
-	UFUNCTION()
-	void HandleShotFired(
-		FVector_NetQuantize MuzzleLocation,
-		FVector_NetQuantizeNormal Direction
-	);
+protected:
 
 	/**
 	 * Multicast RPC for spawning muzzle flash on all clients
@@ -318,22 +309,6 @@ protected:
 	void Multicast_PlayMuzzleFlash(
 		FVector_NetQuantize MuzzleLocation,
 		FVector_NetQuantizeNormal Direction
-	);
-
-	// ============================================
-	// IMPACT EFFECTS (Multiplayer)
-	// ============================================
-
-	/**
-	 * Callback for ballistics impact events (SERVER ONLY)
-	 * Called when BallisticsComponent detects impact
-	 * Triggers Multicast RPC to spawn effects on all clients
-	 */
-	UFUNCTION()
-	void HandleImpactDetected(
-		TSoftObjectPtr<UNiagaraSystem> ImpactVFX,
-		FVector_NetQuantize Location,
-		FVector_NetQuantizeNormal Normal
 	);
 
 	/**
@@ -412,6 +387,25 @@ public:
 
 	// Get animation layer class
 	virtual TSubclassOf<UAnimInstance> GetAnimLayer_Implementation() const override;
+
+	// ============================================
+	// AMMO CONSUMER INTERFACE
+	// ============================================
+
+	// Get ammo type from magazine
+	virtual FName GetAmmoType_Implementation() const override;
+
+	// Get current ammo in magazine
+	virtual int32 GetClip_Implementation() const override;
+
+	// Get max magazine capacity
+	virtual int32 GetClipSize_Implementation() const override;
+
+	// Get total reserve ammo (0 for now - no reserve system yet)
+	virtual int32 GetTotalAmmo_Implementation() const override;
+
+	// Consume ammo from magazine (SERVER ONLY)
+	virtual int32 ConsumeAmmo_Implementation(int32 Requested, const FUseContext& Ctx) override;
 
 	// ============================================
 	// UTILITY METHODS
