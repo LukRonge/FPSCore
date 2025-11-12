@@ -314,34 +314,80 @@ void AFPSCharacter::Client_OnPossessed_Implementation()
 
 void AFPSCharacter::UpdatePitch(float Y)
 {
-	float NewPitch = (Y * -1.0f) + Pitch;
-	NewPitch = FMath::ClampAngle(NewPitch, -45.0f, 45.0f);
-
-	if (IsLocallyControlled())
+	if (!IsLocallyControlled())
 	{
-		Pitch = NewPitch;
-		UpdateSpineRotations();
+		return;
+	}
 
-		if (!HasAuthority())
-		{
-			Server_UpdatePitch(Pitch);
-		}
+	// Update local pitch accumulator for spine rotations (visual only)
+	float NewLocalPitch = (Y * -1.0f) + LocalPitchAccumulator;
+	NewLocalPitch = FMath::ClampAngle(NewLocalPitch, -45.0f, 45.0f);
+	LocalPitchAccumulator = NewLocalPitch;
+
+	// Update spine rotations with local pitch (immediate visual feedback)
+	UpdateSpineRotations();
+
+	// Calculate network pitch from actual camera direction (inverse calculation)
+	// This ensures ViewPointProvider returns the same direction as local camera
+	float CorrectedPitch = CalculateNetworkPitchFromCamera();
+
+	// Update replicated Pitch variable with corrected value
+	Pitch = CorrectedPitch;
+
+	// Send corrected pitch to server for weapon ballistics
+	if (!HasAuthority())
+	{
+		Server_UpdatePitch(Pitch);
 	}
 }
 
 void AFPSCharacter::Server_UpdatePitch_Implementation(float NewPitch)
 {
-	Pitch = FMath::ClampAngle(NewPitch, -45.0f, 45.0f);
+	// Clamp received pitch from client
+	Pitch = FMath::Clamp(NewPitch, -45.0f, 45.0f);
+
+	// Server uses replicated Pitch for third-person spine rotations
+	// (Server doesn't have LocalPitchAccumulator, it's only on owning client)
+	LocalPitchAccumulator = Pitch;
 	UpdateSpineRotations();
 }
 
 void AFPSCharacter::UpdateSpineRotations()
 {
 	// Distribute pitch across spine bones (40%, 50%, 60%, 20%)
-	Spine_03->SetRelativeRotation(FRotator(Pitch * 0.4f, 90.0f, 0.0f));
-	Spine_04->SetRelativeRotation(FRotator(Pitch * 0.5f, 0.0f, 0.0f));
-	Spine_05->SetRelativeRotation(FRotator(Pitch * 0.6f, 0.0f, 0.0f));
-	Neck_01->SetRelativeRotation(FRotator(Pitch * 0.2f, 0.0f, 0.0f));
+	Spine_03->SetRelativeRotation(FRotator(LocalPitchAccumulator * 0.4f, 90.0f, 0.0f));
+	Spine_04->SetRelativeRotation(FRotator(LocalPitchAccumulator * 0.5f, 0.0f, 0.0f));
+	Spine_05->SetRelativeRotation(FRotator(LocalPitchAccumulator * 0.6f, 0.0f, 0.0f));
+	Neck_01->SetRelativeRotation(FRotator(LocalPitchAccumulator * 0.2f, 0.0f, 0.0f));
+}
+
+float AFPSCharacter::CalculateNetworkPitchFromCamera() const
+{
+	// Early exit if no camera
+	if (!Camera)
+	{
+		return 0.0f;
+	}
+
+	// Get camera forward vector in world space
+	const FVector CameraForward = Camera->GetForwardVector();
+
+	// Transform to actor local space (remove actor yaw rotation)
+	// This gives us forward vector relative to character facing direction
+	const FQuat ActorRotationQuat = GetActorQuat();
+	const FVector LocalForward = ActorRotationQuat.Inverse().RotateVector(CameraForward);
+
+	// Extract pitch from local forward vector
+	// Pitch = atan2(Z, sqrt(X^2 + Y^2))
+	// We use the horizontal magnitude (XY plane) vs vertical component (Z)
+	const float HorizontalLength = FMath::Sqrt(LocalForward.X * LocalForward.X + LocalForward.Y * LocalForward.Y);
+	const float PitchRadians = FMath::Atan2(LocalForward.Z, HorizontalLength);
+	const float PitchDegrees = FMath::RadiansToDegrees(PitchRadians);
+
+	// Clamp to same range as input pitch (±45°)
+	float ClampedPitch = FMath::Clamp(PitchDegrees, -45.0f, 45.0f);
+
+	return ClampedPitch;
 }
 
 void AFPSCharacter::SetupHandsLocation()
@@ -649,8 +695,12 @@ void AFPSCharacter::UpdateMovementSpeed(EFPSMovementMode NewMode)
 
 void AFPSCharacter::OnRep_Pitch()
 {
+	// Only update spine rotations for remote clients (not locally controlled)
+	// Locally controlled client already updates spine via UpdatePitch()
 	if (!IsLocallyControlled())
 	{
+		// Remote clients use replicated Pitch for third-person spine rotations
+		LocalPitchAccumulator = Pitch;
 		UpdateSpineRotations();
 	}
 }
@@ -1628,9 +1678,6 @@ void AFPSCharacter::GetShootingViewPoint_Implementation(FVector& OutLocation, FR
 	{
 		OutLocation = Camera->GetComponentLocation();
 	}
-
-	UE_LOG(LogTemp, Verbose, TEXT("AFPSCharacter::GetShootingViewPoint() - Location: %s, Rotation: %s (Pitch: %.2f)"),
-		*OutLocation.ToString(), *OutRotation.ToString(), Pitch);
 }
 
 float AFPSCharacter::GetViewPitch_Implementation() const

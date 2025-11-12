@@ -151,33 +151,18 @@ void UFireComponent::Fire()
 	{
 		// ✅ Use interface to get ACCURATE view point (includes custom replicated Pitch)
 		IViewPointProviderInterface::Execute_GetShootingViewPoint(WeaponOwner, ViewLocation, ViewRotation);
-
-		UE_LOG(LogTemp, Log, TEXT("FireComponent::Fire() - Using IViewPointProvider interface for accurate view point"));
 	}
 	else
 	{
 		// ❌ Fallback: Use default GetActorEyesViewPoint() (may have incorrect Pitch)
 		WeaponOwner->GetActorEyesViewPoint(ViewLocation, ViewRotation);
 
-		UE_LOG(LogTemp, Warning, TEXT("FireComponent::Fire() - Owner '%s' does not implement IViewPointProvider! Pitch may be incorrect."),
+		UE_LOG(LogTemp, Warning, TEXT("FireComponent::Fire() - Owner '%s' does not implement IViewPointProvider!"),
 			*WeaponOwner->GetName());
 	}
 
 	// Convert rotation to direction vector
 	FVector ViewDirection = ViewRotation.Vector();
-
-	// Display debug info on screen
-	if (GEngine)
-	{
-		FString OwnerName = WeaponOwner->GetName();
-		FString WeaponName = WeaponActor->GetName();
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
-			FString::Printf(TEXT("Fire! Weapon: %s | Owner: %s"), *WeaponName, *OwnerName));
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan,
-			FString::Printf(TEXT("Location: %s"), *ViewLocation.ToString()));
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
-			FString::Printf(TEXT("Direction: %s"), *ViewDirection.ToString()));
-	}
 
 	// 1. Consume ammo
 	ConsumeAmmo();

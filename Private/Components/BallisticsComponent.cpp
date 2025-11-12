@@ -38,22 +38,16 @@ void UBallisticsComponent::Shoot(FVector Location, FVector Direction)
 	// SERVER ONLY - projectile spawning
 	if (!GetOwner()->HasAuthority())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("BallisticsComponent::Shoot() - Called on client! Projectiles spawn on server only."));
+		UE_LOG(LogTemp, Error, TEXT("[BALLISTICS] Called on CLIENT! Projectiles spawn on server only."));
 		return;
 	}
 
 	// Validate CurrentAmmoType
 	if (!CurrentAmmoType)
 	{
-		UE_LOG(LogTemp, Error, TEXT("BallisticsComponent::Shoot() - No CurrentAmmoType set! Call InitAmmoType() first."));
+		UE_LOG(LogTemp, Error, TEXT("[BALLISTICS] No CurrentAmmoType set! Call InitAmmoType() first."));
 		return;
 	}
-
-	// Log shoot event
-	UE_LOG(LogTemp, Log, TEXT("BallisticsComponent::Shoot() - Location: %s, Direction: %s, Caliber: %s"),
-		*Location.ToString(),
-		*Direction.ToString(),
-		*CurrentAmmoType->AmmoName.ToString());
 
 	// ============================================
 	// STEP 1: LINE TRACE SETUP
@@ -82,35 +76,14 @@ void UBallisticsComponent::Shoot(FVector Location, FVector Direction)
 		TraceParams
 	);
 
-	if (!bHit || HitResults.Num() == 0)
+	// ✅ FIX: Process hits even if bHit=false (OVERLAP-only hits)
+	// bHit=false just means no BLOCK collision, but HitResults can still contain OVERLAP hits
+	if (HitResults.Num() == 0)
 	{
-		UE_LOG(LogTemp, Log, TEXT("BallisticsComponent::Shoot() - No hits detected"));
-
-		// Display miss message
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(
-				-1,
-				2.0f,
-				FColor::Green,
-				TEXT("❌ MISS - No hit detected")
-			);
-		}
+		UE_LOG(LogTemp, Verbose, TEXT("[BALLISTICS] No hits detected - trace distance: %.2f meters"), (End - Location).Size() / 100.0f);
 		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("BallisticsComponent::Shoot() - Hit %d objects"), HitResults.Num());
-
-	// Display hit count on screen
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(
-			-1,
-			2.0f,
-			FColor::Orange,
-			FString::Printf(TEXT("🎯 HIT %d object(s)"), HitResults.Num())
-		);
-	}
 
 	// ============================================
 	// STEP 2: PROCESS HIT RESULTS
@@ -124,7 +97,7 @@ void UBallisticsComponent::Shoot(FVector Location, FVector Direction)
 	float KineticEnergy = 0.0f;
 
 	// Track last hit location for distance calculation
-	FVector LastHitLocation = Location; // Start from muzzle location
+	FVector LastHitLocation = Location; // Start from muzzle/camera location
 
 	// Process each hit
 	for (int32 HitIndex = 0; HitIndex < HitResults.Num(); HitIndex++)
@@ -182,9 +155,6 @@ bool UBallisticsComponent::ProcessHit(
 		// Calculate initial kinetic energy: KE = (m * v²) / 2
 		// Simplified: (mass_grams / 1000) * (speed_m/s² / 1000)
 		KineticEnergy = (Mass / 1000.0f) * (Speed * Speed / 1000.0f);
-
-		UE_LOG(LogTemp, Log, TEXT("ProcessHit() - First Hit: Speed=%.1f m/s, Mass=%.2f g, Penetration=%.3f, KE=%.1f J"),
-			Speed, Mass, Penetration, KineticEnergy);
 	}
 
 	// ============================================
@@ -196,9 +166,6 @@ bool UBallisticsComponent::ProcessHit(
 
 	// Apply distance decay (air resistance, drag)
 	ApplyDistanceDecay(Speed, Mass, DropFactor, KineticEnergy, DistanceTraveled);
-
-	UE_LOG(LogTemp, Log, TEXT("ProcessHit() - Hit[%d]: Actor=%s, Location=%s, KE=%.1f J (AFTER distance decay, BEFORE penetration)"),
-		HitIndex, *HitActor->GetName(), *ImpactPoint.ToString(), KineticEnergy);
 
 	// ============================================
 	// DEBUG VISUALIZATION: Impact Sphere (scaled by KE)
@@ -231,20 +198,6 @@ bool UBallisticsComponent::ProcessHit(
 	FName MaterialName;
 	bool bIsThin = IsThinMaterial(PhysMaterial, MaterialName);
 
-	// Display physics material on screen
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(
-			-1,
-			2.0f,
-			FColor::Yellow,
-			FString::Printf(TEXT("💥 HIT[%d]: %s %s"),
-				HitIndex,
-				*MaterialName.ToString(),
-				bIsThin ? TEXT("(THIN)") : TEXT("(SOLID)"))
-		);
-	}
-
 	// Lookup VFX from CurrentAmmoType on server
 	UNiagaraSystem* ImpactVFX = CurrentAmmoType->GetImpactVFX(MaterialName);
 
@@ -257,9 +210,6 @@ bool UBallisticsComponent::ProcessHit(
 			FVector_NetQuantize(ImpactPoint),
 			FVector_NetQuantizeNormal(ImpactNormal)
 		);
-
-		UE_LOG(LogTemp, Log, TEXT("ProcessHit() - Broadcasted impact event: Material=%s, VFX=%s"),
-			*MaterialName.ToString(), *ImpactVFX->GetName());
 	}
 
 	// ============================================
@@ -282,9 +232,6 @@ bool UBallisticsComponent::ProcessHit(
 			GetOwner(),
 			UDamageType::StaticClass()
 		);
-
-		UE_LOG(LogTemp, Log, TEXT("ProcessHit() - Applied Damage: %.1f (BaseDamage: %.1f * KE: %.1f) to %s"),
-			FinalDamage, CurrentAmmoType->Damage, KineticEnergy, *HitActor->GetName());
 	}
 
 	// ============================================
@@ -306,9 +253,6 @@ bool UBallisticsComponent::ProcessHit(
 			ImpactPoint,
 			BoneName
 		);
-
-		UE_LOG(LogTemp, Log, TEXT("ProcessHit() - Applied Impulse: %s (Magnitude: %.1f) to %s at bone %s"),
-			*Impulse.ToString(), Impulse.Size(), *HitComponent->GetName(), *BoneName.ToString());
 	}
 
 	// ============================================
@@ -318,13 +262,7 @@ bool UBallisticsComponent::ProcessHit(
 	// Apply penetration loss (reduces KE, Mass, Speed for NEXT hit)
 	bool bCanContinue = ApplyPenetrationLoss(Speed, Mass, Penetration, DropFactor, KineticEnergy, PhysMaterial);
 
-	if (!bCanContinue)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("ProcessHit() - Bullet stopped after penetration loss at hit %d"), HitIndex);
-		return false; // Bullet stopped - don't process further hits
-	}
-
-	return true; // Continue processing next hits
+	return bCanContinue; // Continue or stop based on penetration loss
 }
 
 bool UBallisticsComponent::IsThinMaterial(UPhysicalMaterial* PhysMaterial, FName& OutMaterialName) const
@@ -333,8 +271,7 @@ bool UBallisticsComponent::IsThinMaterial(UPhysicalMaterial* PhysMaterial, FName
 	if (!PhysMaterial)
 	{
 		OutMaterialName = FName(TEXT("Default"));
-		UE_LOG(LogTemp, Warning, TEXT("IsThinMaterial() - PhysMaterial is nullptr! Treating as SOLID 'Default' material."));
-		return false; // Nullptr = treat as THIN to allow penetration
+		return false; // Nullptr = treat as SOLID (default)
 	}
 
 	// Get material name from PhysicalMaterial
@@ -343,9 +280,6 @@ bool UBallisticsComponent::IsThinMaterial(UPhysicalMaterial* PhysMaterial, FName
 	// Check if material name contains "Thin" substring
 	FString MaterialNameStr = OutMaterialName.ToString();
 	bool bIsThin = MaterialNameStr.Contains(TEXT("Thin"), ESearchCase::IgnoreCase);
-
-	UE_LOG(LogTemp, Log, TEXT("IsThinMaterial() - PhysMaterial='%s', Contains 'Thin'=%s"),
-		*MaterialNameStr, bIsThin ? TEXT("YES") : TEXT("NO"));
 
 	return bIsThin;
 }
@@ -374,9 +308,6 @@ void UBallisticsComponent::ApplyDistanceDecay(
 	// Recalculate kinetic energy after speed change
 	// Mass stays the same (no fragmentation in air)
 	KineticEnergy = (Mass / 1000.0f) * (Speed * Speed / 1000.0f);
-
-	UE_LOG(LogTemp, Log, TEXT("ApplyDistanceDecay() - Distance: %.1f m, DecayFactor: %.3f, Speed: %.1f m/s, KE: %.1f J"),
-		DistanceMeters, DecayFactor, Speed, KineticEnergy);
 }
 
 bool UBallisticsComponent::ApplyPenetrationLoss(
@@ -398,8 +329,6 @@ bool UBallisticsComponent::ApplyPenetrationLoss(
 	{
 		// Solid material detected (includes nullptr PhysMaterial)
 		// Bullet STOPS and does NOT continue to next hit
-		UE_LOG(LogTemp, Warning, TEXT("ApplyPenetrationLoss() - SOLID MATERIAL '%s' blocks penetration! Bullet STOPPED."),
-			*MaterialName.ToString());
 
 		// Apply heavy energy loss and fragmentation (for damage calculation on current hit)
 		Penetration *= (KineticEnergy * 0.5f);
@@ -424,14 +353,9 @@ bool UBallisticsComponent::ApplyPenetrationLoss(
 	// Recalculate kinetic energy after velocity/mass changes
 	KineticEnergy = (Mass / 1000.0f) * (Speed * Speed / 1000.0f);
 
-	UE_LOG(LogTemp, Log, TEXT("ApplyPenetrationLoss() - THIN MATERIAL '%s' - Bullet continues. Speed=%.1f m/s, Mass=%.2f g, Penetration=%.3f, KE=%.1f J"),
-		*MaterialName.ToString(),
-		Speed, Mass, Penetration, KineticEnergy);
-
 	// Check penetration threshold - bullet stopped due to energy loss
 	if (Penetration <= 0.002f)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("ApplyPenetrationLoss() - Bullet stopped (Penetration <= 0.002)"));
 		return false; // Bullet stopped
 	}
 

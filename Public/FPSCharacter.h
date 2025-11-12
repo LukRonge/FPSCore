@@ -81,6 +81,11 @@ protected:
 	// Called from UpdatePitch, Server_UpdatePitch, and OnRep_Pitch
 	void UpdateSpineRotations();
 
+	// Calculate network pitch from actual camera direction (inverse calculation)
+	// This ensures ViewPointProvider returns the same direction as local camera
+	// Returns pitch in degrees that should be replicated for correct weapon ballistics
+	float CalculateNetworkPitchFromCamera() const;
+
 public:
 	virtual void Tick(float DeltaTime) override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
@@ -141,6 +146,16 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, Category = "Animation")
 	float DeltaSeconds = 0.0f;
+
+	// Local pitch accumulator for spine rotations (NOT replicated)
+	// This is the raw input-driven pitch for visual spine animations
+	// The replicated Pitch variable is calculated from actual camera direction
+	UPROPERTY(BlueprintReadOnly, Category = "Animation")
+	float LocalPitchAccumulator = 0.0f;
+
+	// Debug draw camera vs network pitch direction
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
+	bool bDebugDrawPitchDirections = false;
 
 	// Current RAW movement input (normalized direction from player input)
 	// INPUT Convention: X=right, Y=forward (W key → Y=1, D key → X=1)
