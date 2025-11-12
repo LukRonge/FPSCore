@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "InputActionValue.h"
+#include "Interfaces/ViewPointProviderInterface.h"
 #include "FPSCharacter.generated.h"
 
 class UInputAction;
@@ -19,12 +20,16 @@ enum class EFPSMovementMode : uint8
 };
 
 UCLASS()
-class FPSCORE_API AFPSCharacter : public ACharacter
+class FPSCORE_API AFPSCharacter : public ACharacter, public IViewPointProviderInterface
 {
 	GENERATED_BODY()
 
 public:
 	AFPSCharacter();
+
+	// IViewPointProviderInterface implementation
+	virtual void GetShootingViewPoint_Implementation(FVector& OutLocation, FRotator& OutRotation) const override;
+	virtual float GetViewPitch_Implementation() const override;
 
 protected:
 	virtual void PostInitializeComponents() override;

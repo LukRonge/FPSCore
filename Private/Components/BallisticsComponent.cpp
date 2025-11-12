@@ -64,7 +64,8 @@ void UBallisticsComponent::Shoot(FVector Location, FVector Direction)
 
 	// Setup trace parameters
 	FCollisionQueryParams TraceParams;
-	TraceParams.bTraceComplex = false;
+	TraceParams.bTraceComplex = true; // ✅ Use complex collision to get Physical Material
+	TraceParams.bReturnPhysicalMaterial = true; // ✅ Explicitly request Physical Material
 	TraceParams.AddIgnoredActor(GetOwner()); // Ignore weapon/character owner
 	if (GetOwner()->GetOwner())
 	{
@@ -79,18 +80,6 @@ void UBallisticsComponent::Shoot(FVector Location, FVector Direction)
 		End,
 		ECC_GameTraceChannel2, // Projectile channel
 		TraceParams
-	);
-
-	// Draw debug line trace (visible for 2 seconds)
-	DrawDebugLine(
-		GetWorld(),
-		Location,
-		bHit ? HitResults[0].ImpactPoint : End,
-		bHit ? FColor::Red : FColor::Green,
-		false,
-		2.0f,
-		0,
-		2.0f // Thickness
 	);
 
 	if (!bHit || HitResults.Num() == 0)
@@ -212,6 +201,29 @@ bool UBallisticsComponent::ProcessHit(
 		HitIndex, *HitActor->GetName(), *ImpactPoint.ToString(), KineticEnergy);
 
 	// ============================================
+	// DEBUG VISUALIZATION: Impact Sphere (scaled by KE)
+	// ============================================
+
+	// Calculate sphere radius based on kinetic energy
+	// Initial KE (~3.5 J) → 30 cm, Final KE (~0.3 J) → 5 cm
+	float SphereRadius = FMath::Clamp(KineticEnergy * 10.0f, 5.0f, 30.0f);
+
+	// Color gradient based on KE
+	FColor SphereColor = KineticEnergy >= 2.0f ? FColor::Red : (KineticEnergy >= 1.0f ? FColor::Orange : FColor::Yellow);
+
+	DrawDebugSphere(
+		GetWorld(),
+		ImpactPoint,
+		SphereRadius,
+		12, // Segments
+		SphereColor,
+		false,
+		3.0f, // Duration
+		0,
+		2.0f // Thickness
+	);
+
+	// ============================================
 	// STEP 3: Broadcast Impact Event (for visual effects)
 	// ============================================
 
@@ -321,7 +333,8 @@ bool UBallisticsComponent::IsThinMaterial(UPhysicalMaterial* PhysMaterial, FName
 	if (!PhysMaterial)
 	{
 		OutMaterialName = FName(TEXT("Default"));
-		return false; // Default is solid material
+		UE_LOG(LogTemp, Warning, TEXT("IsThinMaterial() - PhysMaterial is nullptr! Treating as SOLID 'Default' material."));
+		return false; // Nullptr = treat as THIN to allow penetration
 	}
 
 	// Get material name from PhysicalMaterial
@@ -330,6 +343,9 @@ bool UBallisticsComponent::IsThinMaterial(UPhysicalMaterial* PhysMaterial, FName
 	// Check if material name contains "Thin" substring
 	FString MaterialNameStr = OutMaterialName.ToString();
 	bool bIsThin = MaterialNameStr.Contains(TEXT("Thin"), ESearchCase::IgnoreCase);
+
+	UE_LOG(LogTemp, Log, TEXT("IsThinMaterial() - PhysMaterial='%s', Contains 'Thin'=%s"),
+		*MaterialNameStr, bIsThin ? TEXT("YES") : TEXT("NO"));
 
 	return bIsThin;
 }
@@ -375,18 +391,32 @@ bool UBallisticsComponent::ApplyPenetrationLoss(
 	FName MaterialName;
 	bool bIsThin = IsThinMaterial(PhysMaterial, MaterialName);
 
-	if (bIsThin)
+	// ============================================
+	// SOLID MATERIALS: Block bullet immediately
+	// ============================================
+	if (!bIsThin)
 	{
-		// Thin materials: light penetration loss, no fragmentation
-		Penetration *= (KineticEnergy * 0.5f);
-		// Mass stays the same (no projectile deformation)
-	}
-	else
-	{
-		// Solid materials: heavy penetration loss, projectile fragments
+		// Solid material detected (includes nullptr PhysMaterial)
+		// Bullet STOPS and does NOT continue to next hit
+		UE_LOG(LogTemp, Warning, TEXT("ApplyPenetrationLoss() - SOLID MATERIAL '%s' blocks penetration! Bullet STOPPED."),
+			*MaterialName.ToString());
+
+		// Apply heavy energy loss and fragmentation (for damage calculation on current hit)
 		Penetration *= (KineticEnergy * 0.5f);
 		Mass *= 0.85f; // Projectile deformation/fragmentation
+		Speed *= DropFactor;
+		KineticEnergy = (Mass / 1000.0f) * (Speed * Speed / 1000.0f);
+
+		return false; // Bullet stopped - do NOT continue
 	}
+
+	// ============================================
+	// THIN MATERIALS: Allow penetration
+	// ============================================
+
+	// Thin materials: light penetration loss, no fragmentation
+	Penetration *= (KineticEnergy * 0.5f);
+	// Mass stays the same (no projectile deformation)
 
 	// Apply velocity drop (exponential decay)
 	Speed *= DropFactor;
@@ -394,19 +424,18 @@ bool UBallisticsComponent::ApplyPenetrationLoss(
 	// Recalculate kinetic energy after velocity/mass changes
 	KineticEnergy = (Mass / 1000.0f) * (Speed * Speed / 1000.0f);
 
-	UE_LOG(LogTemp, Log, TEXT("ApplyPenetrationLoss() - Material=%s, Thin=%s, Speed=%.1f m/s, Mass=%.2f g, Penetration=%.3f, KE=%.1f J"),
+	UE_LOG(LogTemp, Log, TEXT("ApplyPenetrationLoss() - THIN MATERIAL '%s' - Bullet continues. Speed=%.1f m/s, Mass=%.2f g, Penetration=%.3f, KE=%.1f J"),
 		*MaterialName.ToString(),
-		bIsThin ? TEXT("Yes") : TEXT("No"),
 		Speed, Mass, Penetration, KineticEnergy);
 
-	// Check penetration threshold - bullet stopped
+	// Check penetration threshold - bullet stopped due to energy loss
 	if (Penetration <= 0.002f)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("ApplyPenetrationLoss() - Bullet stopped (Penetration <= 0.002)"));
 		return false; // Bullet stopped
 	}
 
-	return true; // Bullet can continue
+	return true; // Bullet can continue through thin material
 }
 
 // ============================================

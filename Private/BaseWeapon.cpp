@@ -75,6 +75,17 @@ void ABaseWeapon::BeginPlay()
 			if (BallisticsComponent)
 			{
 				FireComponent->BallisticsComponent = BallisticsComponent;
+
+				// Initialize ballistics with magazine's caliber type
+				if (CurrentMagazine)
+				{
+					bool bSuccess = BallisticsComponent->InitAmmoType(CurrentMagazine->AmmoType);
+					if (!bSuccess)
+					{
+						UE_LOG(LogTemp, Error, TEXT("BaseWeapon::BeginPlay() - Failed to initialize ammo type for caliber: %s"),
+							*UEnum::GetValueAsString(CurrentMagazine->AmmoType));
+					}
+				}
 			}
 		}
 		else

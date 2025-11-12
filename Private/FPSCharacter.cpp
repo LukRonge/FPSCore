@@ -1609,3 +1609,32 @@ void AFPSCharacter::DropItem(AActor* Item)
 	}
 }
 
+// ============================================
+// IViewPointProviderInterface Implementation
+// ============================================
+
+void AFPSCharacter::GetShootingViewPoint_Implementation(FVector& OutLocation, FRotator& OutRotation) const
+{
+	// Get base eyes view point (Yaw from controller, Location from capsule + BaseEyeHeight)
+	GetActorEyesViewPoint(OutLocation, OutRotation);
+
+	// ✅ Override Pitch with our custom replicated value
+	// This is critical because bUseControllerRotationPitch = false
+	// Server needs replicated Pitch for accurate weapon ballistics
+	OutRotation.Pitch = Pitch;
+
+	// Optional: Use Camera location if available (more accurate than capsule + BaseEyeHeight)
+	if (Camera)
+	{
+		OutLocation = Camera->GetComponentLocation();
+	}
+
+	UE_LOG(LogTemp, Verbose, TEXT("AFPSCharacter::GetShootingViewPoint() - Location: %s, Rotation: %s (Pitch: %.2f)"),
+		*OutLocation.ToString(), *OutRotation.ToString(), Pitch);
+}
+
+float AFPSCharacter::GetViewPitch_Implementation() const
+{
+	return Pitch;
+}
+

@@ -6,6 +6,7 @@
 #include "BaseWeapon.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Interfaces/ViewPointProviderInterface.h"
 
 UFireComponent::UFireComponent()
 {
@@ -143,7 +144,24 @@ void UFireComponent::Fire()
 	// Get view center point (camera/eyes location) and direction
 	FVector ViewLocation;
 	FRotator ViewRotation;
-	WeaponOwner->GetActorEyesViewPoint(ViewLocation, ViewRotation);
+
+	// ✅ Component-based view point retrieval
+	// Check if owner implements IViewPointProvider interface (e.g., AFPSCharacter)
+	if (WeaponOwner->Implements<UViewPointProviderInterface>())
+	{
+		// ✅ Use interface to get ACCURATE view point (includes custom replicated Pitch)
+		IViewPointProviderInterface::Execute_GetShootingViewPoint(WeaponOwner, ViewLocation, ViewRotation);
+
+		UE_LOG(LogTemp, Log, TEXT("FireComponent::Fire() - Using IViewPointProvider interface for accurate view point"));
+	}
+	else
+	{
+		// ❌ Fallback: Use default GetActorEyesViewPoint() (may have incorrect Pitch)
+		WeaponOwner->GetActorEyesViewPoint(ViewLocation, ViewRotation);
+
+		UE_LOG(LogTemp, Warning, TEXT("FireComponent::Fire() - Owner '%s' does not implement IViewPointProvider! Pitch may be incorrect."),
+			*WeaponOwner->GetName());
+	}
 
 	// Convert rotation to direction vector
 	FVector ViewDirection = ViewRotation.Vector();
