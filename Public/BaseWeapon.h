@@ -272,10 +272,58 @@ public:
 	virtual bool IsUsing_Implementation() const override;
 
 	// ============================================
-	// IMPACT EFFECTS (Multiplayer)
+	// FIRE COMPONENT CALLBACKS (Server authority)
 	// ============================================
 
 protected:
+	/**
+	 * Callback for FireComponent to consume ammo (SERVER ONLY)
+	 * Called when shot is fired, removes one round from magazine
+	 * Bound to: FireComponent->OnAmmoConsume
+	 */
+	UFUNCTION()
+	void ConsumeAmmoFromMagazine();
+
+	/**
+	 * Callback for FireComponent to check if weapon can fire (SERVER ONLY)
+	 * Called before allowing shot, checks all fire conditions:
+	 * - Magazine exists and has ammo
+	 * - Weapon is not reloading
+	 * Bound to: FireComponent->OnCanFireAmmoCheck
+	 * @return True if can fire, false otherwise
+	 */
+	UFUNCTION()
+	bool CheckMagazineAmmo() const;
+
+	// ============================================
+	// MUZZLE EFFECTS (Multiplayer)
+	// ============================================
+
+	/**
+	 * Callback for shot fired events (SERVER ONLY)
+	 * Called when BallisticsComponent fires a shot
+	 * Triggers Multicast RPC to spawn muzzle flash on all clients
+	 */
+	UFUNCTION()
+	void HandleShotFired(
+		FVector_NetQuantize MuzzleLocation,
+		FVector_NetQuantizeNormal Direction
+	);
+
+	/**
+	 * Multicast RPC for spawning muzzle flash on all clients
+	 * Spawns Niagara muzzle flash, plays sound, animates weapon
+	 */
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_PlayMuzzleFlash(
+		FVector_NetQuantize MuzzleLocation,
+		FVector_NetQuantizeNormal Direction
+	);
+
+	// ============================================
+	// IMPACT EFFECTS (Multiplayer)
+	// ============================================
+
 	/**
 	 * Callback for ballistics impact events (SERVER ONLY)
 	 * Called when BallisticsComponent detects impact

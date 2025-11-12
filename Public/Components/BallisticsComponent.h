@@ -12,6 +12,20 @@ class ABaseMagazine;
 class UNiagaraSystem;
 
 /**
+ * Delegate for shot fired event
+ * Broadcasted when shot is fired from weapon (SERVER ONLY)
+ * Used by weapon to spawn muzzle flash, play sound, animate recoil
+ *
+ * @param MuzzleLocation - Location where shot originated (quantized for bandwidth savings)
+ * @param Direction - Direction of shot (normalized, quantized for bandwidth savings)
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FOnShotFired,
+	FVector_NetQuantize, MuzzleLocation,
+	FVector_NetQuantizeNormal, Direction
+);
+
+/**
  * Delegate for impact detection
  * Broadcasted when projectile hits a surface (SERVER ONLY)
  * Used by weapon to spawn visual effects via Multicast RPC
@@ -83,6 +97,18 @@ public:
 	// ============================================
 	// EVENTS
 	// ============================================
+
+	/**
+	 * Event broadcasted when shot is fired (SERVER ONLY)
+	 * Weapon should bind to this to spawn muzzle flash via Multicast RPC
+	 *
+	 * Usage in BaseWeapon:
+	 * - BeginPlay(): BallisticsComponent->OnShotFired.AddDynamic(this, &ABaseWeapon::HandleShotFired)
+	 * - HandleShotFired(): Multicast_PlayMuzzleFlash(Location, Direction)
+	 * - Multicast_PlayMuzzleFlash_Implementation(): UNiagaraFunctionLibrary::SpawnSystemAtLocation()
+	 */
+	UPROPERTY(BlueprintAssignable, Category = "Ballistics|Events")
+	FOnShotFired OnShotFired;
 
 	/**
 	 * Event broadcasted when impact is detected (SERVER ONLY)
@@ -237,62 +263,10 @@ public:
 	float CalculateKineticEnergy() const;
 
 	// ============================================
-	// CALIBER DATA GETTERS (From CaliberDataAsset)
+	// CALIBER DATA ACCESS
 	// ============================================
-
-	/**
-	 * Get projectile mass in grams
-	 */
-	UFUNCTION(BlueprintPure, Category = "Ballistics")
-	float GetProjectileMass() const;
-
-	/**
-	 * Get muzzle velocity in m/s
-	 */
-	UFUNCTION(BlueprintPure, Category = "Ballistics")
-	float GetMuzzleVelocity() const;
-
-	/**
-	 * Get drag coefficient (0.0 - 1.0)
-	 */
-	UFUNCTION(BlueprintPure, Category = "Ballistics")
-	float GetDragCoefficient() const;
-
-	/**
-	 * Get penetration power (0.0 - 1.0)
-	 */
-	UFUNCTION(BlueprintPure, Category = "Ballistics")
-	float GetPenetrationPower() const;
-
-	/**
-	 * Get base damage per projectile
-	 */
-	UFUNCTION(BlueprintPure, Category = "Ballistics")
-	float GetDamage() const;
-
-	/**
-	 * Get damage radius for explosive rounds (0 = no splash)
-	 */
-	UFUNCTION(BlueprintPure, Category = "Ballistics")
-	float GetDamageRadius() const;
-
-	/**
-	 * Get caliber type enum
-	 */
-	UFUNCTION(BlueprintPure, Category = "Ballistics")
-	EAmmoCaliberType GetCaliberType() const;
-
-	/**
-	 * Get ammo display name
-	 */
-	UFUNCTION(BlueprintPure, Category = "Ballistics")
-	FText GetAmmoName() const;
-
-	/**
-	 * Get ammo identifier
-	 */
-	UFUNCTION(BlueprintPure, Category = "Ballistics")
-	FName GetAmmoID() const;
+	// NOTE: Use CurrentAmmoType directly to access caliber properties
+	// All AmmoTypeDataAsset properties are BlueprintReadOnly
 
 	/**
 	 * Get current ammo type data asset

@@ -70,11 +70,18 @@ void ABaseWeapon::BeginPlay()
 
 		if (FireComponent)
 		{
-			FireComponent->CurrentMagazine = CurrentMagazine;
+			// ✅ REFACTORED: Bind delegate callbacks (zero coupling!)
+			FireComponent->OnAmmoConsume.BindUObject(this, &ABaseWeapon::ConsumeAmmoFromMagazine);
+			FireComponent->OnCanFireAmmoCheck.BindUObject(this, &ABaseWeapon::CheckMagazineAmmo);
 
 			if (BallisticsComponent)
 			{
+				// Set sibling component reference
 				FireComponent->BallisticsComponent = BallisticsComponent;
+
+				// ✅ CRITICAL FIX: Bind ballistics events
+				BallisticsComponent->OnShotFired.AddDynamic(this, &ABaseWeapon::HandleShotFired);
+				BallisticsComponent->OnImpactDetected.AddDynamic(this, &ABaseWeapon::HandleImpactDetected);
 
 				// Initialize ballistics with magazine's caliber type
 				if (CurrentMagazine)
@@ -86,6 +93,8 @@ void ABaseWeapon::BeginPlay()
 							*UEnum::GetValueAsString(CurrentMagazine->AmmoType));
 					}
 				}
+
+				UE_LOG(LogTemp, Log, TEXT("BaseWeapon::BeginPlay() - BallisticsComponent initialized and events bound"));
 			}
 		}
 		else
@@ -312,6 +321,147 @@ TSubclassOf<UAnimInstance> ABaseWeapon::GetAnimLayer_Implementation() const
 }
 
 // ============================================
+// FIRE COMPONENT CALLBACKS (Server authority)
+// ============================================
+
+void ABaseWeapon::ConsumeAmmoFromMagazine()
+{
+	// SERVER ONLY
+	if (!HasAuthority())
+	{
+		UE_LOG(LogTemp, Error, TEXT("BaseWeapon::ConsumeAmmoFromMagazine() - Called on CLIENT! Should only run on server."));
+		return;
+	}
+
+	if (CurrentMagazine)
+	{
+		CurrentMagazine->RemoveAmmo();
+
+		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::ConsumeAmmoFromMagazine() - Ammo: %d/%d"),
+			CurrentMagazine->CurrentAmmo, CurrentMagazine->MaxCapacity);
+
+		// TODO: Trigger UI update event
+		// OnAmmoChanged.Broadcast(CurrentMagazine->CurrentAmmo, CurrentMagazine->MaxCapacity);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::ConsumeAmmoFromMagazine() - CurrentMagazine is null!"));
+	}
+}
+
+bool ABaseWeapon::CheckMagazineAmmo() const
+{
+	// ✅ Check all fire conditions (ammo + reload state)
+
+	// 1. Check if weapon is reloading
+	if (IsReload)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::CheckMagazineAmmo() - Weapon is reloading"));
+		return false;
+	}
+
+	// 2. Check if magazine exists and has ammo
+	if (!CurrentMagazine || CurrentMagazine->CurrentAmmo <= 0)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::CheckMagazineAmmo() - No ammo available"));
+		return false;
+	}
+
+	return true;
+}
+
+// ============================================
+// MUZZLE EFFECTS (Multiplayer)
+// ============================================
+
+void ABaseWeapon::HandleShotFired(
+	FVector_NetQuantize MuzzleLocation,
+	FVector_NetQuantizeNormal Direction)
+{
+	// SERVER ONLY
+	if (HasAuthority())
+	{
+		// Replicate to all clients via Multicast RPC
+		Multicast_PlayMuzzleFlash(MuzzleLocation, Direction);
+	}
+}
+
+void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
+	FVector_NetQuantize MuzzleLocation,
+	FVector_NetQuantizeNormal Direction)
+{
+	// Runs on SERVER and ALL CLIENTS
+
+	// 1. Spawn muzzle flash VFX attached to weapon barrel bone
+	if (MuzzleFlashNiagara)
+	{
+		// Determine which mesh to use based on ownership
+		USkeletalMeshComponent* MuzzleMesh = nullptr;
+
+		// Check if local player is owner
+		APawn* OwnerPawn = Cast<APawn>(GetOwner());
+		if (OwnerPawn && OwnerPawn->IsLocallyControlled())
+		{
+			MuzzleMesh = FPSMesh; // Owner sees FPS mesh
+			UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Using FPS mesh (owner)"));
+		}
+		else
+		{
+			MuzzleMesh = TPSMesh; // Others see TPS mesh
+			UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Using TPS mesh (spectator)"));
+		}
+
+		if (MuzzleMesh)
+		{
+			// ✅ ATTACH to "barrel" bone (not spawn at location!)
+			UNiagaraComponent* MuzzleFlashComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
+				MuzzleFlashNiagara,
+				MuzzleMesh,
+				FName("barrel"),           // Attach to barrel bone
+				FVector::ZeroVector,       // No offset
+				FRotator::ZeroRotator,     // No rotation offset
+				EAttachLocation::SnapToTarget, // Snap to bone transform
+				true,                      // Auto destroy
+				true,                      // Auto activate
+				ENCPoolMethod::None
+			);
+
+			if (MuzzleFlashComponent)
+			{
+				UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Muzzle flash attached to barrel bone"));
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Failed to spawn muzzle flash! Check MuzzleFlashNiagara asset."));
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - MuzzleMesh is null! Weapon not properly initialized."));
+		}
+	}
+
+	// 2. Play shoot sound (TODO: Add USoundCue property)
+	// if (ShootSound)
+	// {
+	//     UGameplayStatics::PlaySoundAtLocation(GetWorld(), ShootSound, MuzzleLocation);
+	// }
+
+	// 3. Play shoot animation (TODO: Implement)
+	// if (ShootMontage && GetOwner())
+	// {
+	//     APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	//     UAnimInstance* AnimInstance = OwnerPawn->GetMesh()->GetAnimInstance();
+	//     if (AnimInstance)
+	//     {
+	//         AnimInstance->Montage_Play(ShootMontage);
+	//     }
+	// }
+
+	// 4. Shell ejection (TODO: Implement)
+}
+
+// ============================================
 // IMPACT EFFECTS (Multiplayer)
 // ============================================
 
@@ -340,16 +490,22 @@ void ABaseWeapon::Multicast_SpawnImpactEffect_Implementation(
 	if (VFX)
 	{
 		// Spawn Niagara system at impact point
-		// Normal.Rotation() creates rotation from surface normal
+		// ✅ Create rotation from surface normal (Z-axis aligned with normal)
+		// This ensures effect spawns perpendicular to surface (correct for decals, dust, sparks)
+		FRotator ImpactRotation = FRotationMatrix::MakeFromZ(Normal).Rotator();
+
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 			GetWorld(),
 			VFX,
 			Location,
-			Normal.Rotation(),
+			ImpactRotation,
 			FVector(1.0f),  // Scale
 			true,           // Auto destroy
 			true,           // Auto activate
 			ENCPoolMethod::None
 		);
+
+		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_SpawnImpactEffect() - Impact VFX spawned at %s, Normal: %s, Rotation: %s"),
+			*Location.ToString(), *Normal.ToString(), *ImpactRotation.ToString());
 	}
 }

@@ -2,8 +2,6 @@
 
 #include "Components/FireComponent.h"
 #include "Components/BallisticsComponent.h"
-#include "BaseMagazine.h"
-#include "BaseWeapon.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Interfaces/ViewPointProviderInterface.h"
@@ -42,25 +40,27 @@ void UFireComponent::TriggerReleased()
 
 bool UFireComponent::CanFire() const
 {
-	// Check magazine has ammo
-	if (!CurrentMagazine || CurrentMagazine->CurrentAmmo <= 0)
+	// ✅ Check all fire conditions via delegate callback (zero coupling!)
+	// BaseWeapon checks: ammo availability, reload state, etc.
+	if (OnCanFireAmmoCheck.IsBound())
 	{
+		if (!OnCanFireAmmoCheck.Execute())
+		{
+			return false;
+		}
+	}
+	else
+	{
+		// Delegate not bound - weapon not properly initialized
+		UE_LOG(LogTemp, Warning, TEXT("FireComponent::CanFire() - OnCanFireAmmoCheck delegate not bound!"));
 		return false;
 	}
 
 	// Check ballistics component is valid
 	if (!BallisticsComponent)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("FireComponent::CanFire() - BallisticsComponent is null!"));
 		return false;
-	}
-
-	// Check weapon is not reloading
-	if (ABaseWeapon* Weapon = Cast<ABaseWeapon>(GetOwner()))
-	{
-		if (Weapon->IsReload)
-		{
-			return false;
-		}
 	}
 
 	return true;
@@ -177,31 +177,21 @@ void UFireComponent::Fire()
 		UE_LOG(LogTemp, Error, TEXT("FireComponent::Fire() - BallisticsComponent is null!"));
 	}
 
-	//// 2. Get muzzle location and direction
-	//FVector CameraLoc = FVector::Zero();
-	//FRotator CameraRot = FRotator::Zero();
-
-
-	//Owner->GetActorEyesViewPoint(CameraLoc, CameraRot);
-
-	//// 3. Apply spread
-	//FVector Direction = ApplySpread(MuzzleDirection);
-
-	//// 4. Call BallisticsComponent->Shoot()
-	//if (BallisticsComponent)
-	//{
-	//	BallisticsComponent->Shoot(CameraLoc, Direction);
-	//}
-
 	// 5. Apply recoil
 	ApplyRecoil();
 }
 
 void UFireComponent::ConsumeAmmo()
 {
-	if (CurrentMagazine)
+	// Consume ammo via delegate callback (zero coupling!)
+	// BaseWeapon handles: CurrentMagazine->RemoveAmmo()
+	if (OnAmmoConsume.IsBound())
 	{
-		CurrentMagazine->RemoveAmmo();
+		OnAmmoConsume.Execute();
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FireComponent::ConsumeAmmo() - OnAmmoConsume delegate not bound!"));
 	}
 }
 
