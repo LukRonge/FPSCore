@@ -1594,6 +1594,10 @@ void AFPSCharacter::DropItem(AActor* Item)
 		Item->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 		Item->SetActorHiddenInGame(false);
 
+		// 3. Re-enable actor-level collision (was disabled in PickupItem)
+		// This is CRITICAL for interaction trace to detect dropped items
+		Item->SetActorEnableCollision(true);
+
 		FTransform DropTransform;
 		FVector DropImpulse;
 		GetDropTransformAndImpulse(Item, DropTransform, DropImpulse);
