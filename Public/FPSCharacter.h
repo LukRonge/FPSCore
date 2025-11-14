@@ -6,6 +6,7 @@
 #include "GameFramework/Character.h"
 #include "InputActionValue.h"
 #include "Interfaces/ViewPointProviderInterface.h"
+#include "Interfaces/ItemCollectorInterface.h"
 #include "FPSCharacter.generated.h"
 
 class UInputAction;
@@ -20,7 +21,7 @@ enum class EFPSMovementMode : uint8
 };
 
 UCLASS()
-class FPSCORE_API AFPSCharacter : public ACharacter, public IViewPointProviderInterface
+class FPSCORE_API AFPSCharacter : public ACharacter, public IViewPointProviderInterface, public IItemCollectorInterface
 {
 	GENERATED_BODY()
 
@@ -30,6 +31,10 @@ public:
 	// IViewPointProviderInterface implementation
 	virtual void GetShootingViewPoint_Implementation(FVector& OutLocation, FRotator& OutRotation) const override;
 	virtual float GetViewPitch_Implementation() const override;
+
+	// IItemCollectorInterface implementation
+	virtual void Pickup_Implementation(AActor* Item) override;
+	virtual void Drop_Implementation(AActor* Item) override;
 
 protected:
 	virtual void PostInitializeComponents() override;
@@ -99,7 +104,7 @@ public:
 	// Hands setup - updates first-person arms position based on active item
 	// Only runs on locally controlled client (Arms mesh is OnlyOwnerSee)
 	UFUNCTION(BlueprintCallable, Category = "Animation")
-	void SetupHandsLocation();
+	void SetupHandsLocation(AActor* Item = nullptr);
 
 	// Link default animation layer to all character meshes
 	UFUNCTION(BlueprintCallable, Category = "Animation")
@@ -115,25 +120,6 @@ public:
 
 	UFUNCTION()
 	void OnRep_ActiveItem(AActor* OldActiveItem);
-
-	// Setup active item locally (mesh attachment, animations, HUD)
-	// Called from:
-	// - EquipItem() on SERVER
-	// - OnRep_ActiveItem() on CLIENTS
-	// This follows MULTIPLAYER_GUIDELINES.md OnRep pattern
-	void SetupActiveItemLocal();
-
-	// Detach item meshes from character and re-attach to item root
-	// LOCAL operation - called on both server and clients
-	// Follows MULTIPLAYER_GUIDELINES.md OnRep pattern
-	void DetachItemMeshes(AActor* Item);
-
-	// Calculate drop transform and impulse for item
-	// Called from DropItem() to determine where item spawns and how much force to apply
-	// Can be overridden in Blueprint for custom drop behavior
-	UFUNCTION(BlueprintNativeEvent, Category = "Inventory")
-	void GetDropTransformAndImpulse(AActor* Item, FTransform& OutTransform, FVector& OutImpulse);
-	virtual void GetDropTransformAndImpulse_Implementation(AActor* Item, FTransform& OutTransform, FVector& OutImpulse);
 
 	UFUNCTION()
 	void OnRep_IsDeath();
@@ -194,48 +180,49 @@ public:
 	// Core pickup logic (SERVER ONLY - called by Server RPC)
 	void PickupItem(AActor* Item);
 
-	// Equip item from inventory into hands
-	UFUNCTION(BlueprintCallable, Category = "Inventory")
-	void EquipItem(AActor* Item);
-
-	// Unequip current item (holster)
-	UFUNCTION(BlueprintCallable, Category = "Inventory")
-	void UnequipCurrentItem();
-
-	// Switch to item at inventory index (Server RPC)
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Inventory")
-	void Server_SwitchToItemAtIndex(int32 Index);
-
-	// Switch to item at inventory index (local execution)
-	void SwitchToItemAtIndex(int32 Index);
-
-	// Drop item from inventory back to world
+	// Server RPC to drop item from inventory
 	UFUNCTION(Server, Reliable)
 	void Server_DropItem(AActor* Item);
 
+	// Core drop logic (SERVER ONLY - called by Server RPC)
 	void DropItem(AActor* Item);
 
+	// Calculate drop transform and physics impulse for dropped items
+	// Used by DropItem() to spawn item in front of character with throw arc
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Inventory")
+	void GetDropTransformAndImpulse(AActor* Item, FTransform& OutTransform, FVector& OutImpulse);
+
 	// ============================================
-	// DROP PARAMETERS (Blueprint Configurable)
+	// EQUIP/UNEQUIP SYSTEM
 	// ============================================
 
-	// How far forward (in cm) from character to drop items
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
-	float DropForwardDistance = 100.0f;
+	// Equip item from inventory (SERVER ONLY)
+	void EquipItem(AActor* Item);
 
-	// How high (in cm) from character feet to drop items
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
-	float DropUpwardOffset = 50.0f;
+	// Unequip item (SERVER ONLY)
+	void UnEquipItem(AActor* Item);
 
-	// Upward component of throw direction (0.0 = horizontal, 1.0 = 45° upward arc)
-	// Higher values create more arcing throws
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-	float DropUpwardArc = 0.5f;
+private:
+	// Setup active item local visual state (LOCAL operation - runs on ALL machines)
+	void SetupActiveItemLocal();
 
-	// Default impulse strength for dropped items (in Newtons)
-	// Item can override this via IPickupableInterface::OnDropped()
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
-	float DefaultDropImpulseStrength = 200.0f;
+public:
+
+	// ============================================
+	// INVENTORY EVENT CALLBACKS
+	// ============================================
+
+	// Called when item is added to inventory (bound to InventoryComp->OnItemAdded)
+	UFUNCTION()
+	void OnInventoryItemAdded(AActor* Item);
+
+	// Called when item is removed from inventory (bound to InventoryComp->OnItemRemoved)
+	UFUNCTION()
+	void OnInventoryItemRemoved(AActor* Item);
+
+	// Called when inventory is cleared (bound to InventoryComp->OnInventoryCleared)
+	UFUNCTION()
+	void OnInventoryCleared();
 
 	// Hands offset (LOCAL ONLY - not replicated, used for first-person arms positioning)
 	// Only relevant for locally controlled player (Arms mesh is OnlyOwnerSee)
@@ -328,6 +315,34 @@ public:
 
 	// ============================================
 	// INTERACTION SYSTEM
+	// ============================================
+
+	// ============================================
+	// DROP PARAMETERS
+	// ============================================
+
+	// Distance in front of character to drop item (in cm)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
+	float DropForwardDistance = 100.0f;
+
+	// Upward offset from character origin when dropping (in cm)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
+	float DropUpwardOffset = 50.0f;
+
+	// Upward arc component for throw direction (0 = horizontal, 1 = 45° upward)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
+	float DropUpwardArc = 0.5f;
+
+	// Base impulse strength for thrown items (in physics units)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
+	float DefaultDropImpulseStrength = 50000.0f;
+
+	// Multiplier for character velocity inheritance (0 = no inheritance, 1 = full inheritance)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
+	float VelocityInheritanceMultiplier = 1.0f;
+
+	// ============================================
+	// INTERACTION PARAMETERS
 	// ============================================
 
 	// Interaction trace distance from camera (in cm)

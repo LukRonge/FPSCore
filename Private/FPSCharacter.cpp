@@ -11,6 +11,7 @@
 #include "Interfaces/HoldableInterface.h"
 #include "Interfaces/InteractableInterface.h"
 #include "Interfaces/PickupableInterface.h"
+#include "Interfaces/ItemCollectorInterface.h"
 #include "Interfaces/UsableInterface.h"
 #include "Interfaces/PlayerHUDInterface.h"
 #include "Core/FPSGameplayTags.h"
@@ -85,6 +86,7 @@ AFPSCharacter::AFPSCharacter()
 
 	// Inventory component
 	InventoryComp = CreateDefaultSubobject<UInventoryComponent>(TEXT("InventoryComponent"));
+
 }
 
 void AFPSCharacter::PostInitializeComponents()
@@ -171,6 +173,16 @@ void AFPSCharacter::BeginPlay()
 
 	UpdateMovementSpeed(CurrentMovementMode);
 	LinkDefaultLayer();
+
+	// Bind inventory event callbacks (SERVER ONLY)
+	// Inventory events should only be processed on authority
+	// Clients receive updates via replication
+	if (HasAuthority() && InventoryComp)
+	{
+		InventoryComp->OnItemAdded.AddDynamic(this, &AFPSCharacter::OnInventoryItemAdded);
+		InventoryComp->OnItemRemoved.AddDynamic(this, &AFPSCharacter::OnInventoryItemRemoved);
+		InventoryComp->OnInventoryCleared.AddDynamic(this, &AFPSCharacter::OnInventoryCleared);
+	}
 }
 
 void AFPSCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -300,7 +312,7 @@ void AFPSCharacter::Client_OnPossessed_Implementation()
 
 	// Setup hands location (LOCAL operation for locally controlled player)
 	// Arms mesh is OnlyOwnerSee, so this only affects local player
-	SetupHandsLocation();
+	SetupHandsLocation(ActiveItem);
 
 	// NOTE: LinkDefaultLayer() is already called in BeginPlay() on ALL machines
 	// No need to call it again here (would be redundant)
@@ -384,22 +396,24 @@ float AFPSCharacter::CalculateNetworkPitchFromCamera() const
 	const float PitchRadians = FMath::Atan2(LocalForward.Z, HorizontalLength);
 	const float PitchDegrees = FMath::RadiansToDegrees(PitchRadians);
 
-	// Clamp to same range as input pitch (±45°)
-	float ClampedPitch = FMath::Clamp(PitchDegrees, -45.0f, 45.0f);
-
-	return ClampedPitch;
+	// CRITICAL FIX: Do NOT clamp - spine chain amplifies rotation beyond ±45°
+	// Server needs ACTUAL camera pitch for accurate weapon ballistics line traces
+	// LocalPitchAccumulator is clamped to ±45° (input), but spine rotations amplify this
+	// Example: LocalPitchAccumulator = 45° → spine rotations (40%+50%+60%+20%) → camera pitch ≈ 50°
+	// Previous clamp to 45° caused: FPS view at 50° but server line trace only at 45° → mismatch
+	return PitchDegrees;
 }
 
-void AFPSCharacter::SetupHandsLocation()
+void AFPSCharacter::SetupHandsLocation(AActor* Item)
 {
 	if (!IsLocallyControlled())
 	{
 		return;
 	}
 
-	if (ActiveItem && ActiveItem->Implements<UHoldableInterface>())
+	if (Item && Item->Implements<UHoldableInterface>())
 	{
-		HandsOffset = IHoldableInterface::Execute_GetHandsOffset(ActiveItem);
+		HandsOffset = IHoldableInterface::Execute_GetHandsOffset(Item);
 	}
 	else
 	{
@@ -563,18 +577,11 @@ void AFPSCharacter::InteractPressed()
 		// Re-check CanInteract in case state changed between frames
 		if (Interactable->Execute_CanInteract(LastInteractableActor, FirstVerb, Ctx))
 		{
-			// Execute the interaction
+			// INTERFACE-DRIVEN INTERACTION
+			// Delegate to item's Interact() - item determines how to be interacted with
+			// Item will call back to Character via IItemCollectorInterface if needed
+			// Clean separation: items are active, interfaces provide contracts
 			Interactable->Execute_Interact(LastInteractableActor, FirstVerb, Ctx);
-
-			// Debug feedback
-			FText InteractionText = Interactable->Execute_GetInteractionText(LastInteractableActor, FirstVerb, Ctx);
-			UE_LOG(LogTemp, Warning, TEXT("✓ Interacted: %s"), *InteractionText.ToString());
-
-			if (GEngine)
-			{
-				GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow,
-					FString::Printf(TEXT("✓ Interacted: %s"), *InteractionText.ToString()));
-			}
 		}
 	}
 }
@@ -598,14 +605,17 @@ void AFPSCharacter::DropPressed()
 		return;
 	}
 
-	// Call Server RPC to drop the cached item
-	Server_DropItem(ActiveItem);
+	// Cache ActiveItem reference (safe from replication race)
+	AActor* ItemToDrop = ActiveItem;
 
-	// Debug feedback using cached reference (safe from replication race)
-	if (GEngine && ActiveItem)
+	// Call Server RPC to drop item
+	Server_DropItem(ItemToDrop);
+
+	// Debug feedback
+	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow,
-			FString::Printf(TEXT("✓ Dropping item: %s"), *ActiveItem->GetName()));
+			FString::Printf(TEXT("✓ Dropping item: %s"), *ItemToDrop->GetName()));
 	}
 }
 
@@ -689,419 +699,34 @@ void AFPSCharacter::OnRep_Pitch()
 	// Locally controlled client already updates spine via UpdatePitch()
 	if (!IsLocallyControlled())
 	{
-		// Remote clients use replicated Pitch for third-person spine rotations
-		LocalPitchAccumulator = Pitch;
+		// PROXY AIMOFFSET COMPENSATION:
+		// Replicated Pitch is now ACTUAL camera pitch (after spine chain amplification)
+		// But AimOffset in AnimBP needs the original input-driven pitch range (±45°)
+		// Apply inverse compensation to approximate LocalPitchAccumulator from camera pitch
+		//
+		// Spine chain calculation: spine_03(40%) + spine_04(50%) + spine_05(60%) + neck_01(20%)
+		// These are RELATIVE rotations, so they accumulate: ~170% amplification (empirical)
+		// Inverse: camera_pitch / 1.7 ≈ LocalPitchAccumulator
+		//
+		// NOTE: Tune this multiplier empirically by comparing local vs proxy AimOffset max range
+		// Goal: Proxy reaches max AimOffset (6) at same visual angle as local client
+		const float ProxyAimOffsetCompensation = 0.588f; // 1 / 1.7 ≈ 0.588
+
+		LocalPitchAccumulator = Pitch * ProxyAimOffsetCompensation;
+		LocalPitchAccumulator = FMath::Clamp(LocalPitchAccumulator, -45.0f, 45.0f);
+
 		UpdateSpineRotations();
 	}
 }
 
 void AFPSCharacter::OnRep_ActiveItem(AActor* OldActiveItem)
 {
-	// ============================================
 	// OnRep runs on CLIENTS when ActiveItem replicates from server
-	// Follows MULTIPLAYER_GUIDELINES.md OnRep pattern:
-	// "Server and client must execute SAME local logic"
-	// ============================================
-
-	FString MachineRole = HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT");
-	UE_LOG(LogTemp, Warning, TEXT("[%s] OnRep_ActiveItem() - Old: %s | New: %s"),
-		*MachineRole,
-		OldActiveItem ? *OldActiveItem->GetName() : TEXT("NULL"),
-		ActiveItem ? *ActiveItem->GetName() : TEXT("NULL"));
-
-	// 1. CLEANUP old item (if transitioning from equipped item)
-	// Detach meshes from character and re-attach to item root
-	// This is LOCAL operation - same as server does in UnequipCurrentItem()
-	if (OldActiveItem)
-	{
-		DetachItemMeshes(OldActiveItem);
-	}
-
-	// 2. SETUP new item (or restore defaults if nullptr)
-	// Execute LOCAL setup on clients (server already executed it in EquipItem/UnequipCurrentItem)
-	SetupActiveItemLocal();
+	// Follows OnRep pattern: Server and client execute SAME local logic
+	SetupHandsLocation(ActiveItem);
 }
 
-void AFPSCharacter::DetachItemMeshes(AActor* Item)
-{
-	// ============================================
-	// LOCAL OPERATION - runs on ALL machines
-	// Called from:
-	// - UnequipCurrentItem() on SERVER
-	// - OnRep_ActiveItem() on CLIENTS
-	// Follows MULTIPLAYER_GUIDELINES.md OnRep pattern
-	//
-	// This is INVERTED EQUIP:
-	// - Equip: Disable physics [LOCAL], Attach to character
-	// - Drop: Re-attach to item root, Enable physics [LOCAL]
-	// ============================================
 
-	if (!Item || !Item->Implements<UHoldableInterface>())
-	{
-		return;
-	}
-
-	FString MachineRole = HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT");
-
-	UMeshComponent* FPSMeshComp = IHoldableInterface::Execute_GetFPSMeshComponent(Item);
-	UMeshComponent* TPSMeshComp = IHoldableInterface::Execute_GetTPSMeshComponent(Item);
-	USceneComponent* ItemRoot = Item->GetRootComponent();
-
-	if (!ItemRoot)
-	{
-		UE_LOG(LogTemp, Error, TEXT("[%s] DetachItemMeshes() - Item has no root component!"), *MachineRole);
-		return;
-	}
-
-	// ============================================
-	// RE-ATTACH MESHES TO ITEM ROOT
-	// ============================================
-
-	// Re-attach FPS mesh to item root (restore default item structure)
-	if (FPSMeshComp)
-	{
-		FPSMeshComp->AttachToComponent(ItemRoot, FAttachmentTransformRules::SnapToTargetIncludingScale);
-
-		// RESET TRANSFORM AFTER ATTACH (not before!)
-		// This is LOCAL operation that runs on ALL machines (Server + Clients)
-		// Follows MULTIPLAYER_GUIDELINES.md: Visual operations are LOCAL
-		FPSMeshComp->SetRelativeTransform(FTransform::Identity);
-
-		UE_LOG(LogTemp, Log, TEXT("[%s] ✓ Re-attached FPS mesh to item root + reset transform: %s"), *MachineRole, *Item->GetName());
-	}
-
-	// Re-attach TPS mesh to item root (restore default item structure)
-	if (TPSMeshComp)
-	{
-		TPSMeshComp->AttachToComponent(ItemRoot, FAttachmentTransformRules::SnapToTargetIncludingScale);
-
-		// RESET TRANSFORM AFTER ATTACH (not before!)
-		// This is LOCAL operation that runs on ALL machines (Server + Clients)
-		// Follows MULTIPLAYER_GUIDELINES.md: Visual operations are LOCAL
-		TPSMeshComp->SetRelativeTransform(FTransform::Identity);
-
-		UE_LOG(LogTemp, Log, TEXT("[%s] ✓ Re-attached TPS mesh to item root + reset transform: %s"), *MachineRole, *Item->GetName());
-	}
-
-	// ============================================
-	// PHYSICS SETUP (INVERTED EQUIP - LOCAL operation)
-	// CRITICAL: Must run on ALL machines (Server + Clients)
-	// This ensures other players see physics on dropped items
-	// ============================================
-
-	// FPS mesh - ensure physics is ALWAYS disabled (FPS mesh NEVER has physics)
-	if (FPSMeshComp && FPSMeshComp->IsA<UPrimitiveComponent>())
-	{
-		UPrimitiveComponent* FPSPrim = Cast<UPrimitiveComponent>(FPSMeshComp);
-		if (FPSPrim)
-		{
-			FPSPrim->SetSimulatePhysics(false);
-			FPSPrim->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-			UE_LOG(LogTemp, Log, TEXT("[%s] ✓ FPS mesh physics disabled (always): %s"),
-				*MachineRole, *Item->GetName());
-		}
-	}
-
-	// TPS mesh - enable physics for drop (inverse of equip)
-	// CRITICAL: Collision MUST be enabled BEFORE SimulatePhysics!
-	// CRITICAL: On SERVER, skip physics setup here - DropItem() handles it after DetachFromActor()
-	//           This prevents warning: "DetachFromActor resets collision but leaves physics ON"
-
-	if (TPSMeshComp && TPSMeshComp->IsA<UPrimitiveComponent>())
-	{
-		UPrimitiveComponent* TPSPrim = Cast<UPrimitiveComponent>(TPSMeshComp);
-		if (TPSPrim)
-		{
-			// ONLY enable physics on CLIENTS (server handles it in DropItem after DetachFromActor)
-			if (!HasAuthority())
-			{
-				// On replicated components, component-level collision settings cannot be changed by clients
-				// Use BodyInstance directly which works correctly
-				if (USkeletalMeshComponent* SkelMesh = Cast<USkeletalMeshComponent>(TPSMeshComp))
-				{
-					// Disable replication temporarily to allow changes
-					bool bWasReplicated = SkelMesh->GetIsReplicated();
-					if (bWasReplicated)
-					{
-						SkelMesh->SetIsReplicated(false);
-					}
-
-					// Set collision and physics via BodyInstance
-					SkelMesh->BodyInstance.SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-					SkelMesh->SetSimulatePhysics(true);
-
-					// Re-enable replication for network sync
-					if (bWasReplicated)
-					{
-						SkelMesh->SetIsReplicated(true);
-					}
-				}
-				else
-				{
-					TPSPrim->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-					TPSPrim->SetSimulatePhysics(true);
-				}
-
-				// Apply impulse
-				if (TPSPrim->IsSimulatingPhysics())
-				{
-					FVector ThrowDirection = GetActorForwardVector() + FVector(0, 0, DropUpwardArc);
-					ThrowDirection.Normalize();
-					FVector ThrowImpulse = ThrowDirection * DefaultDropImpulseStrength;
-					FVector CharacterVelocity = GetVelocity();
-					FVector FinalImpulse = ThrowImpulse + CharacterVelocity;
-
-					// Use BodyInstance.AddImpulse() - works with BodyInstance collision settings
-					if (USkeletalMeshComponent* SkelMesh = Cast<USkeletalMeshComponent>(TPSMeshComp))
-					{
-						SkelMesh->BodyInstance.AddImpulse(FinalImpulse, true);
-					}
-					else
-					{
-						TPSPrim->AddImpulse(FinalImpulse, NAME_None, true);
-					}
-				}
-			}
-			// On SERVER, skip physics setup - DropItem() handles it after DetachFromActor()
-		}
-	}
-
-	// Enable collision on item actor
-	Item->SetActorEnableCollision(true);
-}
-
-void AFPSCharacter::GetDropTransformAndImpulse_Implementation(AActor* Item, FTransform& OutTransform, FVector& OutImpulse)
-{
-	// Calculate drop position in front of character
-	// Uses Blueprint-configurable parameters (DropForwardDistance, DropUpwardOffset)
-	FVector DropLocation = GetActorLocation() + (GetActorForwardVector() * DropForwardDistance) + FVector(0, 0, DropUpwardOffset);
-	FRotator DropRotation = GetActorRotation();
-
-	OutTransform = FTransform(DropRotation, DropLocation);
-
-	// Calculate throw impulse direction (forward + upward arc)
-	// Uses Blueprint-configurable DropUpwardArc (default 0.5 for 45° arc)
-	FVector ThrowDirection = GetActorForwardVector() + FVector(0, 0, DropUpwardArc);
-	ThrowDirection.Normalize();
-
-	// Base throw impulse
-	FVector ThrowImpulse = ThrowDirection * DefaultDropImpulseStrength;
-
-	// Add character velocity to impulse (inheritance)
-	// When character is running forward, item inherits velocity + throw impulse
-	// This prevents character from outrunning the dropped item
-	FVector CharacterVelocity = GetVelocity();
-
-	// Final impulse = throw impulse + character velocity
-	OutImpulse = ThrowImpulse + CharacterVelocity;
-
-	UE_LOG(LogTemp, Log, TEXT("GetDropTransformAndImpulse() - Location: %s | Throw: %s | Velocity: %s | Final: %s"),
-		*DropLocation.ToString(), *ThrowImpulse.ToString(), *CharacterVelocity.ToString(), *OutImpulse.ToString());
-}
-
-void AFPSCharacter::SetupActiveItemLocal()
-{
-	// ============================================
-	// LOCAL SETUP (runs on ALL machines)
-	// ============================================
-	// Called from:
-	// - EquipItem() on SERVER
-	// - OnRep_ActiveItem() on CLIENTS
-	// This follows MULTIPLAYER_GUIDELINES.md OnRep pattern
-
-	FString MachineRole = HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT");
-	UE_LOG(LogTemp, Warning, TEXT("[%s] SetupActiveItemLocal() - Item: %s"), *MachineRole, ActiveItem ? *ActiveItem->GetName() : TEXT("NULL"));
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
-			FString::Printf(TEXT("[%s] SetupActiveItemLocal() - Item: %s"), *MachineRole, ActiveItem ? *ActiveItem->GetName() : TEXT("NULL")));
-	}
-
-	// Case 1: No active item (unarmed state)
-	if (!ActiveItem)
-	{
-		// Clear hands offset
-		HandsOffset = DefaultHandsOffset;
-		if (Arms)
-		{
-			Arms->SetRelativeLocation(HandsOffset);
-		}
-
-		// Link unarmed animation layer (use helper function)
-		LinkDefaultLayer();
-
-		// Update HUD (clear weapon display) - ONLY for locally controlled player
-		if (IsLocallyControlled() && CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
-		{
-			IPlayerHUDInterface::Execute_UpdateActiveWeapon(CachedPlayerController, nullptr);
-		}
-
-		return;
-	}
-
-	// Case 2: Item equipped
-	if (!ActiveItem->Implements<UHoldableInterface>())
-	{
-		UE_LOG(LogTemp, Error, TEXT("[%s] ActiveItem does not implement IHoldableInterface!"), *MachineRole);
-		return;
-	}
-
-	// ============================================
-	// PREPARE ITEM FOR EQUIP (LOCAL operations - run on ALL machines)
-	// Following user-specified flow exactly
-	// ============================================
-
-	// 2. Show item (visual state)
-	ActiveItem->SetActorHiddenInGame(false);
-
-	// Get mesh components early (needed for physics disable)
-	UMeshComponent* FPSMeshComp = IHoldableInterface::Execute_GetFPSMeshComponent(ActiveItem);
-	UMeshComponent* TPSMeshComp = IHoldableInterface::Execute_GetTPSMeshComponent(ActiveItem);
-
-	// 3. Disable physics on both FPS and TPS meshes
-	// CRITICAL: Must disable physics BEFORE AttachToComponent or UE will error:
-	// "Attempting to move a fully simulated skeletal mesh. Please use Teleport flag"
-	// NOTE: This is LOCAL operation that must run on ALL machines (Server + Clients)
-
-	// FPS mesh - ensure physics is ALWAYS disabled (should have no physics, but force disable to be safe)
-	if (FPSMeshComp && FPSMeshComp->IsA<UPrimitiveComponent>())
-	{
-		UPrimitiveComponent* FPSPrim = Cast<UPrimitiveComponent>(FPSMeshComp);
-		if (FPSPrim)
-		{
-			FPSPrim->SetSimulatePhysics(false);
-			FPSPrim->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-			UE_LOG(LogTemp, Log, TEXT("[%s] ✓ Disabled physics on FPS mesh: %s"),
-				*MachineRole, *ActiveItem->GetName());
-		}
-	}
-
-	// TPS mesh - disable physics for equip
-	if (TPSMeshComp && TPSMeshComp->IsA<UPrimitiveComponent>())
-	{
-		UPrimitiveComponent* TPSPrim = Cast<UPrimitiveComponent>(TPSMeshComp);
-		if (TPSPrim)
-		{
-			TPSPrim->SetSimulatePhysics(false);
-			TPSPrim->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-			UE_LOG(LogTemp, Log, TEXT("[%s] ✓ Disabled physics on TPS mesh: %s"),
-				*MachineRole, *ActiveItem->GetName());
-		}
-	}
-
-	// 4. Disable collision on item actor
-	ActiveItem->SetActorEnableCollision(false);
-
-	// ============================================
-	// MESH ATTACHMENT (via IHoldableInterface)
-	// User spec flow: 5-9
-	// ============================================
-
-	// 5. Get hands offset from item (will be applied in step 12)
-	// 6-8. Mesh components already retrieved above (FPSMeshComp, TPSMeshComp)
-
-	// Get attach socket from item (used for both FPS and TPS)
-	FName AttachSocket = IHoldableInterface::Execute_GetAttachSocket(ActiveItem);
-
-	// ============================================
-	// 7. Attach weapon actor and meshes (3-STEP APPROACH)
-	// ============================================
-	// STEP 1: Attach weapon ACTOR (SceneRoot) to Body socket
-	// STEP 2: Re-attach TPS mesh to Body socket (breaks from SceneRoot)
-	// STEP 3: Re-attach FPS mesh to Arms socket (breaks from SceneRoot)
-	// Result: All three (Actor, TPSMesh, FPSMesh) are independently attached
-
-	// STEP 1: Attach weapon actor (SceneRoot) to Body socket
-	if (GetMesh())
-	{
-		ActiveItem->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
-		ActiveItem->SetActorRelativeLocation(FVector::ZeroVector);
-		ActiveItem->SetActorRelativeRotation(FRotator::ZeroRotator);
-		ActiveItem->SetActorRelativeScale3D(FVector::OneVector);
-
-		UE_LOG(LogTemp, Log, TEXT("✓ [%s] Attached weapon ACTOR to Body: %s"), *MachineRole, *AttachSocket.ToString());
-	}
-
-	// STEP 2: Re-attach TPS mesh to Body socket (breaks from SceneRoot hierarchy)
-	if (TPSMeshComp && GetMesh())
-	{
-		TPSMeshComp->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
-		TPSMeshComp->SetRelativeLocation(FVector::ZeroVector);
-		TPSMeshComp->SetRelativeRotation(FRotator::ZeroRotator);
-		TPSMeshComp->SetRelativeScale3D(FVector::OneVector);
-
-		UE_LOG(LogTemp, Log, TEXT("✓ [%s] Re-attached TPS mesh to Body: %s"), *MachineRole, *AttachSocket.ToString());
-	}
-
-	// STEP 3: Re-attach FPS mesh to Arms socket (breaks from SceneRoot hierarchy)
-	if (FPSMeshComp && Arms)
-	{
-		FPSMeshComp->AttachToComponent(Arms, FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
-		FPSMeshComp->SetRelativeLocation(FVector::ZeroVector);
-		FPSMeshComp->SetRelativeRotation(FRotator::ZeroRotator);
-		FPSMeshComp->SetRelativeScale3D(FVector::OneVector);
-
-		UE_LOG(LogTemp, Log, TEXT("✓ [%s] Re-attached FPS mesh to Arms: %s"), *MachineRole, *AttachSocket.ToString());
-	}
-
-	// ============================================
-	// ANIMATION LINKING (via IHoldableInterface)
-	// User spec flow: 10-11
-	// ============================================
-
-	// 10. Get anim layer from item
-	TSubclassOf<UAnimInstance> ItemAnimLayer = IHoldableInterface::Execute_GetAnimLayer(ActiveItem);
-	if (ItemAnimLayer)
-	{
-		// Unlink default layer first (use helper function)
-		UnlinkDefaultLayer();
-
-		// 11. Link anim layer to Mesh, Arms, Legs
-		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
-		Legs->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
-		Arms->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
-
-		UE_LOG(LogTemp, Warning, TEXT("✓ [%s] Linked animation layer: %s"), *MachineRole, *ItemAnimLayer->GetName());
-
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
-				FString::Printf(TEXT("✓ [%s] Linked animation layer: %s"), *MachineRole, *ItemAnimLayer->GetName()));
-		}
-	}
-
-	// ============================================
-	// HANDS OFFSET UPDATE (via IHoldableInterface)
-	// User spec flow: 5 (get hands offset, applied here)
-	// ============================================
-	SetupHandsLocation();
-
-	// ============================================
-	// HUD UPDATE (via PlayerHUDInterface)
-	// ONLY for locally controlled player
-	// ============================================
-	if (IsLocallyControlled() && CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
-	{
-		// Update active weapon display
-		IPlayerHUDInterface::Execute_UpdateActiveWeapon(CachedPlayerController, ActiveItem);
-
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
-				TEXT("✓ Updated HUD with active item"));
-		}
-	}
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
-			FString::Printf(TEXT("✓ [%s] Setup complete: %s"), *MachineRole, *ActiveItem->GetName()));
-	}
-}
 
 void AFPSCharacter::OnRep_IsDeath()
 {
@@ -1135,25 +760,17 @@ float AFPSCharacter::GetSprintDirectionMultiplier(const FVector2D& MovementInput
 
 void AFPSCharacter::CheckInteractionTrace()
 {
-	// Early exit if no camera
 	if (!Camera)
 	{
 		return;
 	}
 
-	// Lazy initialization of cached player controller (for client)
 	if (!CachedPlayerController)
 	{
 		CachedPlayerController = Cast<AFPSPlayerController>(GetController());
 		if (!CachedPlayerController)
 		{
 			return;
-		}
-
-		// Debug: Log when we cache the controller
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Orange, TEXT("PlayerController cached!"));
 		}
 	}
 
@@ -1178,43 +795,18 @@ void AFPSCharacter::CheckInteractionTrace()
 		QueryParams
 	);
 
-	// Debug: Check if we're actually tracing
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(3, 0.0f, FColor::White, FString::Printf(TEXT("Trace: %s"), bHit ? TEXT("HIT") : TEXT("MISS")));
-	}
-
-	// Debug: Draw trace line (from actual trace start point)
-	DrawDebugLine(GetWorld(), TraceStart, TraceEnd, bHit ? FColor::Green : FColor::Red, false, 0.0f, 0, 2.0f);
-
-	// Debug: Draw hit point
-	if (bHit)
-	{
-		DrawDebugSphere(GetWorld(), Hit.Location, 10.0f, 8, FColor::Yellow, false, 0.0f, 0, 2.0f);
-
-		// Log what we hit
-		if (GEngine)
-		{
-			FString HitActorName = Hit.GetActor() ? Hit.GetActor()->GetName() : TEXT("NULL");
-			FString HitComponentName = Hit.GetComponent() ? Hit.GetComponent()->GetName() : TEXT("NULL");
-			GEngine->AddOnScreenDebugMessage(2, 0.0f, FColor::Cyan, FString::Printf(TEXT("Hit: %s | Component: %s"), *HitActorName, *HitComponentName));
-		}
-	}
-
 	// Check if we hit an interactable object
 	if (bHit && Hit.GetActor() && Hit.GetActor()->Implements<UInteractableInterface>())
 	{
 		AActor* HitActor = Hit.GetActor();
 		IInteractableInterface* Interactable = Cast<IInteractableInterface>(HitActor);
 
-		// Create interaction context
 		FInteractionContext Ctx;
 		Ctx.Controller = GetController();
 		Ctx.Pawn = this;
 		Ctx.Instigator = this;
 		Ctx.Hit = Hit;
 
-		// Get available verbs
 		TArray<FGameplayTag> Verbs;
 		Interactable->Execute_GetVerbs(HitActor, Verbs, Ctx);
 
@@ -1222,19 +814,22 @@ void AFPSCharacter::CheckInteractionTrace()
 		{
 			const FGameplayTag& FirstVerb = Verbs[0];
 
-			// Check if interaction is allowed
-			if (Interactable->Execute_CanInteract(HitActor, FirstVerb, Ctx))
+			bool bCanInteract = Interactable->Execute_CanInteract(HitActor, FirstVerb, Ctx);
+
+			// Debug: Show CanInteract result
+			if (GEngine)
 			{
-				// Get interaction text
+				GEngine->AddOnScreenDebugMessage(10, 0.0f, bCanInteract ? FColor::Green : FColor::Red,
+					FString::Printf(TEXT("CanInteract: %s | Owner: %s | Result: %s"),
+						*HitActor->GetName(),
+						HitActor->GetOwner() ? *HitActor->GetOwner()->GetName() : TEXT("nullptr"),
+						bCanInteract ? TEXT("TRUE") : TEXT("FALSE")));
+			}
+
+			if (bCanInteract)
+			{
 				FText InteractionText = Interactable->Execute_GetInteractionText(HitActor, FirstVerb, Ctx);
 
-				// Debug: Screen message
-				if (GEngine)
-				{
-					GEngine->AddOnScreenDebugMessage(1, 0.0f, FColor::Green, FString::Printf(TEXT("Interaction: %s"), *InteractionText.ToString()));
-				}
-
-				// Update PlayerController via PlayerHUDInterface
 				if (CachedPlayerController->Implements<UPlayerHUDInterface>())
 				{
 					IPlayerHUDInterface::Execute_UpdateItemInfo(CachedPlayerController, InteractionText.ToString());
@@ -1246,18 +841,12 @@ void AFPSCharacter::CheckInteractionTrace()
 		}
 	}
 
-	// No valid interactable found - clear HUD if we were looking at something before
+	// Clear HUD if no valid interactable found
 	if (LastInteractableActor != nullptr)
 	{
 		if (CachedPlayerController->Implements<UPlayerHUDInterface>())
 		{
 			IPlayerHUDInterface::Execute_UpdateItemInfo(CachedPlayerController, FString());
-		}
-
-		// Debug: Clear screen message
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(1, 0.0f, FColor::Red, TEXT(""));
 		}
 
 		LastInteractableActor = nullptr;
@@ -1270,13 +859,75 @@ void AFPSCharacter::CheckInteractionTrace()
 
 void AFPSCharacter::Server_PickupItem_Implementation(AActor* Item)
 {
-	// Validation
+	// SERVER VALIDATION (anti-cheat, race conditions)
+	// Client already validated before sending RPC, but server MUST re-validate
+	// to prevent cheating and handle race conditions
+
 	if (!Item || !HasAuthority())
 	{
 		return;
 	}
 
-	// Verify item is pickupable
+	if (InventoryComp->AddItem(Item))
+	{
+
+	}
+}
+
+void AFPSCharacter::Server_DropItem_Implementation(AActor* Item)
+{
+	// SERVER VALIDATION (anti-cheat)
+	// Client already has local checks, but server MUST re-validate
+
+	if (!Item || !HasAuthority())
+	{
+		return;
+	}
+
+	// Validate item is actually in our inventory
+	if (!InventoryComp->ContainsItem(Item))
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red,
+				FString::Printf(TEXT("❌ [SERVER] Cannot drop item %s - not in inventory"), *Item->GetName()));
+		}
+		return;
+	}
+
+	// INVERTED FLOW (compared to pickup):
+	// 1. Remove item from inventory
+	// 2. InventoryComponent fires OnItemRemoved delegate
+	// 3. OnInventoryItemRemoved callback executes
+	// 4. Callback calls IPickupableInterface::Execute_OnDropped
+	if (InventoryComp->RemoveItem(Item))
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
+				FString::Printf(TEXT("✓ [SERVER] Dropped item: %s"), *Item->GetName()));
+		}
+	}
+}
+
+
+
+// ============================================
+// IItemCollectorInterface Implementation
+// ============================================
+
+void AFPSCharacter::Pickup_Implementation(AActor* Item)
+{
+	// CLIENT-SIDE VALIDATION (optimization + immediate feedback)
+	// These checks run on client BEFORE sending RPC to server
+	// Server MUST still validate (anti-cheat, race conditions)
+
+	if (!Item)
+	{
+		return;
+	}
+
+	// Check 1: Is item pickupable? (pure reflection - always safe)
 	if (!Item->Implements<UPickupableInterface>())
 	{
 		if (GEngine)
@@ -1287,7 +938,7 @@ void AFPSCharacter::Server_PickupItem_Implementation(AActor* Item)
 		return;
 	}
 
-	// Verify item can be picked (interface validation)
+	// Check 2: Can item be picked? (uses replicated state - GetOwner, etc.)
 	FInteractionContext Ctx;
 	Ctx.Controller = GetController();
 	Ctx.Pawn = this;
@@ -1298,359 +949,295 @@ void AFPSCharacter::Server_PickupItem_Implementation(AActor* Item)
 		if (GEngine)
 		{
 			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
-				FString::Printf(TEXT("⚠ Cannot pick %s (CanBePicked = false)"), *Item->GetName()));
+				FString::Printf(TEXT("⚠ Cannot pick %s (already owned?)"), *Item->GetName()));
 		}
 		return;
 	}
 
-	// Execute pickup
-	PickupItem(Item);
+	// Validation passed - send RPC to server
+	Server_PickupItem(Item);
 }
 
-void AFPSCharacter::PickupItem(AActor* Item)
+void AFPSCharacter::Drop_Implementation(AActor* Item)
 {
-	if (!Item || !HasAuthority() || !InventoryComp)
+	// TODO: Implement drop logic
+}
+
+
+void AFPSCharacter::UnEquipItem(AActor* Item)
+{
+	if (Item->Implements<UHoldableInterface>())
 	{
-		return;
+		USceneComponent* ItemRoot = Item->GetRootComponent();
+
+		FAttachmentTransformRules AttachRules(
+			EAttachmentRule::SnapToTarget,
+			EAttachmentRule::SnapToTarget,
+			EAttachmentRule::KeepWorld,
+			false
+		);
+
+		// Reset FPS mesh transform to identity (was attached to Arms with relative transform)
+		if (UPrimitiveComponent* FPSMesh = IHoldableInterface::Execute_GetFPSMeshComponent(Item))
+		{
+			FPSMesh->AttachToComponent(ItemRoot, AttachRules);
+			FPSMesh->SetRelativeTransform(FTransform::Identity);
+		}
+
+		// Reset TPS mesh transform to identity and apply physics
+		if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
+		{
+			// Reset transform (was attached to Body with relative transform)
+			TPSMesh->SetSimulatePhysics(false);
+			TPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			TPSMesh->AttachToComponent(ItemRoot, AttachRules);
+			TPSMesh->SetRelativeTransform(FTransform::Identity);
+		}
+
+		// Notify item it has been unequipped
+		IHoldableInterface::Execute_OnUnequipped(Item);
+	}
+}
+
+void AFPSCharacter::EquipItem(AActor* Item)
+{
+	if (HasAuthority())
+	{
+		ActiveItem = Item;
 	}
 
-	// Debug: Log pickup start
-	UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::PickupItem() - Picking up: %s"), *Item->GetName());
+	FName AttachSocket = IHoldableInterface::Execute_GetAttachSocket(Item);
+
+	// STEP 1: Attach weapon actor (SceneRoot) to Body socket
+	if (GetMesh())
+	{
+		Item->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
+		Item->SetActorRelativeTransform(FTransform::Identity);
+
+		UE_LOG(LogTemp, Log, TEXT("✓ Attached weapon ACTOR to Body: %s"), *AttachSocket.ToString());
+	}
+
+	// STEP 2: Re-attach TPS mesh to Body socket (breaks from SceneRoot hierarchy)
+	if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
+	{
+		TPSMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
+		TPSMesh->SetRelativeTransform(FTransform::Identity);
+
+		UE_LOG(LogTemp, Log, TEXT("✓ Re-attached TPS mesh to Body: %s"), *AttachSocket.ToString());
+	}
+
+	// STEP 3: Re-attach FPS mesh to Arms socket (breaks from SceneRoot hierarchy)
+	if (UPrimitiveComponent* FPSMesh = IHoldableInterface::Execute_GetFPSMeshComponent(Item))
+	{
+		FPSMesh->AttachToComponent(Arms, FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
+		FPSMesh->SetRelativeTransform(FTransform::Identity);
+
+		UE_LOG(LogTemp, Log, TEXT("✓ Re-attached FPS mesh to Arms: %s"), *AttachSocket.ToString());
+	}
+
+	// 10. Get anim layer from item
+	TSubclassOf<UAnimInstance> ItemAnimLayer = IHoldableInterface::Execute_GetAnimLayer(Item);
+	if (ItemAnimLayer)
+	{
+		// Unlink default layer first (use helper function)
+		UnlinkDefaultLayer();
+
+		// 11. Link anim layer to Mesh, Arms, Legs
+		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
+		Legs->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
+		Arms->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
+	}
+
+	// ============================================
+	// HANDS OFFSET UPDATE (via IHoldableInterface)
+	// User spec flow: 5 (get hands offset, applied here)
+	// ============================================
+
+	// ============================================
+	// HUD UPDATE (via PlayerHUDInterface)
+	// ONLY for locally controlled player
+	// ============================================
+	if (IsLocallyControlled() && CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
+	{
+		// Update active weapon display
+		IPlayerHUDInterface::Execute_UpdateActiveWeapon(CachedPlayerController, ActiveItem);
+
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
+				TEXT("✓ Updated HUD with active item"));
+		}
+	}
+
+	// ============================================
+	// NOTIFY ITEM (via IHoldableInterface)
+	// ============================================
+	if (Item->Implements<UHoldableInterface>())
+	{
+		IHoldableInterface::Execute_OnEquipped(Item, this);
+	}
+
+}
+
+
+// ============================================
+// INVENTORY EVENT CALLBACKS (SERVER ONLY)
+// ============================================
+
+void AFPSCharacter::OnInventoryItemAdded(AActor* Item)
+{
+	// SERVER ONLY - bound with HasAuthority() check in BeginPlay
 
 	if (GEngine)
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan,
-			FString::Printf(TEXT("FPSCharacter::PickupItem() - Picking up: %s"), *Item->GetName()));
+		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
+			FString::Printf(TEXT("✓ [SERVER] Item added to inventory: %s"),
+				Item ? *Item->GetName() : TEXT("nullptr")));
 	}
 
-	// GENERIC PICKUP LOGIC (applies to ALL items - SERVER ONLY)
-
-	// 1. Set owner (for replication and authority)
+	// Prepare item for inventory
 	Item->SetOwner(this);
 
-	// 2. Disable collision on item actor (prevent collision with world/character)
-	Item->SetActorEnableCollision(false);
+	FAttachmentTransformRules AttachRules(
+		EAttachmentRule::SnapToTarget,
+		EAttachmentRule::SnapToTarget,
+		EAttachmentRule::KeepWorld,
+		false
+	);
 
-	// 3. Hide item from world (will be shown when equipped in SetupActiveItemLocal)
-	// NOTE: This is SERVER-side hide (not replicated), but item is immediately equipped
-	// so clients will see Show in SetupActiveItemLocal via OnRep_ActiveItem
+	Item->AttachToComponent(GetMesh(), AttachRules);
 	Item->SetActorHiddenInGame(true);
 
-	// 4. Add to inventory via component (handles validation + replication + events)
-	if (InventoryComp->AddItem(Item))
+	if (Item->Implements<UHoldableInterface>())
 	{
-		// 5. Notify item via PickupableInterface (item-specific behavior)
+		if (InventoryComp->GetItemCount() == 1)
+		{
+			EquipItem(Item);
+		}
+		else
+		{
+			UnEquipItem(Item);
+		}
+	}
+
+	// Notify item via IPickupableInterface
+	if (Item->Implements<UPickupableInterface>())
+	{
 		FInteractionContext Ctx;
 		Ctx.Controller = GetController();
 		Ctx.Pawn = this;
 		Ctx.Instigator = this;
 
 		IPickupableInterface::Execute_OnPicked(Item, this, Ctx);
-
-		// Debug: Log inventory state
-		UE_LOG(LogTemp, Warning, TEXT("✓ Pickup complete - Inventory size: %d"), InventoryComp->GetItemCount());
-
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
-				FString::Printf(TEXT("✓ Pickup complete - Inventory size: %d"), InventoryComp->GetItemCount()));
-		}
-
-		// 7. Auto-equip if this is first item and it's holdable
-		if (InventoryComp->GetItemCount() == 1 && Item->Implements<UHoldableInterface>())
-		{
-			EquipItem(Item);
-		}
-	}
-	else
-	{
-		// Failed to add to inventory - revert changes
-		Item->SetOwner(nullptr);
-		Item->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-		Item->SetActorHiddenInGame(false);
 	}
 }
 
-void AFPSCharacter::EquipItem(AActor* Item)
+
+void AFPSCharacter::OnInventoryItemRemoved(AActor* Item)
 {
-	if (!Item || !HasAuthority() || !InventoryComp)
-	{
-		return;
-	}
-
-	// Verify item is in inventory
-	if (!InventoryComp->ContainsItem(Item))
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red,
-				FString::Printf(TEXT("❌ Cannot equip %s - not in inventory!"), *Item->GetName()));
-		}
-		return;
-	}
-
-	// Verify item is holdable
-	if (!Item->Implements<UHoldableInterface>())
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
-				FString::Printf(TEXT("⚠ Cannot equip %s - not holdable!"), *Item->GetName()));
-		}
-		return;
-	}
-
-	// Debug: Log equip start (SERVER)
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Magenta,
-			FString::Printf(TEXT("[SERVER] FPSCharacter::EquipItem() - %s"), *Item->GetName()));
-	}
-
-	// Unequip current item first
-	if (ActiveItem != nullptr)
-	{
-		UnequipCurrentItem();
-	}
-
-	// ============================================
-	// SERVER-SIDE LOGIC
-	// ============================================
-
-	// 1. Set as active item (REPLICATED - triggers OnRep_ActiveItem on clients)
-	ActiveItem = Item;
-
-	// 2. Set owner (for replication and authority)
-	Item->SetOwner(this);
-
-	// 3. Notify item via HoldableInterface (SERVER-side item-specific behavior)
-	IHoldableInterface::Execute_OnEquipped(Item, this);
-
-	// 4. Execute LOCAL setup on server (same as clients will do via OnRep_ActiveItem)
-	// This follows MULTIPLAYER_GUIDELINES.md OnRep pattern:
-	// "Server and client must execute SAME local logic"
-	SetupActiveItemLocal();
-
-	// Debug: Confirm server equip
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
-			FString::Printf(TEXT("✓ [SERVER] Equipped: %s (ActiveItem replicated to clients)"), *Item->GetName()));
-	}
-}
-
-void AFPSCharacter::UnequipCurrentItem()
-{
-	if (!ActiveItem || !HasAuthority())
-	{
-		return;
-	}
-
-	// Debug: Log unequip (SERVER)
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Purple,
-			FString::Printf(TEXT("[SERVER] UnequipCurrentItem() - %s"), *ActiveItem->GetName()));
-	}
-
-	// ============================================
-	// SERVER-SIDE LOGIC ONLY
-	// ============================================
-
-	// Cache old item before clearing (need for detach logic)
-	AActor* OldActiveItem = ActiveItem;
-
-	// 1. Notify item via HoldableInterface (SERVER-side item-specific behavior)
-	if (OldActiveItem->Implements<UHoldableInterface>())
-	{
-		IHoldableInterface::Execute_OnUnequipped(OldActiveItem);
-	}
-
-	// 2. Hide item
-	OldActiveItem->SetActorHiddenInGame(true);
-
-	// 3. DETACH item meshes from character (LOCAL operation)
-	// Clients will execute SAME logic in OnRep_ActiveItem()
-	// Follows MULTIPLAYER_GUIDELINES.md OnRep pattern
-	DetachItemMeshes(OldActiveItem);
-
-	// 4. Clear active item reference (REPLICATED - triggers OnRep_ActiveItem on clients)
-	ActiveItem = nullptr;
-
-	// 5. Execute LOCAL setup on server (same as clients will do via OnRep_ActiveItem)
-	// This follows MULTIPLAYER_GUIDELINES.md OnRep pattern:
-	// "Server and client must execute SAME local logic"
-	// SetupActiveItemLocal() handles nullptr case (unarmed state - restores DefaultAnimLayer)
-	SetupActiveItemLocal();
+	// SERVER ONLY - bound with HasAuthority() check in BeginPlay
+	// This callback is fired AFTER item is removed from inventory (inverted from pickup flow)
 
 	if (GEngine)
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
-			TEXT("✓ [SERVER] Unequipped (ActiveItem cleared, replicated to clients)"));
-	}
-}
-
-void AFPSCharacter::Server_SwitchToItemAtIndex_Implementation(int32 Index)
-{
-	if (!HasAuthority() || !InventoryComp)
-	{
-		return;
+		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
+			FString::Printf(TEXT("⚠ [SERVER] Item removed from inventory: %s"),
+				Item ? *Item->GetName() : TEXT("nullptr")));
 	}
 
-	SwitchToItemAtIndex(Index);
-}
+	// Get drop transform and impulse before dropping
+	FTransform DropTransform;
+	FVector DropImpulse;
+	GetDropTransformAndImpulse(Item, DropTransform, DropImpulse);
 
-void AFPSCharacter::SwitchToItemAtIndex(int32 Index)
-{
-	if (!InventoryComp)
+	// Detach item from character (critical - must be before SetActorTransform)
+	FDetachmentTransformRules DetachRules(
+		EDetachmentRule::KeepWorld,
+		EDetachmentRule::KeepWorld,
+		EDetachmentRule::KeepWorld,
+		false
+	);
+	Item->DetachFromActor(DetachRules);
+
+	// Prepare item for world
+	Item->SetOwner(nullptr);
+	Item->SetActorTransform(DropTransform);
+	Item->SetActorHiddenInGame(false);
+
+	// INTERFACE-DRIVEN: Apply physics to TPS mesh if item is holdable
+	// Use IHoldableInterface::Execute_GetTPSMeshComponent instead of direct member access
+	if (Item->Implements<UHoldableInterface>())
 	{
-		return;
-	}
-
-	// Get item at index
-	AActor* Item = InventoryComp->GetItemAtIndex(Index);
-
-	if (!Item)
-	{
-		if (GEngine)
+		// Reset FPS mesh transform to identity (was attached to Arms with relative transform)
+		if (UPrimitiveComponent* FPSMesh = IHoldableInterface::Execute_GetFPSMeshComponent(Item))
 		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
-				FString::Printf(TEXT("⚠ No item at index %d"), Index));
+			FPSMesh->SetRelativeTransform(FTransform::Identity);
 		}
-		return;
-	}
 
-	// Check if item is already equipped
-	if (ActiveItem == Item)
-	{
-		if (GEngine)
+		// Reset TPS mesh transform to identity and apply physics
+		if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
 		{
-			GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow,
-				FString::Printf(TEXT("Item already equipped: %s"), *Item->GetName()));
+			// Reset transform (was attached to Body with relative transform)
+			TPSMesh->SetRelativeTransform(FTransform::Identity);
+
+			// TPS mesh is visible to other players in world
+			TPSMesh->SetSimulatePhysics(true);
+			TPSMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+			TPSMesh->AddImpulse(DropImpulse, NAME_None, true);
 		}
-		return;
 	}
 
-	// Equip the item
-	EquipItem(Item);
+	// Notify item via IPickupableInterface
+	// Item handles weapon-specific drop logic (detach meshes, re-enable replication, etc.)
+	if (Item->Implements<UPickupableInterface>())
+	{
+		FInteractionContext Ctx;
+		Ctx.Controller = GetController();
+		Ctx.Pawn = this;
+		Ctx.Instigator = this;
+
+		IPickupableInterface::Execute_OnDropped(Item, Ctx);
+	}
 }
 
-void AFPSCharacter::Server_DropItem_Implementation(AActor* Item)
+void AFPSCharacter::OnInventoryCleared()
 {
-	if (!Item || !HasAuthority() || !InventoryComp)
-	{
-		return;
-	}
-
-	// Verify item is in inventory
-	if (!InventoryComp->ContainsItem(Item))
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red,
-				FString::Printf(TEXT("❌ Cannot drop %s - not in inventory!"), *Item->GetName()));
-		}
-		return;
-	}
-
-	DropItem(Item);
-}
-
-void AFPSCharacter::DropItem(AActor* Item)
-{
-	if (!Item || !HasAuthority() || !InventoryComp)
-	{
-		return;
-	}
-
-	// Debug: Log drop
-	UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::DropItem() - Dropping: %s"), *Item->GetName());
+	// SERVER ONLY - bound with HasAuthority() check in BeginPlay
 
 	if (GEngine)
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Orange,
-			FString::Printf(TEXT("FPSCharacter::DropItem() - Dropping: %s"), *Item->GetName()));
+		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red,
+			TEXT("❌ [SERVER] Inventory cleared"));
 	}
+}
 
-	// Unequip if it's the active item
-	// UnequipCurrentItem() handles:
-	//   - OnUnequipped() notification
-	//   - Hide item
-	//   - DetachItemMeshes() (LOCAL operation on ALL machines via OnRep)
-	//   - Clear ActiveItem (replicated)
-	//   - Restore default anim layer
-	if (ActiveItem == Item)
+void AFPSCharacter::GetDropTransformAndImpulse_Implementation(AActor* Item, FTransform& OutTransform, FVector& OutImpulse)
+{
+	// Calculate drop position in front of character
+	// Uses Blueprint-configurable parameters (DropForwardDistance, DropUpwardOffset)
+	FVector DropLocation = GetActorLocation() + (GetActorForwardVector() * DropForwardDistance) + FVector(0, 0, DropUpwardOffset);
+	FRotator DropRotation = GetActorRotation();
+
+	OutTransform = FTransform(DropRotation, DropLocation);
+
+	// Calculate throw impulse direction (forward + upward arc)
+	// Uses Blueprint-configurable DropUpwardArc (default 0.5 for 45° arc)
+	FVector ThrowDirection = GetActorForwardVector() + FVector(0, 0, DropUpwardArc);
+	ThrowDirection.Normalize();
+
+	// Base throw impulse
+	FVector ThrowImpulse = ThrowDirection * DefaultDropImpulseStrength;
+
+	// Add character velocity to impulse (inheritance)
+	// When character is running forward, item inherits velocity + throw impulse
+	// This prevents character from outrunning the dropped item
+	if (CMC)
 	{
-		UnequipCurrentItem();
+		FVector CharacterVelocity = CMC->Velocity * VelocityInheritanceMultiplier;
+		ThrowImpulse += CharacterVelocity;
 	}
 
-	// GENERIC DROP LOGIC (applies to ALL items)
-
-	// 1. Remove from inventory via component (handles replication + events)
-	if (InventoryComp->RemoveItem(Item))
-	{
-		// 2. Clear owner
-		Item->SetOwner(nullptr);
-		Item->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-		Item->SetActorHiddenInGame(false);
-
-		// 3. Re-enable actor-level collision (was disabled in PickupItem)
-		// This is CRITICAL for interaction trace to detect dropped items
-		Item->SetActorEnableCollision(true);
-
-		FTransform DropTransform;
-		FVector DropImpulse;
-		GetDropTransformAndImpulse(Item, DropTransform, DropImpulse);
-
-		// DEBUG: Visualize drop transform location
-		DrawDebugSphere(GetWorld(), DropTransform.GetLocation(), 25.0f, 12, FColor::Yellow, false, 5.0f, 0, 2.0f);
-		UE_LOG(LogTemp, Warning, TEXT("🎯 Drop Transform Location: %s"), *DropTransform.GetLocation().ToString());
-
-		// Set drop location and rotation
-		Item->SetActorTransform(DropTransform);
-
-		// 6. Setup physics BEFORE calling OnDropped (prevents warning from SetIsReplicated)
-		// Get the TPS mesh (physics-enabled mesh for dropped items)
-		UMeshComponent* TPSMeshComp = nullptr;
-		if (Item->Implements<UHoldableInterface>())
-		{
-			TPSMeshComp = IHoldableInterface::Execute_GetTPSMeshComponent(Item);
-		}
-
-		if (TPSMeshComp)
-		{
-			UPrimitiveComponent* TPSPrim = Cast<UPrimitiveComponent>(TPSMeshComp);
-			if (TPSPrim)
-			{
-				// DetachFromActor() resets collision to NoCollision - fix before enabling physics
-				TPSPrim->SetSimulatePhysics(false);
-				TPSPrim->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-				TPSPrim->SetSimulatePhysics(true);
-				TPSPrim->AddImpulse(DropImpulse, NAME_None, true);
-			}
-		}
-
-		// 7. Notify item via PickupableInterface
-		if (Item->Implements<UPickupableInterface>())
-		{
-			FInteractionContext Ctx;
-			Ctx.Controller = GetController();
-			Ctx.Pawn = this;
-			Ctx.Instigator = this;
-
-			IPickupableInterface::Execute_OnDropped(Item, Ctx);
-		}
-
-		// 8. Auto-equip next holdable item from inventory
-		if (InventoryComp)
-		{
-			AActor* NextItem = InventoryComp->GetNextHoldableItem(nullptr);
-			if (NextItem)
-			{
-				EquipItem(NextItem);
-			}
-		}
-	}
+	OutImpulse = ThrowImpulse;
 }
 
 // ============================================
@@ -1678,4 +1265,3 @@ float AFPSCharacter::GetViewPitch_Implementation() const
 {
 	return Pitch;
 }
-

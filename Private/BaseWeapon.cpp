@@ -5,8 +5,8 @@
 #include "Components/FireComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Core/FPSGameplayTags.h"
-#include "FPSCharacter.h"
 #include "BaseMagazine.h"
+#include "Interfaces/ItemCollectorInterface.h"
 
 ABaseWeapon::ABaseWeapon()
 {
@@ -200,13 +200,10 @@ void ABaseWeapon::Interact_Implementation(FGameplayTag Verb, const FInteractionC
 {
 	if (Verb == FPSGameplayTags::Interact_Pickup && IPickupableInterface::Execute_CanBePicked(this, Ctx))
 	{
-		if (Ctx.Pawn && Ctx.Pawn->IsA<AFPSCharacter>())
+		if (GetOwner() == nullptr && Ctx.Pawn && Ctx.Pawn->Implements<UItemCollectorInterface>())
 		{
-			AFPSCharacter* Character = Cast<AFPSCharacter>(Ctx.Pawn);
-			if (Character)
-			{
-				Character->Server_PickupItem(this);
-			}
+			// NO CAST - Ctx.Pawn implements IItemCollectorInterface and handles pickup
+			IItemCollectorInterface::Execute_Pickup(Ctx.Pawn, this);
 		}
 	}
 }
@@ -228,11 +225,16 @@ bool ABaseWeapon::CanBePicked_Implementation(const FInteractionContext& Ctx) con
 
 void ABaseWeapon::OnPicked_Implementation(APawn* Picker, const FInteractionContext& Ctx)
 {
-	// Generic pickup logic is handled by FPSCharacter
-	TPSMesh->SetIsReplicated(false);
+	// Called when weapon is picked up and added to inventory (SERVER ONLY)
+	// Generic pickup logic (SetOwner, SetHidden, SetCollision) is handled by FPSCharacter::OnInventoryItemAdded
+	// This handles weapon-specific behavior
+
+	// Attach weapon to character mesh (for inventory storage)
+	// Weapon stays hidden but attached to character
+	
 
 	// TODO: Weapon-specific pickup behavior:
-	// - Play pickup sound
+	// - Play pickup sound (via Multicast RPC)
 	// - Spawn pickup VFX
 	// - Trigger pickup animation
 	// - Award achievement/stat tracking
@@ -240,9 +242,11 @@ void ABaseWeapon::OnPicked_Implementation(APawn* Picker, const FInteractionConte
 
 void ABaseWeapon::OnDropped_Implementation(const FInteractionContext& Ctx)
 {
-	// Generic drop logic is handled by FPSCharacter
-	TPSMesh->SetIsReplicated(true);
-	SetReplicateMovement(true);
+	// Called when weapon is dropped from inventory (SERVER ONLY)
+	// Generic drop logic is handled by FPSCharacter, this handles weapon-specific behavior
+	
+	// Ensure weapon actor replicates movement when dropped
+	//SetReplicateMovement(true);
 }
 
 void ABaseWeapon::OnEquipped_Implementation(APawn* OwnerPawn)
@@ -279,12 +283,12 @@ FVector ABaseWeapon::GetHandsOffset_Implementation() const
 	return HandsOffset;
 }
 
-UMeshComponent* ABaseWeapon::GetFPSMeshComponent_Implementation() const
+UPrimitiveComponent* ABaseWeapon::GetFPSMeshComponent_Implementation() const
 {
 	return FPSMesh;
 }
 
-UMeshComponent* ABaseWeapon::GetTPSMeshComponent_Implementation() const
+UPrimitiveComponent* ABaseWeapon::GetTPSMeshComponent_Implementation() const
 {
 	return TPSMesh;
 }
@@ -344,9 +348,9 @@ void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
 		// Determine which mesh to use based on ownership
 		USkeletalMeshComponent* MuzzleMesh = nullptr;
 
-		// Check if local player is owner
-		APawn* OwnerPawn = Cast<APawn>(GetOwner());
-		if (OwnerPawn && OwnerPawn->IsLocallyControlled())
+		// Check if local player is owner (NO CAST - use GetLocalRole)
+		AActor* OwnerActor = GetOwner();
+		if (OwnerActor && OwnerActor->GetLocalRole() == ROLE_AutonomousProxy)
 		{
 			MuzzleMesh = FPSMesh; // Owner sees FPS mesh
 			UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Using FPS mesh (owner)"));

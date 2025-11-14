@@ -6,10 +6,22 @@
 #include "Components/ActorComponent.h"
 #include "InventoryComponent.generated.h"
 
+// Event delegates
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnItemAdded, AActor*, Item);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnItemRemoved, AActor*, Item);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnInventoryCleared);
+
 /**
  * Inventory Component
  * Manages item storage for characters, NPCs, containers, etc.
- * Handles adding/removing items, validation, and events
+ *
+ * Responsibilities:
+ * - Store items in replicated array
+ * - Add/remove items with validation
+ * - Query inventory contents
+ * - Broadcast events on inventory changes
+ *
+ * Network: Items array is replicated automatically
  */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class FPSCORE_API UInventoryComponent : public UActorComponent
@@ -19,43 +31,36 @@ class FPSCORE_API UInventoryComponent : public UActorComponent
 public:
 	UInventoryComponent();
 
+	// Replication setup
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-	// ============================================
-	// INVENTORY STORAGE
-	// ============================================
+protected:
+	virtual void BeginPlay() override;
 
-	// Items in inventory (replicated)
-	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Inventory")
-	TArray<AActor*> Items;
-
-	// Maximum inventory slots (0 = unlimited)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Inventory")
-	int32 MaxSlots = 0;
-
+public:
 	// ============================================
-	// CORE INVENTORY OPERATIONS
+	// INVENTORY MANAGEMENT
 	// ============================================
 
 	/**
 	 * Add item to inventory
-	 * @param Item - Actor to add
-	 * @return true if successfully added
+	 * @param Item - Item to add
+	 * @return true if successfully added, false if failed (inventory full, item already exists, etc.)
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	bool AddItem(AActor* Item);
 
 	/**
 	 * Remove item from inventory
-	 * @param Item - Actor to remove
-	 * @return true if successfully removed
+	 * @param Item - Item to remove
+	 * @return true if successfully removed, false if not found
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	bool RemoveItem(AActor* Item);
 
 	/**
-	 * Check if inventory contains item
-	 * @param Item - Actor to check
+	 * Check if item exists in inventory
+	 * @param Item - Item to check
 	 * @return true if item is in inventory
 	 */
 	UFUNCTION(BlueprintPure, Category = "Inventory")
@@ -64,7 +69,7 @@ public:
 	/**
 	 * Get item at specific index
 	 * @param Index - Array index
-	 * @return Actor at index, or nullptr if invalid
+	 * @return Item at index, or nullptr if invalid index
 	 */
 	UFUNCTION(BlueprintPure, Category = "Inventory")
 	AActor* GetItemAtIndex(int32 Index) const;
@@ -74,76 +79,47 @@ public:
 	 * @return Item count
 	 */
 	UFUNCTION(BlueprintPure, Category = "Inventory")
-	int32 GetItemCount() const { return Items.Num(); }
+	int32 GetItemCount() const;
 
 	/**
-	 * Check if inventory is full
-	 * @return true if at max capacity
-	 */
-	UFUNCTION(BlueprintPure, Category = "Inventory")
-	bool IsFull() const { return MaxSlots > 0 && Items.Num() >= MaxSlots; }
-
-	/**
-	 * Get all items of specific class
-	 * @param ItemClass - Class to filter by
-	 * @param OutItems - Output array of matching items
+	 * Get next holdable item in inventory (for weapon switching)
+	 * @param CurrentItem - Current active item (nullptr to get first holdable)
+	 * @return Next holdable item, or nullptr if none found
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
-	void GetItemsByClass(TSubclassOf<AActor> ItemClass, TArray<AActor*>& OutItems) const;
+	AActor* GetNextHoldableItem(AActor* CurrentItem) const;
 
 	/**
-	 * Clear all items from inventory
+	 * Clear entire inventory
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void ClearInventory();
 
-	/**
-	 * Get first item of specific class
-	 * @param ItemClass - Class to find
-	 * @return First matching item, or nullptr
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Inventory")
-	AActor* GetFirstItemOfClass(TSubclassOf<AActor> ItemClass) const;
-
-	/**
-	 * Get next holdable item from inventory (excluding specified item)
-	 * Used for auto-equip after dropping active item
-	 * @param ExcludeItem - Item to exclude from search (typically current active item)
-	 * @return Next holdable item, or nullptr if none found
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Inventory")
-	AActor* GetNextHoldableItem(AActor* ExcludeItem = nullptr) const;
-
 	// ============================================
-	// EVENTS / DELEGATES
+	// INVENTORY DATA
 	// ============================================
 
-	// Delegate for item added
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnItemAdded, AActor*, Item, int32, Index);
+	// Items stored in inventory (replicated)
+	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Inventory")
+	TArray<AActor*> Items;
+
+	// Maximum number of items allowed (0 = unlimited)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+	int32 MaxSlots = 0;
+
+	// ============================================
+	// EVENTS
+	// ============================================
+
+	// Called when item is added to inventory
 	UPROPERTY(BlueprintAssignable, Category = "Inventory")
 	FOnItemAdded OnItemAdded;
 
-	// Delegate for item removed
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnItemRemoved, AActor*, Item, int32, Index);
+	// Called when item is removed from inventory
 	UPROPERTY(BlueprintAssignable, Category = "Inventory")
 	FOnItemRemoved OnItemRemoved;
 
-	// Delegate for inventory cleared
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnInventoryCleared);
+	// Called when inventory is cleared
 	UPROPERTY(BlueprintAssignable, Category = "Inventory")
 	FOnInventoryCleared OnInventoryCleared;
-
-	// ============================================
-	// VALIDATION
-	// ============================================
-
-	/**
-	 * Check if item can be added to inventory
-	 * Blueprint implementable validation hook
-	 * @param Item - Actor to validate
-	 * @return true if item can be added
-	 */
-	UFUNCTION(BlueprintNativeEvent, Category = "Inventory")
-	bool CanAddItem(AActor* Item) const;
-	virtual bool CanAddItem_Implementation(AActor* Item) const;
 };

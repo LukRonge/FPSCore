@@ -16,103 +16,67 @@ void UInventoryComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
+	// Replicate Items array to all clients
 	DOREPLIFETIME(UInventoryComponent, Items);
 }
 
+void UInventoryComponent::BeginPlay()
+{
+	Super::BeginPlay();
+}
+
+// ============================================
+// INVENTORY MANAGEMENT
+// ============================================
+
 bool UInventoryComponent::AddItem(AActor* Item)
 {
+	// Validation
 	if (!Item)
 	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red,
-				TEXT("InventoryComponent::AddItem() - Item is NULL!"));
-		}
 		return false;
 	}
 
-	// Check if inventory is full
-	if (IsFull())
+	// Check if item already exists
+	if (Items.Contains(Item))
 	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
-				FString::Printf(TEXT("⚠ Inventory full! Max: %d"), MaxSlots));
-		}
 		return false;
 	}
 
-	// Check if item already in inventory
-	if (ContainsItem(Item))
+	// Check if inventory is full (0 = unlimited)
+	if (MaxSlots > 0 && Items.Num() >= MaxSlots)
 	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
-				FString::Printf(TEXT("⚠ Item %s already in inventory!"), *Item->GetName()));
-		}
 		return false;
 	}
 
-	// Validate via Blueprint hook
-	if (!CanAddItem(Item))
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
-				FString::Printf(TEXT("⚠ CanAddItem() returned false for %s"), *Item->GetName()));
-		}
-		return false;
-	}
-
-	// Add to array
-	int32 Index = Items.Add(Item);
-
-	// Debug log
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
-			FString::Printf(TEXT("✓ InventoryComponent::AddItem() - %s | Index: %d | Count: %d"),
-				*Item->GetName(), Index, Items.Num()));
-	}
+	// Add item to array
+	Items.Add(Item);
 
 	// Broadcast event
-	OnItemAdded.Broadcast(Item, Index);
+	OnItemAdded.Broadcast(Item);
 
 	return true;
 }
 
 bool UInventoryComponent::RemoveItem(AActor* Item)
 {
+	// Validation
 	if (!Item)
 	{
 		return false;
 	}
 
-	// Find item index
-	int32 Index = Items.Find(Item);
-	if (Index == INDEX_NONE)
+	// Check if item exists
+	if (!Items.Contains(Item))
 	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
-				FString::Printf(TEXT("⚠ Item %s not in inventory!"), *Item->GetName()));
-		}
 		return false;
 	}
 
-	// Remove from array
-	Items.RemoveAt(Index);
-
-	// Debug log
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan,
-			FString::Printf(TEXT("✓ InventoryComponent::RemoveItem() - %s | Count: %d"),
-				*Item->GetName(), Items.Num()));
-	}
+	// Remove item from array
+	Items.Remove(Item);
 
 	// Broadcast event
-	OnItemRemoved.Broadcast(Item, Index);
+	OnItemRemoved.Broadcast(Item);
 
 	return true;
 }
@@ -124,95 +88,84 @@ bool UInventoryComponent::ContainsItem(AActor* Item) const
 
 AActor* UInventoryComponent::GetItemAtIndex(int32 Index) const
 {
-	if (Items.IsValidIndex(Index))
-	{
-		return Items[Index];
-	}
-
-	return nullptr;
-}
-
-void UInventoryComponent::GetItemsByClass(TSubclassOf<AActor> ItemClass, TArray<AActor*>& OutItems) const
-{
-	OutItems.Empty();
-
-	if (!ItemClass)
-	{
-		return;
-	}
-
-	for (AActor* Item : Items)
-	{
-		if (Item && Item->IsA(ItemClass))
-		{
-			OutItems.Add(Item);
-		}
-	}
-}
-
-AActor* UInventoryComponent::GetFirstItemOfClass(TSubclassOf<AActor> ItemClass) const
-{
-	if (!ItemClass)
+	// Validate index
+	if (!Items.IsValidIndex(Index))
 	{
 		return nullptr;
 	}
 
-	for (AActor* Item : Items)
+	return Items[Index];
+}
+
+int32 UInventoryComponent::GetItemCount() const
+{
+	return Items.Num();
+}
+
+AActor* UInventoryComponent::GetNextHoldableItem(AActor* CurrentItem) const
+{
+	// If no items in inventory, return nullptr
+	if (Items.Num() == 0)
 	{
-		if (Item && Item->IsA(ItemClass))
+		return nullptr;
+	}
+
+	// If CurrentItem is nullptr, return first holdable item
+	if (CurrentItem == nullptr)
+	{
+		for (AActor* Item : Items)
+		{
+			if (Item && Item->Implements<UHoldableInterface>())
+			{
+				return Item;
+			}
+		}
+		return nullptr;
+	}
+
+	// Find current item index
+	int32 CurrentIndex = Items.Find(CurrentItem);
+	if (CurrentIndex == INDEX_NONE)
+	{
+		// Current item not in inventory, return first holdable
+		for (AActor* Item : Items)
+		{
+			if (Item && Item->Implements<UHoldableInterface>())
+			{
+				return Item;
+			}
+		}
+		return nullptr;
+	}
+
+	// Search for next holdable item (wrap around)
+	int32 SearchIndex = CurrentIndex + 1;
+	for (int32 i = 0; i < Items.Num(); i++)
+	{
+		// Wrap around
+		if (SearchIndex >= Items.Num())
+		{
+			SearchIndex = 0;
+		}
+
+		AActor* Item = Items[SearchIndex];
+		if (Item && Item->Implements<UHoldableInterface>())
 		{
 			return Item;
 		}
+
+		SearchIndex++;
 	}
 
-	return nullptr;
+	// No other holdable item found, return current item
+	return CurrentItem;
 }
 
 void UInventoryComponent::ClearInventory()
 {
-	if (Items.Num() == 0)
-	{
-		return;
-	}
-
-	// Debug log
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow,
-			FString::Printf(TEXT("InventoryComponent::ClearInventory() - Clearing %d items"), Items.Num()));
-	}
-
+	// Clear array
 	Items.Empty();
 
 	// Broadcast event
 	OnInventoryCleared.Broadcast();
-}
-
-bool UInventoryComponent::CanAddItem_Implementation(AActor* Item) const
-{
-	// Default implementation - allow all items
-	// Override in Blueprint or derived classes for custom validation
-	return true;
-}
-
-AActor* UInventoryComponent::GetNextHoldableItem(AActor* ExcludeItem) const
-{
-	// Iterate through inventory to find next holdable item
-	for (AActor* Item : Items)
-	{
-		// Skip invalid items or excluded item
-		if (!Item || Item == ExcludeItem)
-		{
-			continue;
-		}
-
-		// Check if item implements IHoldableInterface
-		if (Item->Implements<UHoldableInterface>())
-		{
-			return Item;
-		}
-	}
-
-	// No holdable item found
-	return nullptr;
 }

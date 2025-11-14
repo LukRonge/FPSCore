@@ -20,6 +20,7 @@
 #include "Interfaces/InteractableInterface.h"
 #include "Interfaces/PickupableInterface.h"
 #include "Interfaces/HoldableInterface.h"
+#include "Interfaces/ItemCollectorInterface.h"
 #include "Interfaces/SightInterface.h"
 #include "Interfaces/UsableInterface.h"
 #include "Interfaces/AmmoConsumerInterface.h"
@@ -377,10 +378,10 @@ public:
 	virtual FVector GetHandsOffset_Implementation() const override;
 
 	// Get FPS mesh component (visible only to owner)
-	virtual UMeshComponent* GetFPSMeshComponent_Implementation() const override;
+	virtual UPrimitiveComponent* GetFPSMeshComponent_Implementation() const override;
 
 	// Get TPS mesh component (visible to others, not owner)
-	virtual UMeshComponent* GetTPSMeshComponent_Implementation() const override;
+	virtual UPrimitiveComponent* GetTPSMeshComponent_Implementation() const override;
 
 	// Get attachment socket name
 	virtual FName GetAttachSocket_Implementation() const override;

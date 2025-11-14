@@ -52,16 +52,18 @@ public:
 	// Get FPS mesh component (visible only to local controlled player)
 	// Attached to Arms mesh, only owner sees this
 	// Returns nullptr if item doesn't have separate FPS mesh
+	// Returns UPrimitiveComponent* because can be UStaticMeshComponent or USkeletalMeshComponent
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
-	UMeshComponent* GetFPSMeshComponent() const;
-	virtual UMeshComponent* GetFPSMeshComponent_Implementation() const { return nullptr; }
+	UPrimitiveComponent* GetFPSMeshComponent() const;
+	virtual UPrimitiveComponent* GetFPSMeshComponent_Implementation() const { return nullptr; }
 
 	// Get TPS mesh component (visible to other players, not owner)
 	// Attached to Body mesh, other players see this
 	// Returns nullptr if item doesn't have separate TPS mesh
+	// Returns UPrimitiveComponent* because can be UStaticMeshComponent or USkeletalMeshComponent
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
-	UMeshComponent* GetTPSMeshComponent() const;
-	virtual UMeshComponent* GetTPSMeshComponent_Implementation() const { return nullptr; }
+	UPrimitiveComponent* GetTPSMeshComponent() const;
+	virtual UPrimitiveComponent* GetTPSMeshComponent_Implementation() const { return nullptr; }
 
 	// Get socket name for attachment (same socket for FPS and TPS)
 	// Both FPS and TPS meshes attach to same socket name (e.g. "hand_r", "weapon_socket")
