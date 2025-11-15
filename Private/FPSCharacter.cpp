@@ -312,7 +312,7 @@ void AFPSCharacter::Client_OnPossessed_Implementation()
 
 	// Setup hands location (LOCAL operation for locally controlled player)
 	// Arms mesh is OnlyOwnerSee, so this only affects local player
-	SetupHandsLocation(ActiveItem);
+	SetupHandsLocation(nullptr);
 
 	// NOTE: LinkDefaultLayer() is already called in BeginPlay() on ALL machines
 	// No need to call it again here (would be redundant)
@@ -605,18 +605,8 @@ void AFPSCharacter::DropPressed()
 		return;
 	}
 
-	// Cache ActiveItem reference (safe from replication race)
-	AActor* ItemToDrop = ActiveItem;
-
 	// Call Server RPC to drop item
-	Server_DropItem(ItemToDrop);
-
-	// Debug feedback
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow,
-			FString::Printf(TEXT("✓ Dropping item: %s"), *ItemToDrop->GetName()));
-	}
+	Server_DropItem(ActiveItem);
 }
 
 void AFPSCharacter::UseStarted()
@@ -1001,11 +991,6 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 
 void AFPSCharacter::EquipItem(AActor* Item)
 {
-	if (HasAuthority())
-	{
-		ActiveItem = Item;
-	}
-
 	FName AttachSocket = IHoldableInterface::Execute_GetAttachSocket(Item);
 
 	// STEP 1: Attach weapon actor (SceneRoot) to Body socket
@@ -1086,41 +1071,21 @@ void AFPSCharacter::EquipItem(AActor* Item)
 
 void AFPSCharacter::OnInventoryItemAdded(AActor* Item)
 {
-	// SERVER ONLY - bound with HasAuthority() check in BeginPlay
-
-	if (GEngine)
+	if (!HasAuthority())
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
-			FString::Printf(TEXT("✓ [SERVER] Item added to inventory: %s"),
-				Item ? *Item->GetName() : TEXT("nullptr")));
+		return;
 	}
 
-	// Prepare item for inventory
-	Item->SetOwner(this);
-
-	FAttachmentTransformRules AttachRules(
-		EAttachmentRule::SnapToTarget,
-		EAttachmentRule::SnapToTarget,
-		EAttachmentRule::KeepWorld,
-		false
-	);
-
-	Item->AttachToComponent(GetMesh(), AttachRules);
-	Item->SetActorHiddenInGame(true);
-
-	if (Item->Implements<UHoldableInterface>())
+	if (InventoryComp->GetItemCount() == 1)
 	{
-		if (InventoryComp->GetItemCount() == 1)
-		{
-			EquipItem(Item);
-		}
-		else
-		{
-			UnEquipItem(Item);
-		}
+		ActiveItem = Item;
 	}
 
-	// Notify item via IPickupableInterface
+	// MULTICAST RPC handles visual pickup on ALL machines (server + clients)
+	// No need to call PerformPickup() directly on server
+	//Multicast_PickupItem(Item);
+	PerformPickup(Item);
+
 	if (Item->Implements<UPickupableInterface>())
 	{
 		FInteractionContext Ctx;
@@ -1132,63 +1097,55 @@ void AFPSCharacter::OnInventoryItemAdded(AActor* Item)
 	}
 }
 
-
-void AFPSCharacter::OnInventoryItemRemoved(AActor* Item)
+void AFPSCharacter::Multicast_PickupItem_Implementation(AActor* Item)
 {
-	// SERVER ONLY - bound with HasAuthority() check in BeginPlay
-	// This callback is fired AFTER item is removed from inventory (inverted from pickup flow)
+	// Multicast RPC runs on ALL machines (server + clients)
+	// This is the ONLY place where PerformPickup() is called
+	PerformPickup(Item);
+}
 
-	if (GEngine)
+void AFPSCharacter::PerformPickup(AActor* Item)
+{
+	if (!Item)
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
-			FString::Printf(TEXT("⚠ [SERVER] Item removed from inventory: %s"),
-				Item ? *Item->GetName() : TEXT("nullptr")));
+		return;
 	}
 
-	// Get drop transform and impulse before dropping
-	FTransform DropTransform;
-	FVector DropImpulse;
-	GetDropTransformAndImpulse(Item, DropTransform, DropImpulse);
+	Item->SetOwner(this);
 
-	// Detach item from character (critical - must be before SetActorTransform)
-	FDetachmentTransformRules DetachRules(
-		EDetachmentRule::KeepWorld,
-		EDetachmentRule::KeepWorld,
-		EDetachmentRule::KeepWorld,
-		false
-	);
-	Item->DetachFromActor(DetachRules);
-
-	// Prepare item for world
-	Item->SetOwner(nullptr);
-	Item->SetActorTransform(DropTransform);
-	Item->SetActorHiddenInGame(false);
-
-	// INTERFACE-DRIVEN: Apply physics to TPS mesh if item is holdable
-	// Use IHoldableInterface::Execute_GetTPSMeshComponent instead of direct member access
 	if (Item->Implements<UHoldableInterface>())
 	{
-		// Reset FPS mesh transform to identity (was attached to Arms with relative transform)
 		if (UPrimitiveComponent* FPSMesh = IHoldableInterface::Execute_GetFPSMeshComponent(Item))
 		{
 			FPSMesh->SetRelativeTransform(FTransform::Identity);
 		}
 
-		// Reset TPS mesh transform to identity and apply physics
 		if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
 		{
-			// Reset transform (was attached to Body with relative transform)
+			TPSMesh->SetSimulatePhysics(false);
+			TPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 			TPSMesh->SetRelativeTransform(FTransform::Identity);
-
-			// TPS mesh is visible to other players in world
-			TPSMesh->SetSimulatePhysics(true);
-			TPSMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-			TPSMesh->AddImpulse(DropImpulse, NAME_None, true);
 		}
 	}
 
-	// Notify item via IPickupableInterface
-	// Item handles weapon-specific drop logic (detach meshes, re-enable replication, etc.)
+	FAttachmentTransformRules AttachRules(EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::KeepWorld, false);
+	Item->AttachToComponent(GetMesh(), AttachRules);
+	Item->SetActorHiddenInGame(true);
+}
+
+
+void AFPSCharacter::OnInventoryItemRemoved(AActor* Item)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// MULTICAST RPC handles visual drop on ALL machines (server + clients)
+	// No need to call PerformDrop() directly on server
+	//Multicast_DropItem(Item);
+	PerformDrop(Item);
+
 	if (Item->Implements<UPickupableInterface>())
 	{
 		FInteractionContext Ctx;
@@ -1202,8 +1159,6 @@ void AFPSCharacter::OnInventoryItemRemoved(AActor* Item)
 
 void AFPSCharacter::OnInventoryCleared()
 {
-	// SERVER ONLY - bound with HasAuthority() check in BeginPlay
-
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red,
@@ -1211,11 +1166,80 @@ void AFPSCharacter::OnInventoryCleared()
 	}
 }
 
+void AFPSCharacter::Multicast_DropItem_Implementation(AActor* Item)
+{
+	// Multicast RPC runs on ALL machines (server + clients)
+	// This is the ONLY place where PerformDrop() is called
+	PerformDrop(Item);
+}
+
+void AFPSCharacter::PerformDrop(AActor* Item)
+{
+	if (!Item)
+	{
+		return;
+	}
+
+	// CRITICAL FIX: Race condition with Owner replication
+	// OnInventoryItemRemoved() calls SetOwner(nullptr) on SERVER
+	// But Multicast RPC arrives BEFORE Owner replication on clients
+	// TPSMesh has SetOwnerNoSee(true) from constructor
+	// If Owner != nullptr when PerformDrop runs, listen server won't see TPSMesh
+	// Solution: Explicitly clear owner on ALL machines to sync immediately
+	Item->SetOwner(nullptr);
+
+	FTransform DropTransform;
+	FVector DropImpulse;
+	GetDropTransformAndImpulse(Item, DropTransform, DropImpulse);
+
+	if (Item->Implements<UHoldableInterface>())
+	{
+		USceneComponent* ItemRoot = Item->GetRootComponent();
+		FAttachmentTransformRules ReAttachRules(EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::KeepWorld, false);
+
+		if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
+		{
+			TPSMesh->SetSimulatePhysics(false);
+			TPSMesh->AttachToComponent(ItemRoot, ReAttachRules);
+			TPSMesh->SetRelativeTransform(FTransform::Identity);
+		}
+
+		if (UPrimitiveComponent* FPSMesh = IHoldableInterface::Execute_GetFPSMeshComponent(Item))
+		{
+			FPSMesh->AttachToComponent(ItemRoot, ReAttachRules);
+			FPSMesh->SetRelativeTransform(FTransform::Identity);
+		}
+	}
+
+	FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, EDetachmentRule::KeepWorld, EDetachmentRule::KeepWorld, false);
+	Item->GetRootComponent()->DetachFromComponent(DetachRules);
+
+	Item->SetActorTransform(DropTransform);
+	Item->SetActorHiddenInGame(false);
+
+	if (Item->Implements<UHoldableInterface>())
+	{
+		if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
+		{
+			//TPSMesh->SetHiddenInGame(false);
+			TPSMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+			TPSMesh->SetSimulatePhysics(true);
+			// Apply calculated drop impulse (bVelChange = true means direct velocity change in cm/s)
+			TPSMesh->AddImpulse(DropImpulse, NAME_None, true);
+		}
+	}
+}
+
 void AFPSCharacter::GetDropTransformAndImpulse_Implementation(AActor* Item, FTransform& OutTransform, FVector& OutImpulse)
 {
-	// Calculate drop position in front of character
+	// Calculate drop position from spine_05 bone (upper chest area)
+	// This ensures item drops from character's chest, not from capsule base
+	FTransform Spine05Transform = GetMesh()->GetSocketTransform(FName("spine_05"), RTS_World);
+	FVector BaseLocation = Spine05Transform.GetLocation();
+
+	// Calculate drop location: spine_05 position + forward offset
 	// Uses Blueprint-configurable parameters (DropForwardDistance, DropUpwardOffset)
-	FVector DropLocation = GetActorLocation() + (GetActorForwardVector() * DropForwardDistance) + FVector(0, 0, DropUpwardOffset);
+	FVector DropLocation = BaseLocation + (GetActorForwardVector() * DropForwardDistance) + FVector(0, 0, DropUpwardOffset);
 	FRotator DropRotation = GetActorRotation();
 
 	OutTransform = FTransform(DropRotation, DropLocation);

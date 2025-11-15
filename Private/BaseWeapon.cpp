@@ -246,7 +246,7 @@ void ABaseWeapon::OnDropped_Implementation(const FInteractionContext& Ctx)
 	// Generic drop logic is handled by FPSCharacter, this handles weapon-specific behavior
 	
 	// Ensure weapon actor replicates movement when dropped
-	//SetReplicateMovement(true);
+	SetReplicateMovement(true);
 }
 
 void ABaseWeapon::OnEquipped_Implementation(APawn* OwnerPawn)

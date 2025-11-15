@@ -177,12 +177,23 @@ public:
 	UFUNCTION(Server, Reliable)
 	void Server_PickupItem(AActor* Item);
 
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_PickupItem(AActor* Item);
+
+	void PerformPickup(AActor* Item);
+
 	// Core pickup logic (SERVER ONLY - called by Server RPC)
 	void PickupItem(AActor* Item);
 
 	// Server RPC to drop item from inventory
 	UFUNCTION(Server, Reliable)
 	void Server_DropItem(AActor* Item);
+
+	// Multicast RPC to perform visual drop on all clients
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_DropItem(AActor* Item);
+
+	void PerformDrop(AActor* Item);
 
 	// Core drop logic (SERVER ONLY - called by Server RPC)
 	void DropItem(AActor* Item);
@@ -333,9 +344,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
 	float DropUpwardArc = 0.5f;
 
-	// Base impulse strength for thrown items (in physics units)
+	// Base impulse strength for thrown items (in cm/s when bVelChange=true)
+	// Recommended: 400-600 for 2m throw distance
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
-	float DefaultDropImpulseStrength = 50000.0f;
+	float DefaultDropImpulseStrength = 200.0f;
 
 	// Multiplier for character velocity inheritance (0 = no inheritance, 1 = full inheritance)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
