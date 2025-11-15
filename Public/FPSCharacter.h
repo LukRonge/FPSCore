@@ -332,13 +332,16 @@ public:
 	// DROP PARAMETERS
 	// ============================================
 
-	// Distance in front of character to drop item (in cm)
+	// Forward distance from camera viewpoint to drop item (in cm)
+	// Recommended: ~30cm to spawn outside capsule collision
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
-	float DropForwardDistance = 100.0f;
+	float DropForwardDistance = 30.0f;
 
-	// Upward offset from character origin when dropping (in cm)
+	// Vertical offset from camera viewpoint (in cm)
+	// Negative value = below camera (hand level), Positive = above camera
+	// Recommended: -20cm for hand level drop point
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")
-	float DropUpwardOffset = 50.0f;
+	float DropUpwardOffset = -20.0f;
 
 	// Upward arc component for throw direction (0 = horizontal, 1 = 45° upward)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Drop")

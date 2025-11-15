@@ -1232,21 +1232,29 @@ void AFPSCharacter::PerformDrop(AActor* Item)
 
 void AFPSCharacter::GetDropTransformAndImpulse_Implementation(AActor* Item, FTransform& OutTransform, FVector& OutImpulse)
 {
-	// Calculate drop position from spine_05 bone (upper chest area)
-	// This ensures item drops from character's chest, not from capsule base
-	FTransform Spine05Transform = GetMesh()->GetSocketTransform(FName("spine_05"), RTS_World);
-	FVector BaseLocation = Spine05Transform.GetLocation();
+	// ✅ Use existing network-safe viewpoint function (same as shooting!)
+	// This works on SERVER because Pitch is replicated and GetActorEyesViewPoint works on server
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetShootingViewPoint_Implementation(ViewLocation, ViewRotation);
 
-	// Calculate drop location: spine_05 position + forward offset
-	// Uses Blueprint-configurable parameters (DropForwardDistance, DropUpwardOffset)
-	FVector DropLocation = BaseLocation + (GetActorForwardVector() * DropForwardDistance) + FVector(0, 0, DropUpwardOffset);
+	// Get camera direction from viewpoint rotation
+	FVector CameraDirection = ViewRotation.Vector();
+
+	// Calculate drop location:
+	// Start from camera viewpoint, then offset forward and down to hand level
+	// DropForwardDistance: ~30cm forward from camera (outside capsule collision)
+	// DropUpwardOffset: Negative value to offset below camera to hand level (e.g., -20cm)
+	FVector DropLocation = ViewLocation;
+	DropLocation += CameraDirection * DropForwardDistance; // Forward offset from camera
+	DropLocation.Z += DropUpwardOffset; // Vertical offset (negative = below camera)
+
 	FRotator DropRotation = GetActorRotation();
-
 	OutTransform = FTransform(DropRotation, DropLocation);
 
-	// Calculate throw impulse direction (forward + upward arc)
-	// Uses Blueprint-configurable DropUpwardArc (default 0.5 for 45° arc)
-	FVector ThrowDirection = GetActorForwardVector() + FVector(0, 0, DropUpwardArc);
+	// ✅ Calculate throw impulse using CAMERA DIRECTION (not actor forward!)
+	// This allows throwing in any direction based on where player is looking (up/down/left/right)
+	FVector ThrowDirection = CameraDirection + FVector(0, 0, DropUpwardArc);
 	ThrowDirection.Normalize();
 
 	// Base throw impulse
