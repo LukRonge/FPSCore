@@ -144,12 +144,12 @@ void AFPSPlayerController::OnPossess(APawn* InPawn)
 				FString::Printf(TEXT("ViewTarget set to: %s"), *InPawn->GetName()));
 		}
 
-		// Link animation layer LOCALLY for listen server host
+		// Link default animation layer LOCALLY for listen server host
 		// This ensures immediate setup on the server's local player
 		if (AFPSCharacter* FPSChar = Cast<AFPSCharacter>(InPawn))
 		{
-			FPSChar->LinkDefaultLayer();
-			UE_LOG(LogTemp, Display, TEXT("[OnPossess] LinkDefaultLayer called (local controller)"));
+			FPSChar->UpdateItemAnimLayer(nullptr);
+			UE_LOG(LogTemp, Display, TEXT("[OnPossess] UpdateItemAnimLayer(nullptr) called (local controller)"));
 		}
 	}
 }

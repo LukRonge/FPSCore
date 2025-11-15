@@ -172,7 +172,9 @@ void AFPSCharacter::BeginPlay()
 	Super::BeginPlay();
 
 	UpdateMovementSpeed(CurrentMovementMode);
-	LinkDefaultLayer();
+
+	// Link default animation layer (runs on ALL machines - each machine links its own AnimInstance)
+	UpdateItemAnimLayer(nullptr);
 
 	// Bind inventory event callbacks (SERVER ONLY)
 	// Inventory events should only be processed on authority
@@ -314,7 +316,7 @@ void AFPSCharacter::Client_OnPossessed_Implementation()
 	// Arms mesh is OnlyOwnerSee, so this only affects local player
 	SetupHandsLocation(nullptr);
 
-	// NOTE: LinkDefaultLayer() is already called in BeginPlay() on ALL machines
+	// NOTE: UpdateItemAnimLayer(nullptr) is already called in BeginPlay() on ALL machines
 	// No need to call it again here (would be redundant)
 
 	if (CachedPlayerController)
@@ -423,28 +425,60 @@ void AFPSCharacter::SetupHandsLocation(AActor* Item)
 	Arms->SetRelativeLocation(HandsOffset);
 }
 
-void AFPSCharacter::LinkDefaultLayer()
+void AFPSCharacter::UpdateItemAnimLayer(AActor* Item)
 {
-	if (!DefaultAnimLayer)
+	// ============================================
+	// ANIMATION LAYER SWITCHING (LOCAL operation)
+	// ============================================
+	// This function runs on ALL machines locally
+	// Each machine manages its own AnimInstance layers
+	// No replication needed - BeginPlay() or OnRep triggers this
+
+	if (Item && Item->Implements<UHoldableInterface>())
 	{
-		return;
+		// Item is valid and holdable - switch to item anim layer
+		TSubclassOf<UAnimInstance> ItemAnimLayer = IHoldableInterface::Execute_GetAnimLayer(Item);
+
+		if (ItemAnimLayer)
+		{
+			// Unlink default layer first (inline)
+			if (DefaultAnimLayer)
+			{
+				GetMesh()->GetAnimInstance()->UnlinkAnimClassLayers(DefaultAnimLayer);
+				Legs->GetAnimInstance()->UnlinkAnimClassLayers(DefaultAnimLayer);
+				Arms->GetAnimInstance()->UnlinkAnimClassLayers(DefaultAnimLayer);
+			}
+
+			// Link item animation layer to all character meshes
+			GetMesh()->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
+			Legs->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
+			Arms->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
+
+			UE_LOG(LogTemp, Log, TEXT("✓ Linked item anim layer: %s"), *ItemAnimLayer->GetName());
+		}
+		else
+		{
+			// Item has no custom anim layer - use default (inline)
+			if (DefaultAnimLayer)
+			{
+				GetMesh()->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
+				Legs->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
+				Arms->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
+			}
+			UE_LOG(LogTemp, Log, TEXT("✓ Item has no anim layer - using default"));
+		}
 	}
-
-	GetMesh()->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
-	Legs->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
-	Arms->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
-}
-
-void AFPSCharacter::UnlinkDefaultLayer()
-{
-	if (!DefaultAnimLayer)
+	else
 	{
-		return;
+		// Item is null or not holdable - switch to default layer (inline)
+		if (DefaultAnimLayer)
+		{
+			GetMesh()->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
+			Legs->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
+			Arms->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
+		}
+		UE_LOG(LogTemp, Log, TEXT("✓ Linked default anim layer"));
 	}
-
-	GetMesh()->GetAnimInstance()->UnlinkAnimClassLayers(DefaultAnimLayer);
-	Legs->GetAnimInstance()->UnlinkAnimClassLayers(DefaultAnimLayer);
-	Arms->GetAnimInstance()->UnlinkAnimClassLayers(DefaultAnimLayer);
 }
 
 void AFPSCharacter::LookYaw(const FInputActionValue& Value)
@@ -712,8 +746,19 @@ void AFPSCharacter::OnRep_Pitch()
 void AFPSCharacter::OnRep_ActiveItem(AActor* OldActiveItem)
 {
 	// OnRep runs on CLIENTS when ActiveItem replicates from server
-	// Follows OnRep pattern: Server and client execute SAME local logic
-	SetupHandsLocation(ActiveItem);
+	// Follows OnRep pattern: Clients execute SAME local logic as server
+
+	// 1. Unequip old item (if exists)
+	if (OldActiveItem)
+	{
+		UnEquipItem(OldActiveItem);
+	}
+
+	// 2. Equip new item (if exists)
+	if (ActiveItem)
+	{
+		EquipItem(ActiveItem);
+	}
 }
 
 
@@ -956,112 +1001,117 @@ void AFPSCharacter::Drop_Implementation(AActor* Item)
 
 void AFPSCharacter::UnEquipItem(AActor* Item)
 {
-	if (Item->Implements<UHoldableInterface>())
+	// Logical unequip: Animation/hands/callbacks (NO mesh/physics changes)
+	// Physical operations handled by PerformDrop() via Multicast
+	//
+	// CRITICAL: Animation/hands MUST execute even if race condition detected
+	// (V2 fix: previous version caused animation layer leak)
+
+	if (!IsValid(Item))
 	{
-		USceneComponent* ItemRoot = Item->GetRootComponent();
-
-		FAttachmentTransformRules AttachRules(
-			EAttachmentRule::SnapToTarget,
-			EAttachmentRule::SnapToTarget,
-			EAttachmentRule::KeepWorld,
-			false
-		);
-
-		// Reset FPS mesh transform to identity (was attached to Arms with relative transform)
-		if (UPrimitiveComponent* FPSMesh = IHoldableInterface::Execute_GetFPSMeshComponent(Item))
-		{
-			FPSMesh->AttachToComponent(ItemRoot, AttachRules);
-			FPSMesh->SetRelativeTransform(FTransform::Identity);
-		}
-
-		// Reset TPS mesh transform to identity and apply physics
-		if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
-		{
-			// Reset transform (was attached to Body with relative transform)
-			TPSMesh->SetSimulatePhysics(false);
-			TPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			TPSMesh->AttachToComponent(ItemRoot, AttachRules);
-			TPSMesh->SetRelativeTransform(FTransform::Identity);
-		}
-
-		// Notify item it has been unequipped
-		IHoldableInterface::Execute_OnUnequipped(Item);
+		UE_LOG(LogTemp, Error, TEXT("[UnEquipItem] Invalid item pointer!"));
+		return;
 	}
+
+	if (!Item->Implements<UHoldableInterface>())
+	{
+		UE_LOG(LogTemp, Error, TEXT("[UnEquipItem] Item %s not holdable!"), *Item->GetName());
+		return;
+	}
+
+	// Reset animation layer (MUST run even if item detached - prevents leak)
+	UpdateItemAnimLayer(nullptr);
+
+	if (IsLocallyControlled())
+	{
+		SetupHandsLocation(nullptr);
+	}
+
+	// Race condition check: Skip callback if Multicast_DropItem arrived first
+	bool bItemAlreadyDetached = (Item->GetAttachParentActor() != this);
+
+	if (bItemAlreadyDetached)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[UnEquipItem] RACE: Item %s already detached"), *Item->GetName());
+		return;
+	}
+
+	IHoldableInterface::Execute_OnUnequipped(Item);
 }
 
 void AFPSCharacter::EquipItem(AActor* Item)
 {
+	// Physical + Logical equip operations
+	// Called by: OnRep_ActiveItem (clients), OnInventoryItemAdded (server)
+	//
+	// CRITICAL: Handles race condition (OnRep before Multicast_PickupItem)
+
+	if (!IsValid(Item))
+	{
+		UE_LOG(LogTemp, Error, TEXT("[EquipItem] Invalid item pointer!"));
+		return;
+	}
+
+	if (!Item->Implements<UHoldableInterface>())
+	{
+		UE_LOG(LogTemp, Error, TEXT("[EquipItem] Item %s not holdable!"), *Item->GetName());
+		return;
+	}
+
+	// Race condition protection: Ensure physical pickup completed first
+	if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
+	{
+		bool bItemInWorldState = TPSMesh->IsSimulatingPhysics() || !Item->IsHidden();
+
+		if (bItemInWorldState)
+		{
+			PerformPickup(Item); // OnRep arrived before Multicast - fix now
+			UE_LOG(LogTemp, Warning, TEXT("[EquipItem] RACE: Item %s not picked up, fixing"), *Item->GetName());
+		}
+	}
+
+	// Mesh attachment (intentionally redundant - maintains dual FPS/TPS hierarchy)
 	FName AttachSocket = IHoldableInterface::Execute_GetAttachSocket(Item);
 
-	// STEP 1: Attach weapon actor (SceneRoot) to Body socket
 	if (GetMesh())
 	{
 		Item->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
 		Item->SetActorRelativeTransform(FTransform::Identity);
-
-		UE_LOG(LogTemp, Log, TEXT("✓ Attached weapon ACTOR to Body: %s"), *AttachSocket.ToString());
 	}
 
-	// STEP 2: Re-attach TPS mesh to Body socket (breaks from SceneRoot hierarchy)
 	if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
 	{
 		TPSMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
 		TPSMesh->SetRelativeTransform(FTransform::Identity);
-
-		UE_LOG(LogTemp, Log, TEXT("✓ Re-attached TPS mesh to Body: %s"), *AttachSocket.ToString());
 	}
 
-	// STEP 3: Re-attach FPS mesh to Arms socket (breaks from SceneRoot hierarchy)
 	if (UPrimitiveComponent* FPSMesh = IHoldableInterface::Execute_GetFPSMeshComponent(Item))
 	{
 		FPSMesh->AttachToComponent(Arms, FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
 		FPSMesh->SetRelativeTransform(FTransform::Identity);
-
-		UE_LOG(LogTemp, Log, TEXT("✓ Re-attached FPS mesh to Arms: %s"), *AttachSocket.ToString());
 	}
 
-	// 10. Get anim layer from item
-	TSubclassOf<UAnimInstance> ItemAnimLayer = IHoldableInterface::Execute_GetAnimLayer(Item);
-	if (ItemAnimLayer)
+	Item->SetActorHiddenInGame(false);
+
+	// LOCAL operations (each machine runs independently)
+	UpdateItemAnimLayer(Item);
+
+	if (IsLocallyControlled())
 	{
-		// Unlink default layer first (use helper function)
-		UnlinkDefaultLayer();
-
-		// 11. Link anim layer to Mesh, Arms, Legs
-		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
-		Legs->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
-		Arms->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
+		SetupHandsLocation(Item);
 	}
 
-	// ============================================
-	// HANDS OFFSET UPDATE (via IHoldableInterface)
-	// User spec flow: 5 (get hands offset, applied here)
-	// ============================================
-
-	// ============================================
-	// HUD UPDATE (via PlayerHUDInterface)
-	// ONLY for locally controlled player
-	// ============================================
+	// HUD update (owning client only)
 	if (IsLocallyControlled() && CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
 	{
-		// Update active weapon display
 		IPlayerHUDInterface::Execute_UpdateActiveWeapon(CachedPlayerController, ActiveItem);
-
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
-				TEXT("✓ Updated HUD with active item"));
-		}
 	}
 
-	// ============================================
-	// NOTIFY ITEM (via IHoldableInterface)
-	// ============================================
+	// Notify item
 	if (Item->Implements<UHoldableInterface>())
 	{
 		IHoldableInterface::Execute_OnEquipped(Item, this);
 	}
-
 }
 
 
@@ -1076,16 +1126,25 @@ void AFPSCharacter::OnInventoryItemAdded(AActor* Item)
 		return;
 	}
 
+	// Set owner (replicated)
+	Item->SetOwner(this);
+
+	// PHYSICAL PICKUP (all clients via Multicast)
+	Multicast_PickupItem(Item);
+
+	// Auto-equip if first item
 	if (InventoryComp->GetItemCount() == 1)
 	{
-		ActiveItem = Item;
+		ActiveItem = Item;  // Replicated property change (triggers OnRep on clients)
+
+		// Server executes equip immediately (OnRep pattern)
+		if (HasAuthority() && ActiveItem)
+		{
+			EquipItem(ActiveItem);
+		}
 	}
 
-	// MULTICAST RPC handles visual pickup on ALL machines (server + clients)
-	// No need to call PerformPickup() directly on server
-	//Multicast_PickupItem(Item);
-	PerformPickup(Item);
-
+	// Notify item via interface (SERVER ONLY)
 	if (Item->Implements<UPickupableInterface>())
 	{
 		FInteractionContext Ctx;
@@ -1099,40 +1158,46 @@ void AFPSCharacter::OnInventoryItemAdded(AActor* Item)
 
 void AFPSCharacter::Multicast_PickupItem_Implementation(AActor* Item)
 {
-	// Multicast RPC runs on ALL machines (server + clients)
-	// This is the ONLY place where PerformPickup() is called
 	PerformPickup(Item);
 }
 
 void AFPSCharacter::PerformPickup(AActor* Item)
 {
-	if (!Item)
+	// Physical pickup: Disable physics, attach to body, hide
+	// Runs on ALL machines via Multicast RPC
+	// Logical operations (animation, hands) handled by EquipItem()
+
+	if (!IsValid(Item))
 	{
+		UE_LOG(LogTemp, Error, TEXT("[PerformPickup] Invalid item!"));
 		return;
 	}
 
-	Item->SetOwner(this);
-
+	// Disable physics BEFORE attaching (prevents warning)
 	if (Item->Implements<UHoldableInterface>())
 	{
-		if (UPrimitiveComponent* FPSMesh = IHoldableInterface::Execute_GetFPSMeshComponent(Item))
-		{
-			FPSMesh->SetRelativeTransform(FTransform::Identity);
-		}
-
 		if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
 		{
 			TPSMesh->SetSimulatePhysics(false);
 			TPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 			TPSMesh->SetRelativeTransform(FTransform::Identity);
 		}
+
+		if (UPrimitiveComponent* FPSMesh = IHoldableInterface::Execute_GetFPSMeshComponent(Item))
+		{
+			FPSMesh->SetRelativeTransform(FTransform::Identity);
+		}
 	}
 
-	FAttachmentTransformRules AttachRules(EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::KeepWorld, false);
+	FAttachmentTransformRules AttachRules(
+		EAttachmentRule::SnapToTarget,
+		EAttachmentRule::SnapToTarget,
+		EAttachmentRule::KeepWorld,
+		false
+	);
 	Item->AttachToComponent(GetMesh(), AttachRules);
 	Item->SetActorHiddenInGame(true);
 }
-
 
 void AFPSCharacter::OnInventoryItemRemoved(AActor* Item)
 {
@@ -1141,11 +1206,26 @@ void AFPSCharacter::OnInventoryItemRemoved(AActor* Item)
 		return;
 	}
 
-	// MULTICAST RPC handles visual drop on ALL machines (server + clients)
-	// No need to call PerformDrop() directly on server
-	//Multicast_DropItem(Item);
-	PerformDrop(Item);
+	// Conditional unequip - only if dropping active item
+	if (Item == ActiveItem)
+	{
+		AActor* OldActiveItem = ActiveItem;
+		ActiveItem = nullptr;  // Replicated property change (triggers OnRep on clients)
 
+		// Server executes unequip immediately (OnRep pattern)
+		if (HasAuthority() && OldActiveItem)
+		{
+			UnEquipItem(OldActiveItem);
+		}
+	}
+
+	// Clear owner (replicated) - BEFORE Multicast
+	Item->SetOwner(nullptr);
+
+	// PHYSICAL DROP (all clients via Multicast)
+	Multicast_DropItem(Item);
+
+	// Notify item via interface (SERVER ONLY)
 	if (Item->Implements<UPickupableInterface>())
 	{
 		FInteractionContext Ctx;
@@ -1168,38 +1248,40 @@ void AFPSCharacter::OnInventoryCleared()
 
 void AFPSCharacter::Multicast_DropItem_Implementation(AActor* Item)
 {
-	// Multicast RPC runs on ALL machines (server + clients)
-	// This is the ONLY place where PerformDrop() is called
 	PerformDrop(Item);
 }
 
 void AFPSCharacter::PerformDrop(AActor* Item)
 {
-	if (!Item)
+	// Physical drop: Mesh reattachment, detach, world placement, physics
+	// Runs on ALL machines via Multicast RPC
+	// Logical operations (animation, hands) handled by UnEquipItem()
+
+	if (!IsValid(Item))
 	{
+		UE_LOG(LogTemp, Error, TEXT("[PerformDrop] Invalid item!"));
 		return;
 	}
-
-	// CRITICAL FIX: Race condition with Owner replication
-	// OnInventoryItemRemoved() calls SetOwner(nullptr) on SERVER
-	// But Multicast RPC arrives BEFORE Owner replication on clients
-	// TPSMesh has SetOwnerNoSee(true) from constructor
-	// If Owner != nullptr when PerformDrop runs, listen server won't see TPSMesh
-	// Solution: Explicitly clear owner on ALL machines to sync immediately
-	Item->SetOwner(nullptr);
 
 	FTransform DropTransform;
 	FVector DropImpulse;
 	GetDropTransformAndImpulse(Item, DropTransform, DropImpulse);
 
+	// Restore mesh hierarchy (reattach FPS/TPS to ItemRoot)
 	if (Item->Implements<UHoldableInterface>())
 	{
 		USceneComponent* ItemRoot = Item->GetRootComponent();
-		FAttachmentTransformRules ReAttachRules(EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::KeepWorld, false);
+		FAttachmentTransformRules ReAttachRules(
+			EAttachmentRule::SnapToTarget,
+			EAttachmentRule::SnapToTarget,
+			EAttachmentRule::KeepWorld,
+			false
+		);
 
 		if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
 		{
 			TPSMesh->SetSimulatePhysics(false);
+			TPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 			TPSMesh->AttachToComponent(ItemRoot, ReAttachRules);
 			TPSMesh->SetRelativeTransform(FTransform::Identity);
 		}
@@ -1211,9 +1293,16 @@ void AFPSCharacter::PerformDrop(AActor* Item)
 		}
 	}
 
-	FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, EDetachmentRule::KeepWorld, EDetachmentRule::KeepWorld, false);
+	// Detach from character
+	FDetachmentTransformRules DetachRules(
+		EDetachmentRule::KeepWorld,
+		EDetachmentRule::KeepWorld,
+		EDetachmentRule::KeepWorld,
+		false
+	);
 	Item->GetRootComponent()->DetachFromComponent(DetachRules);
 
+	// Place in world and enable physics
 	Item->SetActorTransform(DropTransform);
 	Item->SetActorHiddenInGame(false);
 
@@ -1221,10 +1310,8 @@ void AFPSCharacter::PerformDrop(AActor* Item)
 	{
 		if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
 		{
-			//TPSMesh->SetHiddenInGame(false);
 			TPSMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 			TPSMesh->SetSimulatePhysics(true);
-			// Apply calculated drop impulse (bVelChange = true means direct velocity change in cm/s)
 			TPSMesh->AddImpulse(DropImpulse, NAME_None, true);
 		}
 	}
@@ -1249,7 +1336,9 @@ void AFPSCharacter::GetDropTransformAndImpulse_Implementation(AActor* Item, FTra
 	DropLocation += CameraDirection * DropForwardDistance; // Forward offset from camera
 	DropLocation.Z += DropUpwardOffset; // Vertical offset (negative = below camera)
 
+	// Rotate item 90 degrees left (counterclockwise in Yaw axis)
 	FRotator DropRotation = GetActorRotation();
+	DropRotation.Yaw -= 90.0f;
 	OutTransform = FTransform(DropRotation, DropLocation);
 
 	// ✅ Calculate throw impulse using CAMERA DIRECTION (not actor forward!)

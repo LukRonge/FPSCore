@@ -106,13 +106,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Animation")
 	void SetupHandsLocation(AActor* Item = nullptr);
 
-	// Link default animation layer to all character meshes
+	// Update animation layer based on item (item anim layer if valid, default layer if null)
+	// @param Item - Item to get anim layer from (nullptr = switch to default layer)
 	UFUNCTION(BlueprintCallable, Category = "Animation")
-	void LinkDefaultLayer();
-
-	// Unlink default animation layer from all character meshes
-	UFUNCTION(BlueprintCallable, Category = "Animation")
-	void UnlinkDefaultLayer();
+	void UpdateItemAnimLayer(AActor* Item);
 
 	// OnRep callbacks
 	UFUNCTION()
@@ -177,26 +174,25 @@ public:
 	UFUNCTION(Server, Reliable)
 	void Server_PickupItem(AActor* Item);
 
+	// Multicast RPC for physical pickup setup (runs on ALL clients)
+	// Disables physics, attaches to character body, hides item
 	UFUNCTION(NetMulticast, Reliable)
 	void Multicast_PickupItem(AActor* Item);
 
+	// Physical pickup implementation (called by Multicast)
 	void PerformPickup(AActor* Item);
-
-	// Core pickup logic (SERVER ONLY - called by Server RPC)
-	void PickupItem(AActor* Item);
 
 	// Server RPC to drop item from inventory
 	UFUNCTION(Server, Reliable)
 	void Server_DropItem(AActor* Item);
 
-	// Multicast RPC to perform visual drop on all clients
+	// Multicast RPC for physical drop setup (runs on ALL clients)
+	// Detaches from character, enables physics, places in world
 	UFUNCTION(NetMulticast, Reliable)
 	void Multicast_DropItem(AActor* Item);
 
+	// Physical drop implementation (called by Multicast)
 	void PerformDrop(AActor* Item);
-
-	// Core drop logic (SERVER ONLY - called by Server RPC)
-	void DropItem(AActor* Item);
 
 	// Calculate drop transform and physics impulse for dropped items
 	// Used by DropItem() to spawn item in front of character with throw arc
