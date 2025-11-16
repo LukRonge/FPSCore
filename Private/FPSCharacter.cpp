@@ -367,12 +367,28 @@ void AFPSCharacter::UpdatePitch(float Y)
 
 void AFPSCharacter::Server_UpdatePitch_Implementation(float NewPitch)
 {
-	// Clamp received pitch from client
-	Pitch = FMath::Clamp(NewPitch, -45.0f, 45.0f);
+	// ✅ FIX: Store ACTUAL camera pitch from client (no artificial clamp to input range)
+	// Client sends calculated pitch from CalculateNetworkPitchFromCamera()
+	// which includes spine chain amplification (can exceed ±45° input range)
+	//
+	// CRITICAL: Server needs ACTUAL camera pitch for accurate weapon ballistics
+	// GetShootingViewPoint() uses this value for FireComponent->Shoot() direction
+	//
+	// Anti-cheat: Clamp to realistic camera pitch range (±90°), not input range (±45°)
+	Pitch = FMath::Clamp(NewPitch, -90.0f, 90.0f);
 
-	// Server uses replicated Pitch for third-person spine rotations
-	// (Server doesn't have LocalPitchAccumulator, it's only on owning client)
-	LocalPitchAccumulator = Pitch;
+	// ✅ FIX: Apply inverse compensation for server's spine rotations
+	// Same logic as OnRep_Pitch() for remote clients
+	//
+	// Background:
+	// - LocalPitchAccumulator is input-driven pitch (±45°) for spine animations
+	// - Pitch is ACTUAL camera pitch (post-amplification, can be >45°) for shooting
+	// - Spine chain amplifies: spine_03(40%) + spine_04(50%) + spine_05(60%) + neck_01(20%) ≈ 170%
+	// - Inverse: camera_pitch / 1.7 ≈ LocalPitchAccumulator
+	const float ProxyAimOffsetCompensation = 0.588f; // 1 / 1.7 ≈ 0.588
+	LocalPitchAccumulator = Pitch * ProxyAimOffsetCompensation;
+	LocalPitchAccumulator = FMath::Clamp(LocalPitchAccumulator, -45.0f, 45.0f);
+
 	UpdateSpineRotations();
 }
 
