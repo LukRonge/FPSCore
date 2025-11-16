@@ -56,6 +56,8 @@ protected:
 	void SprintReleased();
 	void CrouchPressed();
 	void CrouchReleased();
+	void JumpPressed();
+	void JumpReleased();
 	void InteractPressed();
 	void DropPressed();
 	void UseStarted();
@@ -264,6 +266,9 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	class USceneComponent* Neck_01;
 
+	// Original Spine_03 location (for crouch offset)
+	FVector OriginalSpineLocation = FVector::ZeroVector;
+
 	// Camera component
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	class UCameraComponent* Camera;
@@ -302,6 +307,9 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	UInputAction* IA_Shoot;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* IA_Jump;
 
 	// Movement speeds
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Movement")

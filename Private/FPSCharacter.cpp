@@ -43,6 +43,7 @@ AFPSCharacter::AFPSCharacter()
 	GetCapsuleComponent()->InitCapsuleSize(34.0f, 88.0f);
 
 	CMC = GetCharacterMovement();
+	CMC->MaxWalkSpeedCrouched = 150.0f;  // Same as WalkSpeed
 
 	// Third person body - visible to others only
 	GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -88.0f));
@@ -139,6 +140,9 @@ void AFPSCharacter::InitializeSpineComponents()
 
 	Spine_03->SetRelativeLocation(Spine03Transform.GetLocation());
 	Spine_03->SetRelativeRotation(FRotator(0.0f, 90.0f, 0.0f));
+
+	// Store original Spine_03 location for crouch offset
+	OriginalSpineLocation = Spine_03->GetRelativeLocation();
 
 	auto SetChildRelativeTransform = [&](USceneComponent* Child, const FTransform& ChildBone, const FTransform& ParentBone)
 	{
@@ -257,6 +261,12 @@ void AFPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		{
 			EnhancedInputComponent->BindAction(IA_Crouch, ETriggerEvent::Started, this, &AFPSCharacter::CrouchPressed);
 			EnhancedInputComponent->BindAction(IA_Crouch, ETriggerEvent::Completed, this, &AFPSCharacter::CrouchReleased);
+		}
+
+		if (IA_Jump)
+		{
+			EnhancedInputComponent->BindAction(IA_Jump, ETriggerEvent::Started, this, &AFPSCharacter::JumpPressed);
+			EnhancedInputComponent->BindAction(IA_Jump, ETriggerEvent::Completed, this, &AFPSCharacter::JumpReleased);
 		}
 
 		if (IA_Interact)
@@ -573,12 +583,36 @@ void AFPSCharacter::CrouchPressed()
 {
 	UpdateMovementSpeed(EFPSMovementMode::Crouch);
 	Server_SetMovementMode(EFPSMovementMode::Crouch);
+	Crouch();
+
+	// Apply crouch camera offset (LOCAL ONLY - owning client)
+	if (IsLocallyControlled())
+	{
+		Spine_03->SetRelativeLocation(OriginalSpineLocation + FVector(0.0f, 10.0f, -50.0f));
+	}
 }
 
 void AFPSCharacter::CrouchReleased()
 {
 	UpdateMovementSpeed(EFPSMovementMode::Jog);
 	Server_SetMovementMode(EFPSMovementMode::Jog);
+	UnCrouch();
+
+	// Restore original spine location (LOCAL ONLY - owning client)
+	if (IsLocallyControlled())
+	{
+		Spine_03->SetRelativeLocation(OriginalSpineLocation);
+	}
+}
+
+void AFPSCharacter::JumpPressed()
+{
+	Jump();  // Native UE5 jump (automatically replicated)
+}
+
+void AFPSCharacter::JumpReleased()
+{
+	StopJumping();  // Native UE5 stop jump (automatically replicated)
 }
 
 void AFPSCharacter::InteractPressed()
