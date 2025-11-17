@@ -243,6 +243,19 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
 	FVector DefaultHandsOffset = FVector::ZeroVector;
 
+	// ============================================
+	// AIMING INTERPOLATION (LOCAL ONLY)
+	// ============================================
+
+	// Target Arms offset for aiming interpolation
+	UPROPERTY(BlueprintReadWrite, Category = "Aiming")
+	FVector TargetArmsOffset = FVector::ZeroVector;
+
+	// Aiming interpolation speed (constant)
+	const float AimingInterpSpeed = 25.0f;
+
+	// Note: bIsAiming already exists at line 157 (replicated, used for look sensitivity)
+
 	// Default animation layer class to link/unlink dynamically
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Animation")
 	TSubclassOf<UAnimInstance> DefaultAnimLayer;

@@ -182,6 +182,13 @@ void AFPSCharacter::BeginPlay()
 	// Link default animation layer (runs on ALL machines - each machine links its own AnimInstance)
 	UpdateItemAnimLayer(nullptr);
 
+	// Initialize Arms position (LOCAL ONLY)
+	if (IsLocallyControlled())
+	{
+		TargetArmsOffset = DefaultHandsOffset;
+		Arms->SetRelativeLocation(DefaultHandsOffset);
+	}
+
 	// Bind inventory event callbacks (SERVER ONLY)
 	// Inventory events should only be processed on authority
 	// Clients receive updates via replication
@@ -214,12 +221,18 @@ void AFPSCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	DeltaSeconds = DeltaTime;
+	DeltaSeconds = DeltaTime;	
 
 	// Check for interactable objects (only for locally controlled player)
 	if (IsLocallyControlled())
 	{
 		CheckInteractionTrace();
+
+		FVector CurrentArmsLocation = Arms->GetRelativeLocation();
+
+		// Interpolate towards target offset
+		FVector NewArmsLocation = FMath::VInterpTo(CurrentArmsLocation, TargetArmsOffset, DeltaTime, AimingInterpSpeed);
+		Arms->SetRelativeLocation(NewArmsLocation);
 	}
 }
 
@@ -292,6 +305,7 @@ void AFPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		{
 			EnhancedInputComponent->BindAction(IA_Aim, ETriggerEvent::Started, this, &AFPSCharacter::AimingPressed);
 			EnhancedInputComponent->BindAction(IA_Aim, ETriggerEvent::Completed, this, &AFPSCharacter::AimingReleased);
+			EnhancedInputComponent->BindAction(IA_Aim, ETriggerEvent::Canceled, this, &AFPSCharacter::AimingReleased);
 		}
 	}
 }
@@ -456,6 +470,8 @@ void AFPSCharacter::SetupHandsLocation(AActor* Item)
 		HandsOffset = DefaultHandsOffset;
 	}
 
+	// Set both current and target position (immediate, no interpolation)
+	TargetArmsOffset = HandsOffset;
 	Arms->SetRelativeLocation(HandsOffset);
 }
 
@@ -799,8 +815,9 @@ void AFPSCharacter::AimingPressed()
 	// Formula: NewArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace
 	FVector AimingArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace;
 
-	// Apply Arms offset
-	Arms->SetRelativeLocation(AimingArmsOffset);
+	// Set target offset for interpolation (will be applied in Tick)
+	TargetArmsOffset = AimingArmsOffset;
+	bIsAiming = true;
 }
 
 void AFPSCharacter::AimingReleased()
@@ -811,9 +828,22 @@ void AFPSCharacter::AimingReleased()
 		return;
 	}
 
-	// Restore default Arms position using SetupHandsLocation
-	// This applies HandsOffset from ActiveItem or DefaultHandsOffset if no item
-	SetupHandsLocation(ActiveItem);
+	// Only process release if we were actually aiming
+	if (!bIsAiming)
+	{
+		return;
+	}
+
+	// Calculate target Arms offset (default hands position)
+	FVector DefaultHandsPosition = DefaultHandsOffset;
+	if (ActiveItem && ActiveItem->Implements<UHoldableInterface>())
+	{
+		DefaultHandsPosition = IHoldableInterface::Execute_GetHandsOffset(ActiveItem);
+	}
+
+	// Set target offset for interpolation back to default position
+	TargetArmsOffset = DefaultHandsPosition;
+	bIsAiming = false;
 }
 
 void AFPSCharacter::Server_SetMovementMode_Implementation(EFPSMovementMode NewMode)
