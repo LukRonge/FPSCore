@@ -62,6 +62,8 @@ protected:
 	void DropPressed();
 	void UseStarted();
 	void UseStopped();
+	void AimingPressed();
+	void AimingReleased();
 
 	// Movement speed control
 	void UpdateMovementSpeed(EFPSMovementMode NewMode);
@@ -310,6 +312,9 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	UInputAction* IA_Jump;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* IA_Aim;
 
 	// Movement speeds
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Movement")

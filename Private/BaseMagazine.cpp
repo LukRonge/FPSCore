@@ -8,7 +8,7 @@ ABaseMagazine::ABaseMagazine()
 	PrimaryActorTick.bCanEverTick = false;
 
 	bReplicates = true;
-	SetReplicateMovement(true);
+	//SetReplicateMovement(true);
 }
 
 void ABaseMagazine::BeginPlay()

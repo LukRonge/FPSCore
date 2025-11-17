@@ -13,7 +13,9 @@
 #include "Interfaces/PickupableInterface.h"
 #include "Interfaces/ItemCollectorInterface.h"
 #include "Interfaces/UsableInterface.h"
+#include "Interfaces/SightInterface.h"
 #include "Interfaces/PlayerHUDInterface.h"
+#include "BaseWeapon.h"
 #include "Core/FPSGameplayTags.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -284,6 +286,12 @@ void AFPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 			EnhancedInputComponent->BindAction(IA_Shoot, ETriggerEvent::Started, this, &AFPSCharacter::UseStarted);
 			EnhancedInputComponent->BindAction(IA_Shoot, ETriggerEvent::Completed, this, &AFPSCharacter::UseStopped);
 			EnhancedInputComponent->BindAction(IA_Shoot, ETriggerEvent::Canceled, this, &AFPSCharacter::UseStopped);
+		}
+
+		if (IA_Aim)
+		{
+			EnhancedInputComponent->BindAction(IA_Aim, ETriggerEvent::Started, this, &AFPSCharacter::AimingPressed);
+			EnhancedInputComponent->BindAction(IA_Aim, ETriggerEvent::Completed, this, &AFPSCharacter::AimingReleased);
 		}
 	}
 }
@@ -733,6 +741,79 @@ void AFPSCharacter::UseStopped()
 
 	// Call UseStop via interface (will trigger Server RPC internally)
 	IUsableInterface::Execute_UseStop(ActiveItem, Ctx);
+}
+
+void AFPSCharacter::AimingPressed()
+{
+	// Only locally controlled players can aim
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	// Check if we have an active item
+	if (!ActiveItem)
+	{
+		return;
+	}
+
+	// Check if active item implements ISightInterface
+	if (!ActiveItem->Implements<USightInterface>())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::AimingPressed() - ActiveItem does not implement ISightInterface"));
+		return;
+	}
+
+	// ============================================
+	// CALCULATE ARMS OFFSET FOR AIMING
+	// ============================================
+	// Goal: Align sight's AimingPoint with camera center (0,0,0) in camera space
+	// Hierarchy: Camera -> Arms -> Weapon -> FPSSightComponent -> SightActor -> AimingPoint
+
+	// Get AimingPoint from weapon's sight (relative to SightActor)
+	FVector AimingPointLocal = ISightInterface::Execute_GetAimingPoint(ActiveItem);
+
+	// Get SightActor from weapon's FPSSightComponent
+	ABaseWeapon* Weapon = Cast<ABaseWeapon>(ActiveItem);
+	if (!Weapon || !Weapon->FPSSightComponent)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::AimingPressed() - Weapon has no FPSSightComponent"));
+		return;
+	}
+
+	AActor* SightActor = Weapon->FPSSightComponent->GetChildActor();
+	if (!SightActor)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::AimingPressed() - FPSSightComponent has no child actor"));
+		return;
+	}
+
+	// Get current Arms position (HandsOffset from weapon)
+	FVector CurrentArmsOffset = Arms->GetRelativeLocation();
+
+	// Transform AimingPoint: SightActor local space -> World space -> Camera local space
+	FVector AimingPointWorld = SightActor->GetActorTransform().TransformPosition(AimingPointLocal);
+	FVector AimingPointInCameraSpace = Camera->GetComponentTransform().InverseTransformPosition(AimingPointWorld);
+
+	// Calculate new Arms offset: Move Arms to align AimingPoint with camera center
+	// Formula: NewArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace
+	FVector AimingArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace;
+
+	// Apply Arms offset
+	Arms->SetRelativeLocation(AimingArmsOffset);
+}
+
+void AFPSCharacter::AimingReleased()
+{
+	// Only locally controlled players can aim
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	// Restore default Arms position using SetupHandsLocation
+	// This applies HandsOffset from ActiveItem or DefaultHandsOffset if no item
+	SetupHandsLocation(ActiveItem);
 }
 
 void AFPSCharacter::Server_SetMovementMode_Implementation(EFPSMovementMode NewMode)

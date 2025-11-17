@@ -30,7 +30,7 @@
 class ABaseMagazine;
 class UBallisticsComponent;
 class UFireComponent;
-class USightComponent;
+class ABaseSight;
 
 UCLASS()
 class FPSCORE_API ABaseWeapon : public AActor, public IInteractableInterface, public IPickupableInterface, public IHoldableInterface, public ISightInterface, public IUsableInterface, public IAmmoConsumerInterface, public IBallisticsHandlerInterface
@@ -64,10 +64,6 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Components")
 	UFireComponent* FireComponent;
 
-	// Sight component (handles sight configuration, aiming calculations)
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
-	USightComponent* SightComponent;
-
 	// FPS Magazine component (attached to FPS mesh "magazine" socket)
 	// Visible only to owner, spawned from MagazineClass
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
@@ -77,6 +73,16 @@ public:
 	// Visible to others, spawned from MagazineClass
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
 	UChildActorComponent* TPSMagazineComponent;
+
+	// FPS Sight component (attached to FPS mesh "attachment_body" bone)
+	// Visible only to owner, spawned from CurrentSightClass
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
+	UChildActorComponent* FPSSightComponent;
+
+	// TPS Sight component (attached to TPS mesh "attachment_body" bone)
+	// Visible to others, spawned from CurrentSightClass
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
+	UChildActorComponent* TPSSightComponent;
 
 	// ============================================
 	// DUAL-MESH SYSTEM (FPS + TPS)
@@ -178,6 +184,39 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "Weapon|Aiming")
 	bool IsAiming = false;
 
+	// Default aiming point for camera positioning when aiming
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Aiming")
+	FVector DefaultAimPoint = FVector::ZeroVector;
+
+	// Default sight class (iron sights, red dot, scope, etc.)
+	// Set in Blueprint Class Defaults
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Aiming")
+	TSubclassOf<ABaseSight> DefaultSightClass;
+
+	// Current attached sight class (REPLICATED)
+	// Auto-initialized in PostInitializeComponents() from DefaultSightClass
+	// Can be changed at runtime for modular sight swapping
+	UPROPERTY(BlueprintReadWrite, Category = "Weapon|Aiming", ReplicatedUsing = OnRep_CurrentSightClass)
+	TSubclassOf<ABaseSight> CurrentSightClass;
+
+protected:
+	/**
+	 * Called on CLIENTS when CurrentSightClass is replicated from server
+	 * Re-initializes sight components with new sight class
+	 */
+	UFUNCTION()
+	void OnRep_CurrentSightClass();
+
+public:
+	/**
+	 * Initialize sight components with specified sight class
+	 * Spawns child actors for FPSSightComponent and TPSSightComponent
+	 * Runs on ALL machines (called from PostInitializeComponents or OnRep)
+	 * @param SightClass - Sight class to spawn (nullptr to clear sights)
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Weapon|Aiming")
+	void InitSightComponents(TSubclassOf<ABaseSight> SightClass);
+
 	// ============================================
 	// UI
 	// ============================================
@@ -185,10 +224,6 @@ public:
 	// Crosshair widget class (hip fire)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|UI")
 	TSubclassOf<UUserWidget> CrossHair;
-
-	// Crosshair widget class (aiming down sights)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|UI")
-	TSubclassOf<UUserWidget> AimCrossHair;
 
 	// ============================================
 	// EFFECTS
@@ -407,6 +442,13 @@ public:
 
 	// Consume ammo from magazine (SERVER ONLY)
 	virtual int32 ConsumeAmmo_Implementation(int32 Requested, const FUseContext& Ctx) override;
+
+	// ============================================
+	// SIGHT INTERFACE
+	// ============================================
+
+	// Get aiming point from current sight or default
+	virtual FVector GetAimingPoint_Implementation() const override;
 
 	// ============================================
 	// UTILITY METHODS

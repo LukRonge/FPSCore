@@ -16,15 +16,15 @@
  * - Provide sight mesh (static or skeletal)
  * - Handle sight-specific VFX (reticle glow, lens reflections)
  * - Support first-person/third-person visibility control
+ * - Store AimingPoint configuration (via ISightInterface)
  *
  * DOES NOT:
- * - Calculate aiming offsets (→ SightComponent)
  * - Handle weapon firing (→ FireComponent)
  * - Manage crosshair UI (→ HUD)
  *
  * USAGE:
- * - Spawned and attached by SightComponent
- * - Configured in weapon Blueprint's SightComponent
+ * - Spawned as child actor in weapon's FPSSightComponent/TPSSightComponent
+ * - Configured in weapon Blueprint's DefaultSightClass
  */
 UCLASS()
 class FPSCORE_API ABaseSightActor : public AActor

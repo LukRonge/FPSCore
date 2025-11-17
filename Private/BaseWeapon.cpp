@@ -6,6 +6,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Core/FPSGameplayTags.h"
 #include "BaseMagazine.h"
+#include "BaseSight.h"
 #include "Interfaces/ItemCollectorInterface.h"
 
 ABaseWeapon::ABaseWeapon()
@@ -40,6 +41,14 @@ ABaseWeapon::ABaseWeapon()
 
 	TPSMagazineComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("TPSMagazineComponent"));
 	TPSMagazineComponent->SetupAttachment(TPSMesh, FName("magazine"));
+
+	FPSSightComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("FPSSightComponent"));
+	FPSSightComponent->SetupAttachment(FPSMesh, FName("attachment_body"));
+	FPSSightComponent->SetIsReplicated(false);  // Component not replicated (child actor spawned locally)
+
+	TPSSightComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("TPSSightComponent"));
+	TPSSightComponent->SetupAttachment(TPSMesh, FName("attachment_body"));
+	TPSSightComponent->SetIsReplicated(false);  // Component not replicated (child actor spawned locally)
 }
 
 void ABaseWeapon::PostInitializeComponents()
@@ -50,6 +59,14 @@ void ABaseWeapon::PostInitializeComponents()
 	{
 		FPSMagazineComponent->SetChildActorClass(MagazineClass);
 		TPSMagazineComponent->SetChildActorClass(MagazineClass);
+	}
+
+	// Initialize sight components from DefaultSightClass
+	// This runs on ALL machines (Server + Clients)
+	if (DefaultSightClass)
+	{
+		CurrentSightClass = DefaultSightClass;
+		InitSightComponents(CurrentSightClass);
 	}
 }
 
@@ -105,6 +122,7 @@ void ABaseWeapon::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifet
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ABaseWeapon, CurrentMagazine);
+	DOREPLIFETIME(ABaseWeapon, CurrentSightClass);
 }
 
 void ABaseWeapon::OnRep_CurrentMagazine()
@@ -127,6 +145,17 @@ void ABaseWeapon::SetOwner(AActor* NewOwner)
 	if (TPSMagazineComponent->GetChildActor())
 	{
 		TPSMagazineComponent->GetChildActor()->SetOwner(NewOwner);
+	}
+
+	// Propagate owner to sights
+	if (FPSSightComponent && FPSSightComponent->GetChildActor())
+	{
+		FPSSightComponent->GetChildActor()->SetOwner(NewOwner);
+	}
+
+	if (TPSSightComponent && TPSSightComponent->GetChildActor())
+	{
+		TPSSightComponent->GetChildActor()->SetOwner(NewOwner);
 	}
 }
 
@@ -506,4 +535,93 @@ int32 ABaseWeapon::ConsumeAmmo_Implementation(int32 Requested, const FUseContext
 		AmmoToConsume, CurrentMagazine->CurrentAmmo);
 
 	return AmmoToConsume;
+}
+
+// ============================================
+// SIGHT SYSTEM
+// ============================================
+
+void ABaseWeapon::InitSightComponents(TSubclassOf<ABaseSight> SightClass)
+{
+	// This function runs on ALL machines (Server + Clients)
+	// Called from PostInitializeComponents() or OnRep_CurrentSightClass()
+
+	if (!FPSSightComponent || !TPSSightComponent)
+	{
+		UE_LOG(LogTemp, Error, TEXT("BaseWeapon::InitSightComponents() - Sight components are nullptr!"));
+		return;
+	}
+
+	if (SightClass)
+	{
+		// Set child actor class for both components
+		// ChildActorComponent will spawn the actor locally on this machine
+		// Cast TSubclassOf<ABaseSight> to TSubclassOf<AActor>
+		FPSSightComponent->SetChildActorClass(TSubclassOf<AActor>(SightClass));
+		TPSSightComponent->SetChildActorClass(TSubclassOf<AActor>(SightClass));
+
+		// Ensure spawned child actors don't replicate (visual-only)
+		// This is redundant since BaseSight has bReplicates=false, but explicit is better
+		FPSSightComponent->CreateChildActor();
+		if (ABaseSight* FPSSight = Cast<ABaseSight>(FPSSightComponent->GetChildActor()))
+		{
+			FPSSight->SetReplicates(false);
+			FPSSight->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::FirstPerson;
+			FPSSight->SetOwner(GetOwner());  // Propagate weapon owner to sight
+		}
+
+		TPSSightComponent->CreateChildActor();
+		if (ABaseSight* TPSSight = Cast<ABaseSight>(TPSSightComponent->GetChildActor()))
+		{
+			TPSSight->SetReplicates(false);
+			TPSSight->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::WorldSpaceRepresentation;
+			TPSSight->SetOwner(GetOwner());  // Propagate weapon owner to sight
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("BaseWeapon::InitSightComponents() - Sight initialized: %s"),
+			*SightClass->GetName());
+	}
+	else
+	{
+		// Clear sight components (no sight attached)
+		FPSSightComponent->SetChildActorClass(nullptr);
+		TPSSightComponent->SetChildActorClass(nullptr);
+
+		UE_LOG(LogTemp, Log, TEXT("BaseWeapon::InitSightComponents() - Sight cleared"));
+	}
+}
+
+void ABaseWeapon::OnRep_CurrentSightClass()
+{
+	// Called on CLIENTS when CurrentSightClass replicates from server
+	// Re-initialize sight components with new class
+	// Server already called InitSightComponents() directly, so this only runs on clients
+
+	UE_LOG(LogTemp, Log, TEXT("BaseWeapon::OnRep_CurrentSightClass() - Sight class replicated: %s"),
+		CurrentSightClass ? *CurrentSightClass->GetName() : TEXT("nullptr"));
+
+	InitSightComponents(CurrentSightClass);
+}
+
+// ============================================
+// SIGHT INTERFACE
+// ============================================
+
+FVector ABaseWeapon::GetAimingPoint_Implementation() const
+{
+	// Try to get AimingPoint from current attached sight
+	if (FPSSightComponent && FPSSightComponent->GetChildActor())
+	{
+		AActor* SightActor = FPSSightComponent->GetChildActor();
+
+		// Check if sight actor implements ISightInterface
+		if (SightActor->Implements<USightInterface>())
+		{
+			// Call interface method directly on actor
+			return ISightInterface::Execute_GetAimingPoint(SightActor);
+		}
+	}
+
+	// Fallback: Use weapon's default aiming point
+	return DefaultAimPoint;
 }

@@ -42,14 +42,6 @@ public:
 	virtual FVector GetAimingPoint_Implementation() const { return FVector::ZeroVector; }
 
 	/**
-	 * Get hands offset when aiming (adjusts arm position for proper sight picture)
-	 * Calculated from sight configuration to bring weapon into proper aim position
-	 */
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Sight")
-	FVector GetAimingHandsOffset() const;
-	virtual FVector GetAimingHandsOffset_Implementation() const { return FVector::ZeroVector; }
-
-	/**
 	 * Check if sight should hide first-person mesh when aiming
 	 * Used for scopes/optics that obstruct view
 	 * Returns true to hide FPS mesh during ADS
