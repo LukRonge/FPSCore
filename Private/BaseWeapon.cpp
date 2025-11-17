@@ -625,3 +625,26 @@ FVector ABaseWeapon::GetAimingPoint_Implementation() const
 	// Fallback: Use weapon's default aiming point
 	return DefaultAimPoint;
 }
+
+bool ABaseWeapon::ShouldHideFPSMeshWhenAiming_Implementation() const
+{
+	// Check if current sight wants to hide FPS mesh when aiming
+	if (FPSSightComponent && FPSSightComponent->GetChildActor())
+	{
+		AActor* SightActor = FPSSightComponent->GetChildActor();
+		if (SightActor->Implements<USightInterface>())
+		{
+			return ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(SightActor);
+		}
+	}
+	return false;
+}
+
+void ABaseWeapon::SetFPSMeshVisibility_Implementation(bool bVisible)
+{
+	if (FPSMesh)
+	{
+		// Propagate visibility to all child components (sights, magazines, attachments)
+		FPSMesh->SetVisibility(bVisible, true);
+	}
+}

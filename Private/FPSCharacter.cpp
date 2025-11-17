@@ -233,6 +233,20 @@ void AFPSCharacter::Tick(float DeltaTime)
 		// Interpolate towards target offset
 		FVector NewArmsLocation = FMath::VInterpTo(CurrentArmsLocation, TargetArmsOffset, DeltaTime, AimingInterpSpeed);
 		Arms->SetRelativeLocation(NewArmsLocation);
+
+		// Hide Arms after interpolation is nearly complete (for scopes)
+		if (bIsAiming && ActiveItem && ActiveItem->Implements<USightInterface>())
+		{
+			// Check if sight wants to hide FPS mesh
+			if (ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(ActiveItem))
+			{
+				// Check if interpolation is nearly complete (within 0.1 cm tolerance)
+				if (NewArmsLocation.Equals(TargetArmsOffset, 0.1f) && Arms->IsVisible())
+				{
+					Arms->SetVisibility(false, true);
+				}
+			}
+		}
 	}
 }
 
@@ -843,6 +857,10 @@ void AFPSCharacter::AimingReleased()
 
 	// Set target offset for interpolation back to default position
 	TargetArmsOffset = DefaultHandsPosition;
+
+	// Restore Arms (and attached weapon) visibility
+	Arms->SetVisibility(true, true);
+
 	bIsAiming = false;
 }
 

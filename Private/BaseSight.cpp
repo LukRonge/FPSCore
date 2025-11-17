@@ -23,6 +23,11 @@ TSubclassOf<UUserWidget> ABaseSight::GetAimingCrosshair_Implementation() const
 	return AimCrossHair;
 }
 
+bool ABaseSight::ShouldHideFPSMeshWhenAiming_Implementation() const
+{
+	return bHideFPSMeshWhenAiming;
+}
+
 void ABaseSight::SetOwner(AActor* NewOwner)
 {
 	Super::SetOwner(NewOwner);

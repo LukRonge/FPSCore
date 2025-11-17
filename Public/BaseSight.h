@@ -27,6 +27,7 @@ public:
 	// ISightInterface
 	virtual FVector GetAimingPoint_Implementation() const override;
 	virtual TSubclassOf<UUserWidget> GetAimingCrosshair_Implementation() const override;
+	virtual bool ShouldHideFPSMeshWhenAiming_Implementation() const override;
 
 	// ============================================
 	// VISIBILITY CONTROL
@@ -53,4 +54,8 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|UI")
 	TSubclassOf<UUserWidget> AimCrossHair;
+
+	// Hide FPS weapon mesh when aiming (true for sniper scopes, false for iron sights/red dots)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Sight|Aiming")
+	bool bHideFPSMeshWhenAiming = false;
 };

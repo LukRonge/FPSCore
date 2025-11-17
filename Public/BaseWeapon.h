@@ -218,14 +218,6 @@ public:
 	void InitSightComponents(TSubclassOf<ABaseSight> SightClass);
 
 	// ============================================
-	// UI
-	// ============================================
-
-	// Crosshair widget class (hip fire)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|UI")
-	TSubclassOf<UUserWidget> CrossHair;
-
-	// ============================================
 	// EFFECTS
 	// ============================================
 
@@ -424,6 +416,9 @@ public:
 	// Get animation layer class
 	virtual TSubclassOf<UAnimInstance> GetAnimLayer_Implementation() const override;
 
+	// Set FPS mesh visibility
+	virtual void SetFPSMeshVisibility_Implementation(bool bVisible) override;
+
 	// ============================================
 	// AMMO CONSUMER INTERFACE
 	// ============================================
@@ -449,6 +444,9 @@ public:
 
 	// Get aiming point from current sight or default
 	virtual FVector GetAimingPoint_Implementation() const override;
+
+	// Check if current sight wants to hide FPS mesh when aiming
+	virtual bool ShouldHideFPSMeshWhenAiming_Implementation() const override;
 
 	// ============================================
 	// UTILITY METHODS

@@ -57,6 +57,11 @@ public:
 	UPrimitiveComponent* GetFPSMeshComponent() const;
 	virtual UPrimitiveComponent* GetFPSMeshComponent_Implementation() const { return nullptr; }
 
+	// Set FPS mesh visibility (used for aiming with scopes)
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	void SetFPSMeshVisibility(bool bVisible);
+	virtual void SetFPSMeshVisibility_Implementation(bool bVisible) { }
+
 	// Get TPS mesh component (visible to other players, not owner)
 	// Attached to Body mesh, other players see this
 	// Returns nullptr if item doesn't have separate TPS mesh
