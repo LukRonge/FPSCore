@@ -65,4 +65,26 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Sight")
 	float GetSightMagnification() const;
 	virtual float GetSightMagnification_Implementation() const { return 1.0f; }
+
+	/**
+	 * Get camera FOV when aiming down sights
+	 * Returns 0.0 if not set (use default weapon AimFOV)
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Sight")
+	float GetAimingFOV() const;
+	virtual float GetAimingFOV_Implementation() const { return 0.0f; }
+
+	/**
+	 * Get look speed multiplier when aiming (0.5 = half speed, 1.0 = normal speed)
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Sight")
+	float GetAimLookSpeed() const;
+	virtual float GetAimLookSpeed_Implementation() const { return 1.0f; }
+
+	/**
+	 * Get leaning scale when aiming (0.0 = no lean, 1.0 = full lean)
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Sight")
+	float GetAimLeaningScale() const;
+	virtual float GetAimLeaningScale_Implementation() const { return 1.0f; }
 };

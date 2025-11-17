@@ -28,6 +28,9 @@ public:
 	virtual FVector GetAimingPoint_Implementation() const override;
 	virtual TSubclassOf<UUserWidget> GetAimingCrosshair_Implementation() const override;
 	virtual bool ShouldHideFPSMeshWhenAiming_Implementation() const override;
+	virtual float GetAimingFOV_Implementation() const override;
+	virtual float GetAimLookSpeed_Implementation() const override;
+	virtual float GetAimLeaningScale_Implementation() const override;
 
 	// ============================================
 	// VISIBILITY CONTROL
@@ -52,10 +55,22 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sight")
 	FVector AimingPoint = FVector::ZeroVector;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|UI")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sight")
 	TSubclassOf<UUserWidget> AimCrossHair;
 
+	// Camera FOV when aiming down sights
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sight")
+	float AimFOV = 90.0f;
+
+	// Look speed multiplier when aiming (0.5 = half speed, 1.0 = normal speed)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sight")
+	float AimLookSpeed = 1.0f;
+
+	// Leaning scale when aiming (0.0 = no lean, 1.0 = full lean)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sight")
+	float AimLeaningScale = 1.0f;
+
 	// Hide FPS weapon mesh when aiming (true for sniper scopes, false for iron sights/red dots)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Sight|Aiming")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Sight")
 	bool bHideFPSMeshWhenAiming = false;
 };

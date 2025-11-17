@@ -81,4 +81,9 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
 	TSubclassOf<UAnimInstance> GetAnimLayer() const;
 	virtual TSubclassOf<UAnimInstance> GetAnimLayer_Implementation() const { return nullptr; }
+
+	// Get leaning scale multiplier for this item (1.0 = normal scale)
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	float GetLeaningScale() const;
+	virtual float GetLeaningScale_Implementation() const { return 1.0f; }
 };

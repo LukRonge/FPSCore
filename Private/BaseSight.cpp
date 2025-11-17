@@ -28,6 +28,21 @@ bool ABaseSight::ShouldHideFPSMeshWhenAiming_Implementation() const
 	return bHideFPSMeshWhenAiming;
 }
 
+float ABaseSight::GetAimingFOV_Implementation() const
+{
+	return AimFOV;
+}
+
+float ABaseSight::GetAimLookSpeed_Implementation() const
+{
+	return AimLookSpeed;
+}
+
+float ABaseSight::GetAimLeaningScale_Implementation() const
+{
+	return AimLeaningScale;
+}
+
 void ABaseSight::SetOwner(AActor* NewOwner)
 {
 	Super::SetOwner(NewOwner);

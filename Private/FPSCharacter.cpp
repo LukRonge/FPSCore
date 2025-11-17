@@ -188,6 +188,16 @@ void AFPSCharacter::BeginPlay()
 		TargetArmsOffset = DefaultHandsOffset;
 		Arms->SetRelativeLocation(DefaultHandsOffset);
 
+		// Initialize camera FOV
+		if (Camera)
+		{
+			Camera->SetFieldOfView(DefaultFOV);
+		}
+
+		// Initialize look speed and leaning scale to defaults
+		CurrentLookSpeed = 1.0f;
+		CurrentLeaningScale = 1.0f;
+
 		// Initialize default crosshair if no active item
 		if (!ActiveItem && CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
 		{
@@ -236,21 +246,42 @@ void AFPSCharacter::Tick(float DeltaTime)
 
 		FVector CurrentArmsLocation = Arms->GetRelativeLocation();
 
-		// Interpolate towards target offset
-		FVector NewArmsLocation = FMath::VInterpTo(CurrentArmsLocation, TargetArmsOffset, DeltaTime, AimingInterpSpeed);
-		Arms->SetRelativeLocation(NewArmsLocation);
-
-		// Hide Arms after interpolation is nearly complete (for scopes)
-		if (bIsAiming && ActiveItem && ActiveItem->Implements<USightInterface>())
+		// Check if interpolation is complete (within 0.1 cm tolerance)
+		if (!CurrentArmsLocation.Equals(TargetArmsOffset, 0.1f))
 		{
-			// Check if sight wants to hide FPS mesh
-			if (ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(ActiveItem))
+			// Interpolate towards target offset
+			FVector NewArmsLocation = FMath::VInterpTo(CurrentArmsLocation, TargetArmsOffset, DeltaTime, AimingInterpSpeed);
+			Arms->SetRelativeLocation(NewArmsLocation);
+		}
+		else if (bIsAiming && !bAimingCrosshairSet && ActiveItem && ActiveItem->Implements<USightInterface>())
+		{
+			// Interpolation complete - set final position
+			Arms->SetRelativeLocation(TargetArmsOffset);
+
+			// Update crosshair to aiming state (once)
+			if (Controller && Controller->Implements<UPlayerHUDInterface>())
 			{
-				// Check if interpolation is nearly complete (within 0.1 cm tolerance)
-				if (NewArmsLocation.Equals(TargetArmsOffset, 0.1f) && Arms->IsVisible())
-				{
-					Arms->SetVisibility(false, true);
-				}
+				IPlayerHUDInterface::Execute_UpdateCrossHair(Controller, true, 0.0f);
+				bAimingCrosshairSet = true; // Mark as set
+			}
+
+			// Set camera FOV for aiming
+			if (Camera)
+			{
+				float AimingFOV = ISightInterface::Execute_GetAimingFOV(ActiveItem);
+				Camera->SetFieldOfView(AimingFOV);
+			}
+
+			// Set look speed and leaning scale for aiming
+			CurrentLookSpeed = ISightInterface::Execute_GetAimLookSpeed(ActiveItem);
+			CurrentLeaningScale = ISightInterface::Execute_GetAimLeaningScale(ActiveItem);
+
+			UE_LOG(LogTemp, Warning, TEXT("Aiming started - CurrentLookSpeed: %f, CurrentLeaningScale: %f"), CurrentLookSpeed, CurrentLeaningScale);
+
+			// Hide Arms if sight requires it (e.g., sniper scope)
+			if (ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(ActiveItem) && Arms->IsVisible())
+			{
+				Arms->SetVisibility(false, true);
 			}
 		}
 	}
@@ -559,7 +590,10 @@ void AFPSCharacter::LookYaw(const FInputActionValue& Value)
 	}
 
 	float YawValue = Value.Get<float>();
-	float Sensitivity = bIsAiming ? 0.25f : 0.5f;
+
+	// Calculate sensitivity: Base sensitivity * LookSpeed scaling * CurrentLookSpeed (modified by aiming)
+	float BaseSensitivity = 0.5f;
+	float Sensitivity = BaseSensitivity * (LookSpeed / 100.0f) * CurrentLookSpeed;
 
 	AddControllerYawInput(YawValue * Sensitivity);
 }
@@ -572,7 +606,10 @@ void AFPSCharacter::LookPitch(const FInputActionValue& Value)
 	}
 
 	float PitchValue = Value.Get<float>();
-	float Sensitivity = bIsAiming ? 0.25f : 0.5f;
+
+	// Calculate sensitivity: Base sensitivity * LookSpeed scaling * CurrentLookSpeed (modified by aiming)
+	float BaseSensitivity = 0.5f;
+	float Sensitivity = BaseSensitivity * (LookSpeed / 100.0f) * CurrentLookSpeed;
 
 	UpdatePitch(PitchValue * Sensitivity);
 }
@@ -838,12 +875,7 @@ void AFPSCharacter::AimingPressed()
 	// Set target offset for interpolation (will be applied in Tick)
 	TargetArmsOffset = AimingArmsOffset;
 	bIsAiming = true;
-
-	// Update HUD crosshair to aiming state
-	if (Controller && Controller->Implements<UPlayerHUDInterface>())
-	{
-		IPlayerHUDInterface::Execute_UpdateCrossHair(Controller, true, 0.0f);
-	}
+	bAimingCrosshairSet = false; // Reset flag
 }
 
 void AFPSCharacter::AimingReleased()
@@ -872,6 +904,25 @@ void AFPSCharacter::AimingReleased()
 
 	// Restore Arms (and attached weapon) visibility
 	Arms->SetVisibility(true, true);
+
+	// Restore default camera FOV
+	if (Camera)
+	{
+		Camera->SetFieldOfView(DefaultFOV);
+	}
+
+	// Restore default look speed
+	CurrentLookSpeed = 1.0f;
+
+	// Restore weapon's leaning scale (or default if no active item)
+	if (ActiveItem && ActiveItem->Implements<UHoldableInterface>())
+	{
+		CurrentLeaningScale = IHoldableInterface::Execute_GetLeaningScale(ActiveItem);
+	}
+	else
+	{
+		CurrentLeaningScale = 1.0f;
+	}
 
 	bIsAiming = false;
 
@@ -1228,6 +1279,12 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 		{
 			IPlayerHUDInterface::Execute_SetCrossHair(CachedPlayerController, DefaultCrossHair, nullptr);
 		}
+
+		// Reset leaning scale if no active item
+		if (!ActiveItem)
+		{
+			CurrentLeaningScale = 1.0f;
+		}
 	}
 
 	// Race condition check: Skip callback if Multicast_DropItem arrived first
@@ -1302,6 +1359,12 @@ void AFPSCharacter::EquipItem(AActor* Item)
 	if (IsLocallyControlled())
 	{
 		SetupHandsLocation(Item);
+
+		// Set leaning scale from active item
+		if (Item && Item->Implements<UHoldableInterface>())
+		{
+			CurrentLeaningScale = IHoldableInterface::Execute_GetLeaningScale(Item);
+		}
 	}
 
 	// HUD update (owning client only)

@@ -180,6 +180,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Aiming")
 	float AimLookSpeed = 0.5f;
 
+	// Leaning scale multiplier when holding this weapon (1.0 = normal scale)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Movement")
+	float LeaningScale = 1.0f;
+
 	// Is player currently aiming (runtime state, NOT replicated)
 	UPROPERTY(BlueprintReadWrite, Category = "Weapon|Aiming")
 	bool IsAiming = false;
@@ -420,6 +424,9 @@ public:
 	// Get animation layer class
 	virtual TSubclassOf<UAnimInstance> GetAnimLayer_Implementation() const override;
 
+	// Get leaning scale
+	virtual float GetLeaningScale_Implementation() const override;
+
 	// Set FPS mesh visibility
 	virtual void SetFPSMeshVisibility_Implementation(bool bVisible) override;
 
@@ -454,6 +461,15 @@ public:
 
 	// Get aiming point from current sight or default
 	virtual FVector GetAimingPoint_Implementation() const override;
+
+	// Get aiming FOV from current sight or default weapon AimFOV
+	virtual float GetAimingFOV_Implementation() const override;
+
+	// Get aim look speed from current sight or default
+	virtual float GetAimLookSpeed_Implementation() const override;
+
+	// Get aim leaning scale from current sight or default
+	virtual float GetAimLeaningScale_Implementation() const override;
 
 	// Check if current sight wants to hide FPS mesh when aiming
 	virtual bool ShouldHideFPSMeshWhenAiming_Implementation() const override;

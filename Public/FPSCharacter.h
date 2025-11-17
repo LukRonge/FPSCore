@@ -162,6 +162,14 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Look")
 	float LookSpeed = 100.0f;
 
+	// Current look speed multiplier (modified by aiming)
+	UPROPERTY(BlueprintReadOnly, Category = "Look")
+	float CurrentLookSpeed = 1.0f;
+
+	// Current leaning scale (modified by aiming)
+	UPROPERTY(BlueprintReadOnly, Category = "Look")
+	float CurrentLeaningScale = 1.0f;
+
 	// ============================================
 	// INVENTORY SYSTEM
 	// ============================================
@@ -252,7 +260,10 @@ public:
 	FVector TargetArmsOffset = FVector::ZeroVector;
 
 	// Aiming interpolation speed (constant)
-	const float AimingInterpSpeed = 25.0f;
+	const float AimingInterpSpeed = 30.0f;
+
+	// Flag to track if aiming crosshair was already set (prevents calling UpdateCrossHair every frame)
+	bool bAimingCrosshairSet = false;
 
 	// Note: bIsAiming already exists at line 157 (replicated, used for look sensitivity)
 
@@ -291,6 +302,10 @@ public:
 	// Camera component
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	class UCameraComponent* Camera;
+
+	// Default camera FOV (non-aiming)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Camera")
+	float DefaultFOV = 90.0f;
 
 	// Mesh components
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh")
