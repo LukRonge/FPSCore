@@ -50,6 +50,15 @@ public:
 	virtual FVector GetAimingPoint_Implementation() const { return FVector::ZeroVector; }
 
 	/**
+	 * Get sight actor for transform calculations
+	 * Returns the actual sight actor (BaseSight instance) for world-space transforms
+	 * Used in aiming calculations to convert AimingPoint to world space
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Sight")
+	AActor* GetSightActor() const;
+	virtual AActor* GetSightActor_Implementation() const { return nullptr; }
+
+	/**
 	 * Check if sight should hide first-person mesh when aiming
 	 * Used for scopes/optics that obstruct view
 	 * Returns true to hide FPS mesh during ADS

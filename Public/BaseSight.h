@@ -26,6 +26,7 @@ public:
 
 	// ISightInterface
 	virtual FVector GetAimingPoint_Implementation() const override;
+	virtual AActor* GetSightActor_Implementation() const override;
 	virtual TSubclassOf<UUserWidget> GetAimingCrosshair_Implementation() const override;
 	virtual bool ShouldHideFPSMeshWhenAiming_Implementation() const override;
 	virtual float GetAimingFOV_Implementation() const override;

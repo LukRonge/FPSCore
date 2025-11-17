@@ -189,10 +189,7 @@ void AFPSCharacter::BeginPlay()
 		Arms->SetRelativeLocation(DefaultHandsOffset);
 
 		// Initialize camera FOV
-		if (Camera)
-		{
-			Camera->SetFieldOfView(DefaultFOV);
-		}
+		Camera->SetFieldOfView(DefaultFOV);
 
 		// Initialize look speed and leaning scale to defaults
 		CurrentLookSpeed = 1.0f;
@@ -266,11 +263,8 @@ void AFPSCharacter::Tick(float DeltaTime)
 			}
 
 			// Set camera FOV for aiming
-			if (Camera)
-			{
-				float AimingFOV = ISightInterface::Execute_GetAimingFOV(ActiveItem);
-				Camera->SetFieldOfView(AimingFOV);
-			}
+			float AimingFOV = ISightInterface::Execute_GetAimingFOV(ActiveItem);
+			Camera->SetFieldOfView(AimingFOV);
 
 			// Set look speed and leaning scale for aiming
 			CurrentLookSpeed = ISightInterface::Execute_GetAimLookSpeed(ActiveItem);
@@ -279,7 +273,7 @@ void AFPSCharacter::Tick(float DeltaTime)
 			UE_LOG(LogTemp, Warning, TEXT("Aiming started - CurrentLookSpeed: %f, CurrentLeaningScale: %f"), CurrentLookSpeed, CurrentLeaningScale);
 
 			// Hide Arms if sight requires it (e.g., sniper scope)
-			if (ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(ActiveItem) && Arms->IsVisible())
+			if (ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(ActiveItem))
 			{
 				Arms->SetVisibility(false, true);
 			}
@@ -846,18 +840,11 @@ void AFPSCharacter::AimingPressed()
 	// Get AimingPoint from weapon's sight (relative to SightActor)
 	FVector AimingPointLocal = ISightInterface::Execute_GetAimingPoint(ActiveItem);
 
-	// Get SightActor from weapon's FPSSightComponent
-	ABaseWeapon* Weapon = Cast<ABaseWeapon>(ActiveItem);
-	if (!Weapon || !Weapon->FPSSightComponent)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::AimingPressed() - Weapon has no FPSSightComponent"));
-		return;
-	}
-
-	AActor* SightActor = Weapon->FPSSightComponent->GetChildActor();
+	// Get SightActor via interface (capability-based design)
+	AActor* SightActor = ISightInterface::Execute_GetSightActor(ActiveItem);
 	if (!SightActor)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::AimingPressed() - FPSSightComponent has no child actor"));
+		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::AimingPressed() - ActiveItem has no sight actor"));
 		return;
 	}
 
@@ -892,12 +879,13 @@ void AFPSCharacter::AimingReleased()
 		return;
 	}
 
+	// Check if active item is holdable (once)
+	bool bHasHoldableItem = ActiveItem && ActiveItem->Implements<UHoldableInterface>();
+
 	// Calculate target Arms offset (default hands position)
-	FVector DefaultHandsPosition = DefaultHandsOffset;
-	if (ActiveItem && ActiveItem->Implements<UHoldableInterface>())
-	{
-		DefaultHandsPosition = IHoldableInterface::Execute_GetHandsOffset(ActiveItem);
-	}
+	FVector DefaultHandsPosition = bHasHoldableItem
+		? IHoldableInterface::Execute_GetHandsOffset(ActiveItem)
+		: DefaultHandsOffset;
 
 	// Set target offset for interpolation back to default position
 	TargetArmsOffset = DefaultHandsPosition;
@@ -906,23 +894,15 @@ void AFPSCharacter::AimingReleased()
 	Arms->SetVisibility(true, true);
 
 	// Restore default camera FOV
-	if (Camera)
-	{
-		Camera->SetFieldOfView(DefaultFOV);
-	}
+	Camera->SetFieldOfView(DefaultFOV);
 
 	// Restore default look speed
 	CurrentLookSpeed = 1.0f;
 
 	// Restore weapon's leaning scale (or default if no active item)
-	if (ActiveItem && ActiveItem->Implements<UHoldableInterface>())
-	{
-		CurrentLeaningScale = IHoldableInterface::Execute_GetLeaningScale(ActiveItem);
-	}
-	else
-	{
-		CurrentLeaningScale = 1.0f;
-	}
+	CurrentLeaningScale = bHasHoldableItem
+		? IHoldableInterface::Execute_GetLeaningScale(ActiveItem)
+		: 1.0f;
 
 	bIsAiming = false;
 
@@ -1333,11 +1313,8 @@ void AFPSCharacter::EquipItem(AActor* Item)
 	// Mesh attachment (intentionally redundant - maintains dual FPS/TPS hierarchy)
 	FName AttachSocket = IHoldableInterface::Execute_GetAttachSocket(Item);
 
-	if (GetMesh())
-	{
-		Item->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
-		Item->SetActorRelativeTransform(FTransform::Identity);
-	}
+	Item->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
+	Item->SetActorRelativeTransform(FTransform::Identity);
 
 	if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
 	{
@@ -1361,10 +1338,7 @@ void AFPSCharacter::EquipItem(AActor* Item)
 		SetupHandsLocation(Item);
 
 		// Set leaning scale from active item
-		if (Item && Item->Implements<UHoldableInterface>())
-		{
-			CurrentLeaningScale = IHoldableInterface::Execute_GetLeaningScale(Item);
-		}
+		CurrentLeaningScale = IHoldableInterface::Execute_GetLeaningScale(Item);
 	}
 
 	// HUD update (owning client only)

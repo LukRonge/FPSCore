@@ -462,6 +462,9 @@ public:
 	// Get aiming point from current sight or default
 	virtual FVector GetAimingPoint_Implementation() const override;
 
+	// Get sight actor for transform calculations
+	virtual AActor* GetSightActor_Implementation() const override;
+
 	// Get aiming FOV from current sight or default weapon AimFOV
 	virtual float GetAimingFOV_Implementation() const override;
 
@@ -494,4 +497,13 @@ public:
 	// Get aim hands offset (when aiming down sights)
 	UFUNCTION(BlueprintPure, Category = "Weapon|Hands")
 	FVector GetAimHandsOffset() const { return AimHandsOffset; }
+
+private:
+	// ============================================
+	// HELPER METHODS
+	// ============================================
+
+	// Get current sight actor from FPSSightComponent
+	// Returns nullptr if no sight attached
+	AActor* GetCurrentSightActor() const;
 };

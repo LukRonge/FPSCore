@@ -18,6 +18,11 @@ FVector ABaseSight::GetAimingPoint_Implementation() const
 	return AimingPoint;
 }
 
+AActor* ABaseSight::GetSightActor_Implementation() const
+{
+	return const_cast<ABaseSight*>(this);
+}
+
 TSubclassOf<UUserWidget> ABaseSight::GetAimingCrosshair_Implementation() const
 {
 	return AimCrossHair;
@@ -87,20 +92,17 @@ void ABaseSight::ApplyVisibilityToMeshes()
 
 	for (UPrimitiveComponent* PrimitiveComp : PrimitiveComponents)
 	{
-		if (PrimitiveComp)
-		{
-			// Set modern UE5 API
-			PrimitiveComp->SetFirstPersonPrimitiveType(FirstPersonPrimitiveType);
+		// Set modern UE5 API
+		PrimitiveComp->SetFirstPersonPrimitiveType(FirstPersonPrimitiveType);
 
-			// Set classic visibility flags
-			PrimitiveComp->SetOnlyOwnerSee(bOnlyOwnerSee);
-			PrimitiveComp->SetOwnerNoSee(bOwnerNoSee);
+		// Set classic visibility flags
+		PrimitiveComp->SetOnlyOwnerSee(bOnlyOwnerSee);
+		PrimitiveComp->SetOwnerNoSee(bOwnerNoSee);
 
-			UE_LOG(LogTemp, Log, TEXT("BaseSight::ApplyVisibilityToMeshes() - %s | Type: %s | OnlyOwnerSee: %s | OwnerNoSee: %s"),
-				*PrimitiveComp->GetName(),
-				*UEnum::GetValueAsString(FirstPersonPrimitiveType),
-				bOnlyOwnerSee ? TEXT("true") : TEXT("false"),
-				bOwnerNoSee ? TEXT("true") : TEXT("false"));
-		}
+		UE_LOG(LogTemp, Log, TEXT("BaseSight::ApplyVisibilityToMeshes() - %s | Type: %s | OnlyOwnerSee: %s | OwnerNoSee: %s"),
+			*PrimitiveComp->GetName(),
+			*UEnum::GetValueAsString(FirstPersonPrimitiveType),
+			bOnlyOwnerSee ? TEXT("true") : TEXT("false"),
+			bOwnerNoSee ? TEXT("true") : TEXT("false"));
 	}
 }

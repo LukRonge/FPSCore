@@ -376,46 +376,35 @@ void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
 {
 	// Runs on SERVER and ALL CLIENTS
 
-	// 1. Spawn muzzle flash VFX attached to weapon muzzle socket
+	// 1. Spawn muzzle flash VFX attached to weapon barrel bone
 	if (MuzzleFlashNiagara)
 	{
 		// Determine which mesh to use based on ownership
 		USkeletalMeshComponent* MuzzleMesh = nullptr;
 
-		// ✅ FIXED: Check if local player controls this weapon's owner
-		// Works for both listen server and clients
-		AActor* OwnerActor = GetOwner();
-		if (OwnerActor)
+		// Check if local player is owner
+		APawn* OwnerPawn = Cast<APawn>(GetOwner());
+		if (OwnerPawn && OwnerPawn->IsLocallyControlled())
 		{
-			APawn* OwnerPawn = Cast<APawn>(OwnerActor);
-			if (OwnerPawn && OwnerPawn->IsLocallyControlled())
-			{
-				MuzzleMesh = FPSMesh; // Owner sees FPS mesh
-				UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Using FPS mesh (locally controlled)"));
-			}
-			else
-			{
-				MuzzleMesh = TPSMesh; // Others see TPS mesh
-				UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Using TPS mesh (spectator)"));
-			}
+			MuzzleMesh = FPSMesh; // Owner sees FPS mesh
+			UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Using FPS mesh (owner)"));
 		}
 		else
 		{
-			// No owner - world weapon (dropped/pickup)
-			MuzzleMesh = TPSMesh;
-			UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Using TPS mesh (no owner)"));
+			MuzzleMesh = TPSMesh; // Others see TPS mesh
+			UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Using TPS mesh (spectator)"));
 		}
 
 		if (MuzzleMesh)
 		{
-			// ✅ FIXED: Attach to "muzzle" socket (not "barrel")
+			// ✅ ATTACH to "barrel" bone (not spawn at location!)
 			UNiagaraComponent* MuzzleFlashComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
 				MuzzleFlashNiagara,
 				MuzzleMesh,
-				FName("muzzle"),           // Attach to muzzle socket (FIXED from "barrel")
+				FName("barrel"),           // Attach to barrel bone
 				FVector::ZeroVector,       // No offset
 				FRotator::ZeroRotator,     // No rotation offset
-				EAttachLocation::SnapToTarget, // Snap to socket transform
+				EAttachLocation::SnapToTarget, // Snap to bone transform
 				true,                      // Auto destroy
 				true,                      // Auto activate
 				ENCPoolMethod::None
@@ -423,7 +412,7 @@ void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
 
 			if (MuzzleFlashComponent)
 			{
-				UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Muzzle flash attached to muzzle socket"));
+				UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Muzzle flash attached to barrel bone"));
 			}
 			else
 			{
@@ -628,102 +617,93 @@ TSubclassOf<UUserWidget> ABaseWeapon::GetCrossHair_Implementation() const
 	return CrossHair;
 }
 
+// ============================================
+// HELPER METHODS
+// ============================================
+
+AActor* ABaseWeapon::GetCurrentSightActor() const
+{
+	if (FPSSightComponent)
+	{
+		return FPSSightComponent->GetChildActor();
+	}
+	return nullptr;
+}
+
+// ============================================
+// SIGHT INTERFACE IMPLEMENTATION
+// ============================================
+
 TSubclassOf<UUserWidget> ABaseWeapon::GetAimingCrosshair_Implementation() const
 {
-	// Try to get AimingCrosshair from current attached sight
-	if (FPSSightComponent && FPSSightComponent->GetChildActor())
+	AActor* SightActor = GetCurrentSightActor();
+	if (SightActor && SightActor->Implements<USightInterface>())
 	{
-		AActor* SightActor = FPSSightComponent->GetChildActor();
-		if (SightActor->Implements<USightInterface>())
-		{
-			return ISightInterface::Execute_GetAimingCrosshair(SightActor);
-		}
+		return ISightInterface::Execute_GetAimingCrosshair(SightActor);
 	}
 	return nullptr;
 }
 
 FVector ABaseWeapon::GetAimingPoint_Implementation() const
 {
-	// Try to get AimingPoint from current attached sight
-	if (FPSSightComponent && FPSSightComponent->GetChildActor())
+	AActor* SightActor = GetCurrentSightActor();
+	if (SightActor && SightActor->Implements<USightInterface>())
 	{
-		AActor* SightActor = FPSSightComponent->GetChildActor();
-
-		// Check if sight actor implements ISightInterface
-		if (SightActor->Implements<USightInterface>())
-		{
-			// Call interface method directly on actor
-			return ISightInterface::Execute_GetAimingPoint(SightActor);
-		}
+		return ISightInterface::Execute_GetAimingPoint(SightActor);
 	}
-
-	// Fallback: Use weapon's default aiming point
 	return DefaultAimPoint;
+}
+
+AActor* ABaseWeapon::GetSightActor_Implementation() const
+{
+	AActor* SightActor = GetCurrentSightActor();
+	if (SightActor && SightActor->Implements<USightInterface>())
+	{
+		return ISightInterface::Execute_GetSightActor(SightActor);
+	}
+	return nullptr;
 }
 
 float ABaseWeapon::GetAimingFOV_Implementation() const
 {
-	// Try to get AimingFOV from current attached sight
-	if (FPSSightComponent && FPSSightComponent->GetChildActor())
+	AActor* SightActor = GetCurrentSightActor();
+	if (SightActor && SightActor->Implements<USightInterface>())
 	{
-		AActor* SightActor = FPSSightComponent->GetChildActor();
-		if (SightActor->Implements<USightInterface>())
+		float SightFOV = ISightInterface::Execute_GetAimingFOV(SightActor);
+		if (SightFOV > 0.0f)
 		{
-			float SightFOV = ISightInterface::Execute_GetAimingFOV(SightActor);
-			// If sight has custom FOV (non-zero), use it
-			if (SightFOV > 0.0f)
-			{
-				return SightFOV;
-			}
+			return SightFOV;
 		}
 	}
-
-	// Fallback: Use weapon's default AimFOV
 	return AimFOV;
 }
 
 float ABaseWeapon::GetAimLookSpeed_Implementation() const
 {
-	// Try to get AimLookSpeed from current attached sight
-	if (FPSSightComponent && FPSSightComponent->GetChildActor())
+	AActor* SightActor = GetCurrentSightActor();
+	if (SightActor && SightActor->Implements<USightInterface>())
 	{
-		AActor* SightActor = FPSSightComponent->GetChildActor();
-		if (SightActor->Implements<USightInterface>())
-		{
-			return ISightInterface::Execute_GetAimLookSpeed(SightActor);
-		}
+		return ISightInterface::Execute_GetAimLookSpeed(SightActor);
 	}
-
-	// Fallback: Use weapon's default AimLookSpeed
 	return AimLookSpeed;
 }
 
 float ABaseWeapon::GetAimLeaningScale_Implementation() const
 {
-	// Try to get AimLeaningScale from current attached sight
-	if (FPSSightComponent && FPSSightComponent->GetChildActor())
+	AActor* SightActor = GetCurrentSightActor();
+	if (SightActor && SightActor->Implements<USightInterface>())
 	{
-		AActor* SightActor = FPSSightComponent->GetChildActor();
-		if (SightActor->Implements<USightInterface>())
-		{
-			return ISightInterface::Execute_GetAimLeaningScale(SightActor);
-		}
+		return ISightInterface::Execute_GetAimLeaningScale(SightActor);
 	}
-
-	// Fallback: return 1.0f (no scaling)
 	return 1.0f;
 }
 
 bool ABaseWeapon::ShouldHideFPSMeshWhenAiming_Implementation() const
 {
-	// Check if current sight wants to hide FPS mesh when aiming
-	if (FPSSightComponent && FPSSightComponent->GetChildActor())
+	AActor* SightActor = GetCurrentSightActor();
+	if (SightActor && SightActor->Implements<USightInterface>())
 	{
-		AActor* SightActor = FPSSightComponent->GetChildActor();
-		if (SightActor->Implements<USightInterface>())
-		{
-			return ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(SightActor);
-		}
+		return ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(SightActor);
 	}
 	return false;
 }
