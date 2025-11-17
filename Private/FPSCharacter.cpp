@@ -187,6 +187,12 @@ void AFPSCharacter::BeginPlay()
 	{
 		TargetArmsOffset = DefaultHandsOffset;
 		Arms->SetRelativeLocation(DefaultHandsOffset);
+
+		// Initialize default crosshair if no active item
+		if (!ActiveItem && CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
+		{
+			IPlayerHUDInterface::Execute_SetCrossHair(CachedPlayerController, DefaultCrossHair, nullptr);
+		}
 	}
 
 	// Bind inventory event callbacks (SERVER ONLY)
@@ -832,6 +838,12 @@ void AFPSCharacter::AimingPressed()
 	// Set target offset for interpolation (will be applied in Tick)
 	TargetArmsOffset = AimingArmsOffset;
 	bIsAiming = true;
+
+	// Update HUD crosshair to aiming state
+	if (Controller && Controller->Implements<UPlayerHUDInterface>())
+	{
+		IPlayerHUDInterface::Execute_UpdateCrossHair(Controller, true, 0.0f);
+	}
 }
 
 void AFPSCharacter::AimingReleased()
@@ -862,6 +874,12 @@ void AFPSCharacter::AimingReleased()
 	Arms->SetVisibility(true, true);
 
 	bIsAiming = false;
+
+	// Update HUD crosshair to normal state
+	if (Controller && Controller->Implements<UPlayerHUDInterface>())
+	{
+		IPlayerHUDInterface::Execute_UpdateCrossHair(Controller, false, 0.0f);
+	}
 }
 
 void AFPSCharacter::Server_SetMovementMode_Implementation(EFPSMovementMode NewMode)
@@ -1204,6 +1222,12 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 	if (IsLocallyControlled())
 	{
 		SetupHandsLocation(nullptr);
+
+		// Set default crosshair if no active item after unequip
+		if (!ActiveItem && CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
+		{
+			IPlayerHUDInterface::Execute_SetCrossHair(CachedPlayerController, DefaultCrossHair, nullptr);
+		}
 	}
 
 	// Race condition check: Skip callback if Multicast_DropItem arrived first
@@ -1284,6 +1308,19 @@ void AFPSCharacter::EquipItem(AActor* Item)
 	if (IsLocallyControlled() && CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
 	{
 		IPlayerHUDInterface::Execute_UpdateActiveWeapon(CachedPlayerController, ActiveItem);
+
+		// Set crosshair for equipped item
+		if (Item && Item->Implements<USightInterface>())
+		{
+			TSubclassOf<UUserWidget> HipCrosshair = ISightInterface::Execute_GetCrossHair(Item);
+			TSubclassOf<UUserWidget> AimCrosshair = ISightInterface::Execute_GetAimingCrosshair(Item);
+			IPlayerHUDInterface::Execute_SetCrossHair(CachedPlayerController, HipCrosshair, AimCrosshair);
+		}
+		else if (!ActiveItem)
+		{
+			// No active item - use default crosshair
+			IPlayerHUDInterface::Execute_SetCrossHair(CachedPlayerController, DefaultCrossHair, nullptr);
+		}
 	}
 
 	// Notify item

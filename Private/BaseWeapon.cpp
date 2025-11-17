@@ -607,6 +607,25 @@ void ABaseWeapon::OnRep_CurrentSightClass()
 // SIGHT INTERFACE
 // ============================================
 
+TSubclassOf<UUserWidget> ABaseWeapon::GetCrossHair_Implementation() const
+{
+	return CrossHair;
+}
+
+TSubclassOf<UUserWidget> ABaseWeapon::GetAimingCrosshair_Implementation() const
+{
+	// Try to get AimingCrosshair from current attached sight
+	if (FPSSightComponent && FPSSightComponent->GetChildActor())
+	{
+		AActor* SightActor = FPSSightComponent->GetChildActor();
+		if (SightActor->Implements<USightInterface>())
+		{
+			return ISightInterface::Execute_GetAimingCrosshair(SightActor);
+		}
+	}
+	return nullptr;
+}
+
 FVector ABaseWeapon::GetAimingPoint_Implementation() const
 {
 	// Try to get AimingPoint from current attached sight

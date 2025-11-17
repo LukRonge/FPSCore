@@ -25,6 +25,14 @@ class FPSCORE_API ISightInterface
 
 public:
 	/**
+	 * Get hip-fire crosshair widget class (shown when not aiming)
+	 * Returns nullptr if no crosshair
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Sight")
+	TSubclassOf<UUserWidget> GetCrossHair() const;
+	virtual TSubclassOf<UUserWidget> GetCrossHair_Implementation() const { return nullptr; }
+
+	/**
 	 * Get aiming crosshair widget class (shown when aiming down sights)
 	 * Returns nullptr if no custom aim crosshair (uses weapon default)
 	 */

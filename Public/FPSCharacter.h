@@ -260,6 +260,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Animation")
 	TSubclassOf<UAnimInstance> DefaultAnimLayer;
 
+	// Default crosshair widget class (shown when no active item)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
+	TSubclassOf<UUserWidget> DefaultCrossHair;
+
 	// Character Movement Component (cached reference)
 	UPROPERTY()
 	class UCharacterMovementComponent* CMC;

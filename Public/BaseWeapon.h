@@ -199,6 +199,10 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "Weapon|Aiming", ReplicatedUsing = OnRep_CurrentSightClass)
 	TSubclassOf<ABaseSight> CurrentSightClass;
 
+	// Hip-fire crosshair widget class (shown when not aiming)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|UI")
+	TSubclassOf<UUserWidget> CrossHair;
+
 protected:
 	/**
 	 * Called on CLIENTS when CurrentSightClass is replicated from server
@@ -441,6 +445,12 @@ public:
 	// ============================================
 	// SIGHT INTERFACE
 	// ============================================
+
+	// Get hip-fire crosshair from weapon
+	virtual TSubclassOf<UUserWidget> GetCrossHair_Implementation() const override;
+
+	// Get aiming crosshair from current sight
+	virtual TSubclassOf<UUserWidget> GetAimingCrosshair_Implementation() const override;
 
 	// Get aiming point from current sight or default
 	virtual FVector GetAimingPoint_Implementation() const override;
