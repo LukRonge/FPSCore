@@ -170,7 +170,7 @@ void AFPSCharacter::InitializeSpineComponents()
 	Arms->SetRelativeLocation(ArmsLocation);
 	Arms->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
 
-	DefaultHandsOffset = ArmsLocation;
+	DefaultArmsOffset = ArmsLocation;
 }
 
 void AFPSCharacter::BeginPlay()
@@ -185,8 +185,8 @@ void AFPSCharacter::BeginPlay()
 	// Initialize Arms position (LOCAL ONLY)
 	if (IsLocallyControlled())
 	{
-		TargetArmsOffset = DefaultHandsOffset;
-		Arms->SetRelativeLocation(DefaultHandsOffset);
+		ArmsOffset = DefaultArmsOffset;
+		Arms->SetRelativeLocation(ArmsOffset);
 
 		// Initialize camera FOV
 		Camera->SetFieldOfView(DefaultFOV);
@@ -241,43 +241,7 @@ void AFPSCharacter::Tick(float DeltaTime)
 	{
 		CheckInteractionTrace();
 
-		FVector CurrentArmsLocation = Arms->GetRelativeLocation();
-
-		// Check if interpolation is complete (within 0.1 cm tolerance)
-		if (!CurrentArmsLocation.Equals(TargetArmsOffset, 0.1f))
-		{
-			// Interpolate towards target offset
-			FVector NewArmsLocation = FMath::VInterpTo(CurrentArmsLocation, TargetArmsOffset, DeltaTime, AimingInterpSpeed);
-			Arms->SetRelativeLocation(NewArmsLocation);
-		}
-		else if (bIsAiming && !bAimingCrosshairSet && ActiveItem && ActiveItem->Implements<USightInterface>())
-		{
-			// Interpolation complete - set final position
-			Arms->SetRelativeLocation(TargetArmsOffset);
-
-			// Update crosshair to aiming state (once)
-			if (Controller && Controller->Implements<UPlayerHUDInterface>())
-			{
-				IPlayerHUDInterface::Execute_UpdateCrossHair(Controller, true, 0.0f);
-				bAimingCrosshairSet = true; // Mark as set
-			}
-
-			// Set camera FOV for aiming
-			float AimingFOV = ISightInterface::Execute_GetAimingFOV(ActiveItem);
-			Camera->SetFieldOfView(AimingFOV);
-
-			// Set look speed and leaning scale for aiming
-			CurrentLookSpeed = ISightInterface::Execute_GetAimLookSpeed(ActiveItem);
-			CurrentLeaningScale = ISightInterface::Execute_GetAimLeaningScale(ActiveItem);
-
-			UE_LOG(LogTemp, Warning, TEXT("Aiming started - CurrentLookSpeed: %f, CurrentLeaningScale: %f"), CurrentLookSpeed, CurrentLeaningScale);
-
-			// Hide Arms if sight requires it (e.g., sniper scope)
-			if (ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(ActiveItem))
-			{
-				Arms->SetVisibility(false, true);
-			}
-		}
+		
 	}
 }
 
@@ -391,7 +355,7 @@ void AFPSCharacter::Client_OnPossessed_Implementation()
 
 	// Setup hands location (LOCAL operation for locally controlled player)
 	// Arms mesh is OnlyOwnerSee, so this only affects local player
-	SetupHandsLocation(nullptr);
+	SetupArmsLocation(nullptr);
 
 	// NOTE: UpdateItemAnimLayer(nullptr) is already called in BeginPlay() on ALL machines
 	// No need to call it again here (would be redundant)
@@ -499,7 +463,7 @@ float AFPSCharacter::CalculateNetworkPitchFromCamera() const
 	return PitchDegrees;
 }
 
-void AFPSCharacter::SetupHandsLocation(AActor* Item)
+void AFPSCharacter::SetupArmsLocation(AActor* Item)
 {
 	if (!IsLocallyControlled())
 	{
@@ -508,16 +472,14 @@ void AFPSCharacter::SetupHandsLocation(AActor* Item)
 
 	if (Item && Item->Implements<UHoldableInterface>())
 	{
-		HandsOffset = IHoldableInterface::Execute_GetHandsOffset(Item);
+		ArmsOffset = IHoldableInterface::Execute_GetArmsOffset(Item);
 	}
 	else
 	{
-		HandsOffset = DefaultHandsOffset;
+		ArmsOffset = DefaultArmsOffset;
 	}
 
-	// Set both current and target position (immediate, no interpolation)
-	TargetArmsOffset = HandsOffset;
-	Arms->SetRelativeLocation(HandsOffset);
+	Arms->SetRelativeLocation(ArmsOffset);
 }
 
 void AFPSCharacter::UpdateItemAnimLayer(AActor* Item)
@@ -857,10 +819,7 @@ void AFPSCharacter::AimingPressed()
 
 	// Calculate new Arms offset: Move Arms to align AimingPoint with camera center
 	// Formula: NewArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace
-	FVector AimingArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace;
-
-	// Set target offset for interpolation (will be applied in Tick)
-	TargetArmsOffset = AimingArmsOffset;
+	AimArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace;
 	bIsAiming = true;
 	bAimingCrosshairSet = false; // Reset flag
 }
@@ -883,19 +842,14 @@ void AFPSCharacter::AimingReleased()
 	bool bHasHoldableItem = ActiveItem && ActiveItem->Implements<UHoldableInterface>();
 
 	// Calculate target Arms offset (default hands position)
-	FVector DefaultHandsPosition = bHasHoldableItem
-		? IHoldableInterface::Execute_GetHandsOffset(ActiveItem)
-		: DefaultHandsOffset;
-
-	// Set target offset for interpolation back to default position
-	TargetArmsOffset = DefaultHandsPosition;
+	FVector DefaultArmssPosition = bHasHoldableItem
+		? IHoldableInterface::Execute_GetArmsOffset(ActiveItem)
+		: DefaultArmsOffset;
 
 	// Restore Arms (and attached weapon) visibility
 	Arms->SetVisibility(true, true);
-
 	// Restore default camera FOV
 	Camera->SetFieldOfView(DefaultFOV);
-
 	// Restore default look speed
 	CurrentLookSpeed = 1.0f;
 
@@ -1252,7 +1206,7 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 
 	if (IsLocallyControlled())
 	{
-		SetupHandsLocation(nullptr);
+		SetupArmsLocation(nullptr);
 
 		// Set default crosshair if no active item after unequip
 		if (!ActiveItem && CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
@@ -1265,15 +1219,6 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 		{
 			CurrentLeaningScale = 1.0f;
 		}
-	}
-
-	// Race condition check: Skip callback if Multicast_DropItem arrived first
-	bool bItemAlreadyDetached = (Item->GetAttachParentActor() != this);
-
-	if (bItemAlreadyDetached)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[UnEquipItem] RACE: Item %s already detached"), *Item->GetName());
-		return;
 	}
 
 	IHoldableInterface::Execute_OnUnequipped(Item);
@@ -1335,7 +1280,7 @@ void AFPSCharacter::EquipItem(AActor* Item)
 
 	if (IsLocallyControlled())
 	{
-		SetupHandsLocation(Item);
+		SetupArmsLocation(Item);
 
 		// Set leaning scale from active item
 		CurrentLeaningScale = IHoldableInterface::Execute_GetLeaningScale(Item);
@@ -1612,6 +1557,114 @@ void AFPSCharacter::GetDropTransformAndImpulse_Implementation(AActor* Item, FTra
 	}
 
 	OutImpulse = ThrowImpulse;
+}
+
+// ============================================
+// LEANING SYSTEM IMPLEMENTATION (Postprocess Offset)
+// ============================================
+//
+// Self-contained function that calculates weapon sway based on movement
+// All parameters are hardcoded for simplicity
+// State is tracked via static variables (per-instance via this pointer map)
+// Returns 2D offset: X = lateral (left/right), Y = forward (forward/back) in cm
+
+FVector2D AFPSCharacter::CalculateLeanVector(float DeltaTime)
+{
+	// ============================================
+	// HARDCODED PARAMETERS
+	// ============================================
+	const float MaxLateralOffset = 1.2f;  // cm - lateral lean offset
+	const float MaxForwardOffset = 0.6f;  // cm - forward lean offset
+	const float BobAmplitudeHorizontal = 0.8f;  // cm
+	const float BobAmplitudeVertical = 1.0f;  // cm (not returned, but calculated)
+	const float BobFrequency = 8.0f;  // cycles per jog speed
+	const float LeanInterpSpeed = 8.0f;  // smooth interpolation
+
+	// ============================================
+	// PER-INSTANCE STATE TRACKING (static map)
+	// ============================================
+	struct LeanState
+	{
+		FVector PreviousVelocity = FVector::ZeroVector;
+		float WalkCycleTime = 0.0f;
+		FVector2D CurrentLean = FVector2D::ZeroVector;
+	};
+	static TMap<const AFPSCharacter*, LeanState> StateMap;
+	LeanState& State = StateMap.FindOrAdd(this);
+
+	// Early exit if no movement component
+	if (!CMC)
+	{
+		return FVector2D::ZeroVector;
+	}
+
+	// ============================================
+	// GET VELOCITY (local space)
+	// ============================================
+	FVector WorldVelocity = CMC->Velocity;
+	WorldVelocity.Z = 0.0f; // Ignore vertical movement
+
+	// Transform to local space (X=forward, Y=right)
+	FQuat ActorRot = GetActorQuat();
+	FVector LocalVelocity = ActorRot.Inverse().RotateVector(WorldVelocity);
+	float VelocityMag = LocalVelocity.Size();
+
+	// ============================================
+	// UPDATE WALK CYCLE TIME (for bob phase)
+	// ============================================
+	if (VelocityMag > 10.0f)
+	{
+		float NormalizedSpeed = VelocityMag / 450.0f; // Normalize to jog speed
+		State.WalkCycleTime += DeltaTime * BobFrequency * NormalizedSpeed;
+	}
+	// Don't reset when stopping - preserves phase, prevents shaking
+
+	// ============================================
+	// CALCULATE VELOCITY-BASED LEAN (follow movement direction)
+	// ============================================
+	float VelLateral = FMath::Clamp(LocalVelocity.Y / 450.0f, -1.0f, 1.0f);  // Normalize
+	float VelForward = FMath::Clamp(LocalVelocity.X / 450.0f, -1.0f, 1.0f);  // Normalize
+
+	// Lean follows velocity (moving RIGHT → lean RIGHT)
+	float TargetLateralLean = VelLateral * MaxLateralOffset;
+	float TargetForwardLean = VelForward * MaxForwardOffset;
+
+	// ============================================
+	// CALCULATE PERPENDICULAR BOB (walking cycle)
+	// ============================================
+	// Normalize velocity direction (for perpendicular bob)
+	FVector2D VelDir = FVector2D::ZeroVector;
+	if (VelocityMag > 10.0f)
+	{
+		VelDir.X = LocalVelocity.X / VelocityMag;  // Forward component
+		VelDir.Y = LocalVelocity.Y / VelocityMag;  // Right component
+	}
+
+	// Bob perpendicular to movement direction
+	// Forward movement (W) → horizontal bob (left-right)
+	// Strafe movement (D) → forward bob (forward-back)
+	float BobHorizontal = FMath::Cos(State.WalkCycleTime) * BobAmplitudeHorizontal;
+	BobHorizontal *= FMath::Abs(VelDir.X); // Scale by forward component
+
+	float BobForward = FMath::Sin(State.WalkCycleTime) * BobAmplitudeHorizontal * 0.5f;
+	BobForward *= FMath::Abs(VelDir.Y); // Scale by strafe component
+
+	// ============================================
+	// COMBINE LEAN + BOB INTO TARGET OFFSET
+	// ============================================
+	FVector2D TargetOffset;
+	TargetOffset.X = TargetLateralLean + BobHorizontal;  // Lateral (left/right) in cm
+	TargetOffset.Y = TargetForwardLean + BobForward;      // Forward (forward/back) in cm
+
+	// Apply aiming scale (reduces lean/bob during ADS)
+	TargetOffset *= CurrentLeaningScale;
+
+	// ============================================
+	// SMOOTH INTERPOLATION
+	// ============================================
+	State.CurrentLean = FMath::Vector2DInterpTo(State.CurrentLean, TargetOffset, DeltaTime, LeanInterpSpeed);
+
+	return State.CurrentLean;
 }
 
 // ============================================

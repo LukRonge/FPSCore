@@ -108,7 +108,7 @@ public:
 	// Hands setup - updates first-person arms position based on active item
 	// Only runs on locally controlled client (Arms mesh is OnlyOwnerSee)
 	UFUNCTION(BlueprintCallable, Category = "Animation")
-	void SetupHandsLocation(AActor* Item = nullptr);
+	void SetupArmsLocation(AActor* Item = nullptr);
 
 	// Update animation layer based on item (item anim layer if valid, default layer if null)
 	// @param Item - Item to get anim layer from (nullptr = switch to default layer)
@@ -169,6 +169,25 @@ public:
 	// Current leaning scale (modified by aiming)
 	UPROPERTY(BlueprintReadOnly, Category = "Look")
 	float CurrentLeaningScale = 1.0f;
+
+	// ============================================
+	// WEAPON SWAY & LEANING SYSTEM (LOCAL ONLY)
+	// ============================================
+
+	// ============================================
+	// LEANING SYSTEM (Postprocess visual offset)
+	// ============================================
+
+	// Current leaning vector (2D offset in cm): X = lateral (left/right), Y = forward/backward
+	// Applied as postprocess on top of base arms position (does not affect aiming interpolation)
+	UPROPERTY(BlueprintReadOnly, Category = "Leaning")
+	FVector2D LeanVector = FVector2D::ZeroVector;
+
+	// Calculate leaning vector based on movement (velocity-based lean + perpendicular bob)
+	// Self-contained function with hardcoded parameters and internal static state tracking
+	// Returns 2D offset: X = lateral offset (cm), Y = forward offset (cm)
+	UFUNCTION(BlueprintCallable, Category = "Leaning")
+	FVector2D CalculateLeanVector(float DeltaTime);
 
 	// ============================================
 	// INVENTORY SYSTEM
@@ -246,18 +265,21 @@ public:
 	// Hands offset (LOCAL ONLY - not replicated, used for first-person arms positioning)
 	// Only relevant for locally controlled player (Arms mesh is OnlyOwnerSee)
 	UPROPERTY(BlueprintReadWrite, Category = "Animation")
-	FVector HandsOffset = FVector::ZeroVector;
+	FVector ArmsOffset = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation")
+	FVector AimArmsOffset = FVector::ZeroVector;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
-	FVector DefaultHandsOffset = FVector::ZeroVector;
+	FVector DefaultArmsOffset = FVector::ZeroVector;
 
 	// ============================================
 	// AIMING INTERPOLATION (LOCAL ONLY)
 	// ============================================
 
-	// Target Arms offset for aiming interpolation
-	UPROPERTY(BlueprintReadWrite, Category = "Aiming")
-	FVector TargetArmsOffset = FVector::ZeroVector;
+	// ✅ NEW: Separate base position tracking (without sway) for interpolation
+	// This allows sway to be additive without interfering with ADS interpolation completion
+	FVector InterpolatedArmsOffset = FVector::ZeroVector;
 
 	// Aiming interpolation speed (constant)
 	const float AimingInterpSpeed = 30.0f;

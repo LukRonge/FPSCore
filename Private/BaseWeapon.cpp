@@ -307,9 +307,9 @@ bool ABaseWeapon::IsEquipped_Implementation() const
 	return GetOwner() != nullptr && !IsHidden();
 }
 
-FVector ABaseWeapon::GetHandsOffset_Implementation() const
+FVector ABaseWeapon::GetArmsOffset_Implementation() const
 {
-	return HandsOffset;
+	return ArmsOffset;
 }
 
 UPrimitiveComponent* ABaseWeapon::GetFPSMeshComponent_Implementation() const

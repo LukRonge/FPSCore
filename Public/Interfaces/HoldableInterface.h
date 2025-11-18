@@ -42,8 +42,8 @@ public:
 	// Get hands offset for FPS arms positioning relative to camera
 	// Used by FPSCharacter to position Arms mesh when item is equipped
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
-	FVector GetHandsOffset() const;
-	virtual FVector GetHandsOffset_Implementation() const { return FVector::ZeroVector; }
+	FVector GetArmsOffset() const;
+	virtual FVector GetArmsOffset_Implementation() const { return FVector::ZeroVector; }
 
 	// ============================================
 	// MESH ACCESS (GENERIC - for any holdable item)

@@ -142,13 +142,9 @@ public:
 	// HANDS / IK
 	// ============================================
 
-	// Hand offset for weapon holding (location correction)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Hands")
-	FVector HandsOffset = FVector::ZeroVector;
-
-	// Hand offset when aiming (location correction)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Hands")
-	FVector AimHandsOffset = FVector::ZeroVector;
+	// Arms offset for weapon holding (location correction)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Arms")
+	FVector ArmsOffset = FVector::ZeroVector;
 
 	// ============================================
 	// SHOOTING
@@ -409,8 +405,8 @@ public:
 	// Check if weapon is currently equipped
 	virtual bool IsEquipped_Implementation() const override;
 
-	// Get hands offset for FPS arms positioning
-	virtual FVector GetHandsOffset_Implementation() const override;
+	// Get arms offset for FPS arms positioning
+	virtual FVector GetArmsOffset_Implementation() const override;
 
 	// Get FPS mesh component (visible only to owner)
 	virtual UPrimitiveComponent* GetFPSMeshComponent_Implementation() const override;
@@ -493,10 +489,6 @@ public:
 	// Get TPS mesh component (root, visible to others)
 	UFUNCTION(BlueprintPure, Category = "Weapon|Mesh")
 	USkeletalMeshComponent* GetTPSMesh() const { return TPSMesh; }
-
-	// Get aim hands offset (when aiming down sights)
-	UFUNCTION(BlueprintPure, Category = "Weapon|Hands")
-	FVector GetAimHandsOffset() const { return AimHandsOffset; }
 
 private:
 	// ============================================
