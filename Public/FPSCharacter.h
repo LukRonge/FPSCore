@@ -233,6 +233,31 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Leaning")
 	FRotator CalculateBreathingRotation(const FVector& BreathingVector) const;
 
+	// Update leaning visual feedback systems (Material Parameter Collection + Crosshair)
+	// Combines LeanVector and BreathingVector to update shader effects and crosshair expansion
+	// LOCAL ONLY - called from Tick() for locally controlled players
+	// @param BreathingVector - Output from CalculateBreathing() for current frame
+	UFUNCTION(BlueprintCallable, Category = "Leaning")
+	void UpdateLeaningVisualFeedback(const FVector& BreathingVector);
+
+private:
+	// ============================================
+	// LEANING & BREATHING STATE TRACKING (LOCAL ONLY)
+	// ============================================
+
+	// Leaning state (replaces static TMap)
+	FVector LeanState_CurrentLean = FVector::ZeroVector;
+	float LeanState_WalkCycleTime = 0.0f;
+	FRotator LeanState_PreviousControlRotation = FRotator::ZeroRotator;
+	FVector2D LeanState_MouseLagOffset = FVector2D::ZeroVector;
+	float LeanState_RawMouseDelta = 0.0f; // RAW mouse angular velocity for crosshair alpha
+
+	// Breathing state (replaces static TMap)
+	FVector BreathingState_CurrentBreathing = FVector::ZeroVector;
+	float BreathingState_IdleSwayTime = 0.0f;
+	float BreathingState_IdleActivation = 0.0f;
+
+public:
 	// ============================================
 	// INVENTORY SYSTEM
 	// ============================================

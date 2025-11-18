@@ -194,15 +194,6 @@ void AFPSCharacter::BeginPlay()
 		// Initialize camera FOV
 		Camera->SetFieldOfView(DefaultFOV);
 
-		// Initialize look speed, leaning scale, and breathing scale to defaults
-		CurrentLookSpeed = 1.0f;
-		CurrentLeaningScale = 1.0f;
-		CurrentBreathingScale = 1.0f;
-		HipLeaningScale = 1.0f;
-		AimLeaningScale = 1.0f;
-		HipBreathingScale = 1.0f;
-		AimBreathingScale = 1.0f;
-
 		// Initialize default crosshair if no active item
 		if (!ActiveItem && CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
 		{
@@ -297,53 +288,10 @@ void AFPSCharacter::Tick(float DeltaTime)
 		}
 
 		// ============================================
-		// MATERIAL PARAMETER COLLECTION UPDATE
+		// UPDATE LEANING VISUAL FEEDBACK
 		// ============================================
-		// Send combined leaning + breathing offset to MPC for shader effects
-		if (MPC_Aim)
-		{
-			// Combine leaning and breathing vectors
-			FVector CombinedOffset = LeanVector + BreathingVector;
-
-			// Normalize to -1..1 range with very gentle scaling
-			// Further increased for subtler shader effects
-			const float MaxOffsetCm = 50.0f;   // Increased from 30cm for gentler response
-			const float IntensityScale = 0.3f; // Reduced from 0.5 for finer control
-
-			// Swap axes for shader convention: X→Y, Y→X (lateral↔forward)
-			FVector NormalizedOffset;
-			NormalizedOffset.X = FMath::Clamp((CombinedOffset.Y / MaxOffsetCm) * IntensityScale, -1.0f, 1.0f); // Lateral → X
-			NormalizedOffset.Y = FMath::Clamp((CombinedOffset.X / MaxOffsetCm) * IntensityScale, -1.0f, 1.0f); // Forward → Y
-			NormalizedOffset.Z = FMath::Clamp((CombinedOffset.Z / MaxOffsetCm) * IntensityScale, -1.0f, 1.0f); // Vertical → Z
-
-			// Set vector parameter in MPC
-			UKismetMaterialLibrary::SetVectorParameterValue(GetWorld(), MPC_Aim, FName("OffsetDirection"), FLinearColor(NormalizedOffset));
-		}
-
-		// ============================================
-		// CROSSHAIR UPDATE (with lean alpha)
-		// ============================================
-		// Update crosshair dynamically based on aiming state and lean intensity
-		if (CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
-		{
-			// Calculate lean alpha from LeanVector magnitude
-			// Max expected magnitude: ~15cm (MouseTilt 7cm + Lateral 3.8cm + Bob 2.4cm + Vertical 3.5cm combined)
-			const float MaxLeanMagnitude = 15.0f;
-			const float LeanDeadzone = 0.5f;  // Below 0.5cm, consider as idle (eliminates mouse lag residuals)
-
-			float LeanMagnitude = LeanVector.Size();
-			float LeanAlpha = 0.0f;
-
-			// Apply deadzone threshold to eliminate residuals when idle
-			if (LeanMagnitude > LeanDeadzone)
-			{
-				// Remap: 0.5cm→0.0, 15cm→1.0
-				LeanAlpha = FMath::Clamp((LeanMagnitude - LeanDeadzone) / (MaxLeanMagnitude - LeanDeadzone), 0.0f, 1.0f);
-			}
-
-			// Update crosshair with aiming state and lean alpha
-			IPlayerHUDInterface::Execute_UpdateCrossHair(CachedPlayerController, bIsAiming, LeanAlpha);
-		}
+		// Update Material Parameter Collection and Crosshair based on leaning/breathing
+		UpdateLeaningVisualFeedback(BreathingVector);
 	}
 }
 
@@ -1002,9 +950,6 @@ void AFPSCharacter::AimingReleased()
 		return;
 	}
 
-	// Check if active item is holdable (for leaning scale restoration)
-	bool bHasHoldableItem = ActiveItem && ActiveItem->Implements<UHoldableInterface>();
-
 	// Restore Arms (and attached weapon) visibility
 	Arms->SetVisibility(true, true);
 
@@ -1014,21 +959,13 @@ void AFPSCharacter::AimingReleased()
 	// Restore default look speed
 	CurrentLookSpeed = 1.0f;
 
-	// Restore weapon's hip-fire leaning and breathing scales (or default if no active item)
-	// Note: Current* values will be interpolated in CalculateInterpolatedArmsOffset()
-	HipLeaningScale = bHasHoldableItem
-		? IHoldableInterface::Execute_GetLeaningScale(ActiveItem)
-		: 1.0f;
-
-	HipBreathingScale = bHasHoldableItem
-		? IHoldableInterface::Execute_GetBreathingScale(ActiveItem)
-		: 1.0f;
-
 	// Reset aiming state flags
 	bIsAiming = false;
 	bAimingCrosshairSet = false; // Reset flag so next aim can apply state again
 
-	// Note: Crosshair is updated continuously in Tick() with LeanAlpha
+	// Note: HipLeaningScale and HipBreathingScale are already set from EquipItem()
+	// Current* values will be interpolated in CalculateInterpolatedArmsOffset()
+	// Crosshair is updated continuously in Tick() with LeanAlpha
 }
 
 void AFPSCharacter::Server_SetMovementMode_Implementation(EFPSMovementMode NewMode)
@@ -1378,15 +1315,12 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 			IPlayerHUDInterface::Execute_SetCrossHair(CachedPlayerController, DefaultCrossHair, nullptr);
 		}
 
-		// Reset leaning and breathing scales if no active item
+		// Reset all scales to defaults when no active item (defensive cleanup)
 		if (!ActiveItem)
 		{
-			CurrentLeaningScale = 1.0f;
-			CurrentBreathingScale = 1.0f;
 			HipLeaningScale = 1.0f;
-			AimLeaningScale = 1.0f;
 			HipBreathingScale = 1.0f;
-			AimBreathingScale = 1.0f;
+			// Current* scales will interpolate to Hip* scales in CalculateInterpolatedArmsOffset()
 		}
 	}
 
@@ -1763,25 +1697,6 @@ FVector AFPSCharacter::CalculateLeanVector(float DeltaTime)
 	const float LeanInterpSpeed = 8.0f;         // velocity-based lean smoothing
 
 	// ============================================
-	// PER-INSTANCE STATE TRACKING (static map)
-	// ============================================
-	struct LeanState
-	{
-		FVector CurrentLean = FVector::ZeroVector;         // Final interpolated lean (3D)
-		float WalkCycleTime = 0.0f;                        // Walk bob phase accumulator
-		FRotator PreviousControlRotation = FRotator::ZeroRotator; // For mouse delta
-		FVector2D MouseLagOffset = FVector2D::ZeroVector;  // Spring-based mouse lag (XY only)
-	};
-	static TMap<const AFPSCharacter*, LeanState> StateMap;
-	LeanState& State = StateMap.FindOrAdd(this);
-
-	// Early exit if no movement component
-	if (!CMC)
-	{
-		return FVector::ZeroVector;
-	}
-
-	// ============================================
 	// GET VELOCITY (local space)
 	// ============================================
 	FVector WorldVelocity = CMC->Velocity;
@@ -1798,7 +1713,7 @@ FVector AFPSCharacter::CalculateLeanVector(float DeltaTime)
 	if (VelocityMag > 10.0f)
 	{
 		float NormalizedSpeed = VelocityMag / 450.0f; // Normalize to jog speed
-		State.WalkCycleTime += DeltaTime * BobFrequency * NormalizedSpeed;
+		LeanState_WalkCycleTime += DeltaTime * BobFrequency * NormalizedSpeed;
 	}
 	// Don't reset when stopping - preserves phase, prevents jarring snap
 
@@ -1827,18 +1742,18 @@ FVector AFPSCharacter::CalculateLeanVector(float DeltaTime)
 		VelDir.Y = LocalVelocity.Y / VelocityMag;  // Right component
 
 		// Forward movement (W) → horizontal bob (left-right swing)
-		BobHorizontal = FMath::Sin(State.WalkCycleTime) * BobAmplitudeHorizontal;
+		BobHorizontal = FMath::Sin(LeanState_WalkCycleTime) * BobAmplitudeHorizontal;
 		BobHorizontal *= FMath::Abs(VelDir.X); // Scale by forward component
 
 		// Strafe movement (A/D) → horizontal bob (perpendicular to strafe)
 		// FIX: Both forward AND strafe create horizontal bob (not forward bob)
-		float StrafeBobHorizontal = FMath::Sin(State.WalkCycleTime) * BobAmplitudeHorizontal * 0.7f;
+		float StrafeBobHorizontal = FMath::Sin(LeanState_WalkCycleTime) * BobAmplitudeHorizontal * 0.7f;
 		StrafeBobHorizontal *= FMath::Abs(VelDir.Y); // Scale by strafe component
 		BobHorizontal += StrafeBobHorizontal;
 
 		// Vertical bob component (subtle forward/back during walk cycle)
 		// TUNED: Reduced from 0.3 to 0.15 for gentler forward/back oscillation
-		BobForward = FMath::Cos(State.WalkCycleTime * 2.0f) * (BobAmplitudeHorizontal * 0.15f);
+		BobForward = FMath::Cos(LeanState_WalkCycleTime * 2.0f) * (BobAmplitudeHorizontal * 0.15f);
 	}
 
 	// ============================================
@@ -1854,7 +1769,7 @@ FVector AFPSCharacter::CalculateLeanVector(float DeltaTime)
 		// Sin wave at same frequency as horizontal bob (smooth, slow bounce)
 		// Always positive (weapon goes DOWN, not up - realistic foot impact)
 		float NormalizedSpeed = FMath::Clamp(VelocityMag / 450.0f, 0.0f, 1.0f);
-		VerticalBob = FMath::Abs(FMath::Sin(State.WalkCycleTime * 1.0f)) * BobAmplitudeVertical;
+		VerticalBob = FMath::Abs(FMath::Sin(LeanState_WalkCycleTime * 1.0f)) * BobAmplitudeVertical;
 		VerticalBob *= NormalizedSpeed;  // Scale by movement speed
 
 		// Invert to negative (weapon drops DOWN on step)
@@ -1872,7 +1787,7 @@ FVector AFPSCharacter::CalculateLeanVector(float DeltaTime)
 		FRotator CurrentRotation = Ctrl->GetControlRotation();
 
 		// Calculate mouse delta (angular velocity)
-		FRotator DeltaRotation = CurrentRotation - State.PreviousControlRotation;
+		FRotator DeltaRotation = CurrentRotation - LeanState_PreviousControlRotation;
 		DeltaRotation.Normalize(); // Clamp to ±180°
 
 		// Convert angular velocity to tilt offset
@@ -1881,17 +1796,21 @@ FVector AFPSCharacter::CalculateLeanVector(float DeltaTime)
 		float MouseYawDelta = DeltaRotation.Yaw / DeltaTime;   // degrees per second
 		float MousePitchDelta = DeltaRotation.Pitch / DeltaTime; // degrees per second
 
+		// Store RAW mouse delta magnitude for crosshair alpha
+		// Combine yaw and pitch for total angular velocity
+		LeanState_RawMouseDelta = FMath::Sqrt(MouseYawDelta * MouseYawDelta + MousePitchDelta * MousePitchDelta);
+
 		// Target tilt based on mouse speed
 		FVector2D TargetMouseTilt;
 		TargetMouseTilt.X = FMath::Clamp(MousePitchDelta * 0.002f, -1.0f, 1.0f) * MouseTiltStrength;
 		TargetMouseTilt.Y = FMath::Clamp(-MouseYawDelta * 0.002f, -1.0f, 1.0f) * MouseTiltStrength;
 
 		// Spring interpolation (weapon lags behind camera)
-		State.MouseLagOffset = FMath::Vector2DInterpTo(State.MouseLagOffset, TargetMouseTilt, DeltaTime, MouseLagSpeed);
-		MouseTiltOffset = State.MouseLagOffset;
+		LeanState_MouseLagOffset = FMath::Vector2DInterpTo(LeanState_MouseLagOffset, TargetMouseTilt, DeltaTime, MouseLagSpeed);
+		MouseTiltOffset = LeanState_MouseLagOffset;
 
 		// Store rotation for next frame
-		State.PreviousControlRotation = CurrentRotation;
+		LeanState_PreviousControlRotation = CurrentRotation;
 	}
 
 	// ============================================
@@ -1910,9 +1829,9 @@ FVector AFPSCharacter::CalculateLeanVector(float DeltaTime)
 	// ============================================
 	// SMOOTH INTERPOLATION (final spring damping)
 	// ============================================
-	State.CurrentLean = FMath::VInterpTo(State.CurrentLean, TargetOffset, DeltaTime, LeanInterpSpeed);
+	LeanState_CurrentLean = FMath::VInterpTo(LeanState_CurrentLean, TargetOffset, DeltaTime, LeanInterpSpeed);
 
-	return State.CurrentLean;
+	return LeanState_CurrentLean;
 }
 
 // ============================================
@@ -1936,24 +1855,6 @@ FVector AFPSCharacter::CalculateBreathing(float DeltaTime)
 	const float LeanInterpSpeed = 8.0f;         // smooth interpolation
 
 	// ============================================
-	// PER-INSTANCE STATE TRACKING (static map)
-	// ============================================
-	struct BreathingState
-	{
-		FVector CurrentBreathing = FVector::ZeroVector;  // Final interpolated breathing
-		float IdleSwayTime = 0.0f;                       // Idle sway phase accumulator
-		float IdleActivation = 0.0f;                     // Idle sway blend alpha
-	};
-	static TMap<const AFPSCharacter*, BreathingState> StateMap;
-	BreathingState& State = StateMap.FindOrAdd(this);
-
-	// Early exit if no movement component
-	if (!CMC)
-	{
-		return FVector::ZeroVector;
-	}
-
-	// ============================================
 	// GET VELOCITY (local space)
 	// ============================================
 	FVector WorldVelocity = CMC->Velocity;
@@ -1966,28 +1867,28 @@ FVector AFPSCharacter::CalculateBreathing(float DeltaTime)
 	// When stationary: IdleActivation = 1.0 (full idle sway)
 	// When moving: IdleActivation = 0.0 (disable idle sway)
 	float TargetIdleActivation = (VelocityMag < 50.0f) ? 1.0f : 0.0f;
-	State.IdleActivation = FMath::FInterpTo(State.IdleActivation, TargetIdleActivation, DeltaTime, IdleBlendSpeed);
+	BreathingState_IdleActivation = FMath::FInterpTo(BreathingState_IdleActivation, TargetIdleActivation, DeltaTime, IdleBlendSpeed);
 
 	// ============================================
 	// UPDATE IDLE SWAY TIME (always running)
 	// ============================================
-	State.IdleSwayTime += DeltaTime;
+	BreathingState_IdleSwayTime += DeltaTime;
 
 	// ============================================
 	// CALCULATE IDLE SWAY (breathing/tremor)
 	// ============================================
 	FVector TargetBreathing = FVector::ZeroVector;
 
-	if (State.IdleActivation > 0.01f)
+	if (BreathingState_IdleActivation > 0.01f)
 	{
 		// Sine waves at different frequencies (creates figure-8 pattern in XY, subtle Z breathing)
-		float IdleX = FMath::Sin(State.IdleSwayTime * IdleSwayFrequencyX * 2.0f * PI);
-		float IdleY = FMath::Sin(State.IdleSwayTime * IdleSwayFrequencyY * 2.0f * PI);
-		float IdleZ = FMath::Cos(State.IdleSwayTime * IdleSwayFrequencyZ * 2.0f * PI);  // Slower breathing rate
+		float IdleX = FMath::Sin(BreathingState_IdleSwayTime * IdleSwayFrequencyX * 2.0f * PI);
+		float IdleY = FMath::Sin(BreathingState_IdleSwayTime * IdleSwayFrequencyY * 2.0f * PI);
+		float IdleZ = FMath::Cos(BreathingState_IdleSwayTime * IdleSwayFrequencyZ * 2.0f * PI);  // Slower breathing rate
 
-		TargetBreathing.X = IdleX * IdleSwayAmplitude * State.IdleActivation;
-		TargetBreathing.Y = IdleY * IdleSwayAmplitude * State.IdleActivation;
-		TargetBreathing.Z = IdleZ * (IdleSwayAmplitude * 0.75f) * State.IdleActivation;  // 75% amplitude for Z
+		TargetBreathing.X = IdleX * IdleSwayAmplitude * BreathingState_IdleActivation;
+		TargetBreathing.Y = IdleY * IdleSwayAmplitude * BreathingState_IdleActivation;
+		TargetBreathing.Z = IdleZ * (IdleSwayAmplitude * 0.75f) * BreathingState_IdleActivation;  // 75% amplitude for Z
 
 		// Apply breathing scale (CurrentBreathingScale interpolates hip → ADS)
 		TargetBreathing *= CurrentBreathingScale;
@@ -1996,9 +1897,9 @@ FVector AFPSCharacter::CalculateBreathing(float DeltaTime)
 	// ============================================
 	// SMOOTH INTERPOLATION (final spring damping)
 	// ============================================
-	State.CurrentBreathing = FMath::VInterpTo(State.CurrentBreathing, TargetBreathing, DeltaTime, LeanInterpSpeed);
+	BreathingState_CurrentBreathing = FMath::VInterpTo(BreathingState_CurrentBreathing, TargetBreathing, DeltaTime, LeanInterpSpeed);
 
-	return State.CurrentBreathing;
+	return BreathingState_CurrentBreathing;
 }
 
 // ============================================
@@ -2026,6 +1927,79 @@ FRotator AFPSCharacter::CalculateBreathingRotation(const FVector& BreathingVecto
 	float BreathingPitch = -BreathingVector.Z * OffsetToRotationScale;
 
 	return FRotator(BreathingPitch, BreathingYaw, 0.0f);
+}
+
+// ============================================
+// UPDATE LEANING VISUAL FEEDBACK (Material Parameter Collection + Crosshair)
+// ============================================
+//
+// Shared function that updates both MPC shader effects and crosshair expansion
+// Combines leaning and breathing vectors for shader, calculates lean alpha for crosshair
+// LOCAL ONLY - called from Tick() for locally controlled players
+//
+void AFPSCharacter::UpdateLeaningVisualFeedback(const FVector& BreathingVector)
+{
+	// ============================================
+	// MATERIAL PARAMETER COLLECTION UPDATE
+	// ============================================
+	// Send normalized vector to MPC for shader effects (independent scaling)
+	if (MPC_Aim)
+	{
+		// Combine leaning and breathing vectors
+		FVector CombinedOffset = LeanVector + BreathingVector;
+
+		// Swap axes for shader convention: X→Y, Y→X (lateral↔forward)
+		FVector ShaderSpaceOffset;
+		ShaderSpaceOffset.X = CombinedOffset.Y; // Lateral → X
+		ShaderSpaceOffset.Y = CombinedOffset.X; // Forward → Y
+		ShaderSpaceOffset.Z = CombinedOffset.Z; // Vertical → Z
+
+		// MPC-specific scaling (independent from leaning/breathing calculations)
+		// Higher MaxOffset = gentler response, lower IntensityScale = reduced dispersion
+		const float MaxOffsetCm = 50.0f;   // Baseline for normalization (increased for gentler response)
+		const float IntensityScale = 0.7f; // Extra damping multiplier (70% of normalized value)
+
+		// Normalize each axis independently to -1..1 range, then apply intensity damping
+		FVector NormalizedOffset;
+		NormalizedOffset.X = FMath::Clamp((ShaderSpaceOffset.X / MaxOffsetCm) * IntensityScale, -1.0f, 1.0f);
+		NormalizedOffset.Y = FMath::Clamp((ShaderSpaceOffset.Y / MaxOffsetCm) * IntensityScale, -1.0f, 1.0f);
+		NormalizedOffset.Z = FMath::Clamp((ShaderSpaceOffset.Z / MaxOffsetCm) * IntensityScale, -1.0f, 1.0f);
+
+		// Set to MPC (each axis always in -1..1 range)
+		UKismetMaterialLibrary::SetVectorParameterValue(GetWorld(), MPC_Aim, FName("OffsetDirection"), FLinearColor(NormalizedOffset));
+	}
+
+	// ============================================
+	// CROSSHAIR UPDATE (with lean alpha from movement + look input)
+	// ============================================
+	// Update crosshair dynamically based on aiming state and lean intensity
+	if (CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
+	{
+		float LeanAlpha = 0.0f;
+
+		// 1. Movement contribution (from LeanVector magnitude)
+		float LeanMagnitude = LeanVector.Size();
+		const float LeanDeadzone = 0.1f;  // cm
+		const float MaxLeanMagnitude = 17.0f;  // cm
+
+		float MovementAlpha = 0.0f;
+		if (LeanMagnitude > LeanDeadzone)
+		{
+			MovementAlpha = FMath::Clamp((LeanMagnitude - LeanDeadzone) / (MaxLeanMagnitude - LeanDeadzone), 0.0f, 1.0f);
+		}
+
+		// 2. Look input contribution (from RAW mouse delta)
+		// Typical mouse speed: slow ~20 deg/s, medium ~100 deg/s, fast ~300 deg/s
+		const float MaxMouseSpeed = 150.0f;  // degrees per second (lowered for more responsive crosshair)
+		float LookAlpha = FMath::Clamp(LeanState_RawMouseDelta / MaxMouseSpeed, 0.0f, 1.0f);
+
+		// 3. Combined alpha: use maximum (either movement or look triggers crosshair expansion)
+		// When idle: LeanVector ≈ 0 AND RawMouseDelta = 0 → LeanAlpha = 0
+		LeanAlpha = FMath::Max(MovementAlpha, LookAlpha);
+
+		// Update crosshair with aiming state and lean alpha
+		IPlayerHUDInterface::Execute_UpdateCrossHair(CachedPlayerController, bIsAiming, LeanAlpha);
+	}
 }
 
 // ============================================
