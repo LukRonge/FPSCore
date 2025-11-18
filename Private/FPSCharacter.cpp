@@ -28,6 +28,9 @@
 #include "DrawDebugHelpers.h"
 #include "Components/InventoryComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Materials/MaterialParameterCollectionInstance.h"
+#include "Kismet/KismetMaterialLibrary.h"
 
 AFPSCharacter::AFPSCharacter()
 {
@@ -269,23 +272,77 @@ void AFPSCharacter::Tick(float DeltaTime)
 		Arms->SetRelativeLocation(FinalArmsOffset);
 
 		// ============================================
-		// BREATHING CAMERA ROTATION (ADS ONLY)
+		// BREATHING & LEANING CAMERA OFFSET (ADS ONLY)
 		// ============================================
-		// Convert breathing offset to camera rotation when aiming
-		// This creates realistic aim wobble during ADS
+		// Apply breathing rotation + leaning position to camera when aiming
+		// This creates realistic aim wobble and weapon sway during ADS
 		if (bIsAiming && Camera)
 		{
+			// Apply breathing rotation (Pitch/Yaw wobble)
 			BreathingRotation = CalculateBreathingRotation(BreathingVector);
 			Camera->SetRelativeRotation(BreathingRotation);
+
+			// Apply leaning position (weapon movement affects camera position)
+			Camera->SetRelativeLocation(BaseCameraLocation + LeanVector);
 		}
 		else
 		{
-			// Reset camera rotation when not aiming
-			if (Camera && !BreathingRotation.IsZero())
+			// Reset camera rotation and location when not aiming
+			if (Camera && (!BreathingRotation.IsZero() || Camera->GetRelativeLocation() != BaseCameraLocation))
 			{
 				BreathingRotation = FRotator::ZeroRotator;
 				Camera->SetRelativeRotation(BreathingRotation);
+				Camera->SetRelativeLocation(BaseCameraLocation);
 			}
+		}
+
+		// ============================================
+		// MATERIAL PARAMETER COLLECTION UPDATE
+		// ============================================
+		// Send combined leaning + breathing offset to MPC for shader effects
+		if (MPC_Aim)
+		{
+			// Combine leaning and breathing vectors
+			FVector CombinedOffset = LeanVector + BreathingVector;
+
+			// Normalize to -1..1 range with very gentle scaling
+			// Further increased for subtler shader effects
+			const float MaxOffsetCm = 50.0f;   // Increased from 30cm for gentler response
+			const float IntensityScale = 0.3f; // Reduced from 0.5 for finer control
+
+			// Swap axes for shader convention: X→Y, Y→X (lateral↔forward)
+			FVector NormalizedOffset;
+			NormalizedOffset.X = FMath::Clamp((CombinedOffset.Y / MaxOffsetCm) * IntensityScale, -1.0f, 1.0f); // Lateral → X
+			NormalizedOffset.Y = FMath::Clamp((CombinedOffset.X / MaxOffsetCm) * IntensityScale, -1.0f, 1.0f); // Forward → Y
+			NormalizedOffset.Z = FMath::Clamp((CombinedOffset.Z / MaxOffsetCm) * IntensityScale, -1.0f, 1.0f); // Vertical → Z
+
+			// Set vector parameter in MPC
+			UKismetMaterialLibrary::SetVectorParameterValue(GetWorld(), MPC_Aim, FName("OffsetDirection"), FLinearColor(NormalizedOffset));
+		}
+
+		// ============================================
+		// CROSSHAIR UPDATE (with lean alpha)
+		// ============================================
+		// Update crosshair dynamically based on aiming state and lean intensity
+		if (CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
+		{
+			// Calculate lean alpha from LeanVector magnitude
+			// Max expected magnitude: ~15cm (MouseTilt 7cm + Lateral 3.8cm + Bob 2.4cm + Vertical 3.5cm combined)
+			const float MaxLeanMagnitude = 15.0f;
+			const float LeanDeadzone = 0.5f;  // Below 0.5cm, consider as idle (eliminates mouse lag residuals)
+
+			float LeanMagnitude = LeanVector.Size();
+			float LeanAlpha = 0.0f;
+
+			// Apply deadzone threshold to eliminate residuals when idle
+			if (LeanMagnitude > LeanDeadzone)
+			{
+				// Remap: 0.5cm→0.0, 15cm→1.0
+				LeanAlpha = FMath::Clamp((LeanMagnitude - LeanDeadzone) / (MaxLeanMagnitude - LeanDeadzone), 0.0f, 1.0f);
+			}
+
+			// Update crosshair with aiming state and lean alpha
+			IPlayerHUDInterface::Execute_UpdateCrossHair(CachedPlayerController, bIsAiming, LeanAlpha);
 		}
 	}
 }
@@ -536,17 +593,11 @@ FVector AFPSCharacter::CalculateInterpolatedArmsOffset(float DeltaTime)
 	// ============================================
 	// AIMING THRESHOLD (AimingAlpha > 0.8)
 	// ============================================
-	// When interpolation reaches 80%, apply aiming state (FOV, crosshair, look speed, hide FPS mesh)
+	// When interpolation reaches 80%, apply aiming state (FOV, look speed, hide FPS mesh)
 	// This happens before full interpolation to provide snappy feel
+	// Note: Crosshair is updated continuously in Tick() with LeanAlpha
 	if (AimingAlpha > 0.8f && bIsAiming && !bAimingCrosshairSet && ActiveItem && ActiveItem->Implements<USightInterface>())
 	{
-		// Update crosshair to aiming state
-		if (CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
-		{
-			IPlayerHUDInterface::Execute_UpdateCrossHair(CachedPlayerController, true, 0.0f);
-			bAimingCrosshairSet = true;
-		}
-
 		// Set camera FOV for aiming
 		if (Camera)
 		{
@@ -562,6 +613,9 @@ FVector AFPSCharacter::CalculateInterpolatedArmsOffset(float DeltaTime)
 		{
 			Arms->SetVisibility(false, true);
 		}
+
+		// Set flag to prevent re-applying state
+		bAimingCrosshairSet = true;
 	}
 
 	// Return interpolated arms offset
@@ -974,11 +1028,7 @@ void AFPSCharacter::AimingReleased()
 	bIsAiming = false;
 	bAimingCrosshairSet = false; // Reset flag so next aim can apply state again
 
-	// Update HUD crosshair to normal state
-	if (CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
-	{
-		IPlayerHUDInterface::Execute_UpdateCrossHair(CachedPlayerController, false, 0.0f);
-	}
+	// Note: Crosshair is updated continuously in Tick() with LeanAlpha
 }
 
 void AFPSCharacter::Server_SetMovementMode_Implementation(EFPSMovementMode NewMode)

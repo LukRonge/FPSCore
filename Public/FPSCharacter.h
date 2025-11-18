@@ -381,6 +381,16 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Camera")
 	float DefaultFOV = 90.0f;
 
+	// Base camera location (relative to Neck_01, set in constructor)
+	// Used as reference for applying LeanVector during ADS
+	UPROPERTY(BlueprintReadOnly, Category = "Camera")
+	FVector BaseCameraLocation = FVector(15.0f, 0.0f, 0.0f);
+
+	// Material Parameter Collection for weapon sway shader effects
+	// Receives normalized OffsetDirection vector (leaning + breathing combined)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Material")
+	class UMaterialParameterCollection* MPC_Aim;
+
 	// Mesh components
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh")
 	USkeletalMeshComponent* Arms;
