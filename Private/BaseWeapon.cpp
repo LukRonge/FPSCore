@@ -337,6 +337,11 @@ float ABaseWeapon::GetLeaningScale_Implementation() const
 	return LeaningScale;
 }
 
+float ABaseWeapon::GetBreathingScale_Implementation() const
+{
+	return BreathingScale;
+}
+
 // ============================================
 // BALLISTICS HANDLER INTERFACE IMPLEMENTATION
 // ============================================
@@ -696,6 +701,16 @@ float ABaseWeapon::GetAimLeaningScale_Implementation() const
 		return ISightInterface::Execute_GetAimLeaningScale(SightActor);
 	}
 	return 1.0f;
+}
+
+float ABaseWeapon::GetAimBreathingScale_Implementation() const
+{
+	AActor* SightActor = GetCurrentSightActor();
+	if (SightActor && SightActor->Implements<USightInterface>())
+	{
+		return ISightInterface::Execute_GetAimBreathingScale(SightActor);
+	}
+	return 0.3f;
 }
 
 bool ABaseWeapon::ShouldHideFPSMeshWhenAiming_Implementation() const

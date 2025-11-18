@@ -86,4 +86,9 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
 	float GetLeaningScale() const;
 	virtual float GetLeaningScale_Implementation() const { return 1.0f; }
+
+	// Get breathing scale multiplier for this item (1.0 = normal scale)
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	float GetBreathingScale() const;
+	virtual float GetBreathingScale_Implementation() const { return 1.0f; }
 };

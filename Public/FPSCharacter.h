@@ -175,6 +175,26 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Look")
 	float CurrentLeaningScale = 1.0f;
 
+	// Current breathing scale (modified by aiming)
+	UPROPERTY(BlueprintReadOnly, Category = "Look")
+	float CurrentBreathingScale = 1.0f;
+
+	// Base leaning scale (hip-fire, from weapon)
+	UPROPERTY(BlueprintReadOnly, Category = "Look")
+	float HipLeaningScale = 1.0f;
+
+	// Aiming leaning scale (ADS, from sight)
+	UPROPERTY(BlueprintReadOnly, Category = "Look")
+	float AimLeaningScale = 1.0f;
+
+	// Base breathing scale (hip-fire, from weapon)
+	UPROPERTY(BlueprintReadOnly, Category = "Look")
+	float HipBreathingScale = 1.0f;
+
+	// Aiming breathing scale (ADS, from sight)
+	UPROPERTY(BlueprintReadOnly, Category = "Look")
+	float AimBreathingScale = 1.0f;
+
 	// ============================================
 	// WEAPON SWAY & LEANING SYSTEM (LOCAL ONLY)
 	// ============================================
@@ -193,6 +213,13 @@ public:
 	// Returns 3D offset: X = forward offset (cm), Y = lateral offset (cm), Z = vertical offset (cm)
 	UFUNCTION(BlueprintCallable, Category = "Leaning")
 	FVector CalculateLeanVector(float DeltaTime);
+
+	// Calculate breathing sway offset (idle breathing effect)
+	// Self-contained function with hardcoded parameters and internal static state tracking
+	// Uses CurrentBreathingScale from ActiveItem (hip) or AimBreathingScale (ADS)
+	// Returns 3D offset: X = forward offset (cm), Y = lateral offset (cm), Z = vertical offset (cm)
+	UFUNCTION(BlueprintCallable, Category = "Leaning")
+	FVector CalculateBreathing(float DeltaTime);
 
 	// ============================================
 	// INVENTORY SYSTEM

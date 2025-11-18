@@ -96,4 +96,11 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Sight")
 	float GetAimLeaningScale() const;
 	virtual float GetAimLeaningScale_Implementation() const { return 1.0f; }
+
+	/**
+	 * Get breathing scale when aiming (0.0 = no breathing, 1.0 = full breathing)
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Sight")
+	float GetAimBreathingScale() const;
+	virtual float GetAimBreathingScale_Implementation() const { return 0.3f; }
 };

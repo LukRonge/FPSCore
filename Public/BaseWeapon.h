@@ -156,13 +156,9 @@ public:
 	// BREATHING / SWAY
 	// ============================================
 
-	// Breathing sway intensity (idle)
+	// Breathing sway intensity (hip-fire idle)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Breathing")
 	float BreathingScale = 1.0f;
-
-	// Breathing sway intensity when aiming
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Breathing")
-	float AimBreathingScale = 0.3f;
 
 	// ============================================
 	// AIMING
@@ -423,6 +419,9 @@ public:
 	// Get leaning scale
 	virtual float GetLeaningScale_Implementation() const override;
 
+	// Get breathing scale
+	virtual float GetBreathingScale_Implementation() const override;
+
 	// Set FPS mesh visibility
 	virtual void SetFPSMeshVisibility_Implementation(bool bVisible) override;
 
@@ -469,6 +468,9 @@ public:
 
 	// Get aim leaning scale from current sight or default
 	virtual float GetAimLeaningScale_Implementation() const override;
+
+	// Get aim breathing scale from current sight or default
+	virtual float GetAimBreathingScale_Implementation() const override;
 
 	// Check if current sight wants to hide FPS mesh when aiming
 	virtual bool ShouldHideFPSMeshWhenAiming_Implementation() const override;

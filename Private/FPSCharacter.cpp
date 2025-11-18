@@ -191,9 +191,14 @@ void AFPSCharacter::BeginPlay()
 		// Initialize camera FOV
 		Camera->SetFieldOfView(DefaultFOV);
 
-		// Initialize look speed and leaning scale to defaults
+		// Initialize look speed, leaning scale, and breathing scale to defaults
 		CurrentLookSpeed = 1.0f;
 		CurrentLeaningScale = 1.0f;
+		CurrentBreathingScale = 1.0f;
+		HipLeaningScale = 1.0f;
+		AimLeaningScale = 1.0f;
+		HipBreathingScale = 1.0f;
+		AimBreathingScale = 1.0f;
 
 		// Initialize default crosshair if no active item
 		if (!ActiveItem && CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
@@ -247,14 +252,18 @@ void AFPSCharacter::Tick(float DeltaTime)
 		// Update weapon leaning/sway based on movement
 		LeanVector = CalculateLeanVector(DeltaTime);
 
-		// Combine aiming offset + weapon lean/sway
+		// Calculate breathing sway (idle breathing effect)
+		FVector BreathingVector = CalculateBreathing(DeltaTime);
+
+		// Combine aiming offset + weapon lean/sway + breathing
 		// LeanVector.X = Forward/back offset (cm)
 		// LeanVector.Y = Lateral left/right offset (cm)
 		// LeanVector.Z = Vertical up/down offset (cm)
+		// BreathingVector = Idle breathing offset (XYZ)
 		FVector FinalArmsOffset = InterpolatedArmsOffset;
-		FinalArmsOffset.X += LeanVector.X; // Add forward/back sway
-		FinalArmsOffset.Y += LeanVector.Y; // Add lateral sway
-		FinalArmsOffset.Z += LeanVector.Z; // Add vertical bob
+		FinalArmsOffset.X += LeanVector.X + BreathingVector.X; // Add forward/back sway + breathing
+		FinalArmsOffset.Y += LeanVector.Y + BreathingVector.Y; // Add lateral sway + breathing
+		FinalArmsOffset.Z += LeanVector.Z + BreathingVector.Z; // Add vertical bob + breathing
 
 		// Apply final position to Arms mesh (first-person hands)
 		Arms->SetRelativeLocation(FinalArmsOffset);
@@ -497,6 +506,14 @@ FVector AFPSCharacter::CalculateInterpolatedArmsOffset(float DeltaTime)
 	FVector Result = FMath::Lerp(ArmsOffset, AimArmsOffset, AimingAlpha);
 
 	// ============================================
+	// CONTINUOUS INTERPOLATION (leaning and breathing scales)
+	// ============================================
+	// Smoothly interpolate leaning and breathing scales based on AimingAlpha
+	// This creates smooth transitions instead of instant jumps at 80% threshold
+	CurrentLeaningScale = FMath::Lerp(HipLeaningScale, AimLeaningScale, AimingAlpha);
+	CurrentBreathingScale = FMath::Lerp(HipBreathingScale, AimBreathingScale, AimingAlpha);
+
+	// ============================================
 	// AIMING THRESHOLD (AimingAlpha > 0.8)
 	// ============================================
 	// When interpolation reaches 80%, apply aiming state (FOV, crosshair, look speed, hide FPS mesh)
@@ -517,9 +534,8 @@ FVector AFPSCharacter::CalculateInterpolatedArmsOffset(float DeltaTime)
 			Camera->SetFieldOfView(AimingFOV);
 		}
 
-		// Set look speed and leaning scale for aiming
+		// Set look speed for aiming
 		CurrentLookSpeed = ISightInterface::Execute_GetAimLookSpeed(ActiveItem);
-		CurrentLeaningScale = ISightInterface::Execute_GetAimLeaningScale(ActiveItem);
 
 		// Hide Arms if sight requires it (e.g., sniper scope with full-screen overlay)
 		if (ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(ActiveItem) && Arms->IsVisible())
@@ -890,6 +906,11 @@ void AFPSCharacter::AimingPressed()
 	// Calculate new Arms offset: Move Arms to align AimingPoint with camera center
 	// Formula: NewArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace
 	AimArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace;
+
+	// Set ADS leaning and breathing scales from sight
+	AimLeaningScale = ISightInterface::Execute_GetAimLeaningScale(ActiveItem);
+	AimBreathingScale = ISightInterface::Execute_GetAimBreathingScale(ActiveItem);
+
 	bIsAiming = true;
 }
 
@@ -919,9 +940,14 @@ void AFPSCharacter::AimingReleased()
 	// Restore default look speed
 	CurrentLookSpeed = 1.0f;
 
-	// Restore weapon's leaning scale (or default if no active item)
-	CurrentLeaningScale = bHasHoldableItem
+	// Restore weapon's hip-fire leaning and breathing scales (or default if no active item)
+	// Note: Current* values will be interpolated in CalculateInterpolatedArmsOffset()
+	HipLeaningScale = bHasHoldableItem
 		? IHoldableInterface::Execute_GetLeaningScale(ActiveItem)
+		: 1.0f;
+
+	HipBreathingScale = bHasHoldableItem
+		? IHoldableInterface::Execute_GetBreathingScale(ActiveItem)
 		: 1.0f;
 
 	// Reset aiming state flags
@@ -1282,10 +1308,15 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 			IPlayerHUDInterface::Execute_SetCrossHair(CachedPlayerController, DefaultCrossHair, nullptr);
 		}
 
-		// Reset leaning scale if no active item
+		// Reset leaning and breathing scales if no active item
 		if (!ActiveItem)
 		{
 			CurrentLeaningScale = 1.0f;
+			CurrentBreathingScale = 1.0f;
+			HipLeaningScale = 1.0f;
+			AimLeaningScale = 1.0f;
+			HipBreathingScale = 1.0f;
+			AimBreathingScale = 1.0f;
 		}
 	}
 
@@ -1350,8 +1381,9 @@ void AFPSCharacter::EquipItem(AActor* Item)
 	{
 		SetupArmsLocation(Item);
 
-		// Set leaning scale from active item
-		CurrentLeaningScale = IHoldableInterface::Execute_GetLeaningScale(Item);
+		// Set hip-fire leaning and breathing scales from active item
+		HipLeaningScale = IHoldableInterface::Execute_GetLeaningScale(Item);
+		HipBreathingScale = IHoldableInterface::Execute_GetBreathingScale(Item);
 	}
 
 	// HUD update (owning client only)
@@ -1657,14 +1689,8 @@ FVector AFPSCharacter::CalculateLeanVector(float DeltaTime)
 	const float MouseTiltStrength = 7.0f;       // cm - tilt effect (tuned: was 12.0, more controlled)
 	const float MouseLagSpeed = 6.0f;           // spring damping (tuned: was 5.0, faster response)
 
-	// Idle sway (breathing/tremor when stationary)
-	const float IdleSwayAmplitude = 0.4f;       // cm - breathing amplitude
-	const float IdleSwayFrequencyX = 1.2f;      // cycles/sec - breathing rate X
-	const float IdleSwayFrequencyY = 1.5f;      // cycles/sec - breathing rate Y
-
-	// Interpolation speeds
+	// Interpolation speed
 	const float LeanInterpSpeed = 8.0f;         // velocity-based lean smoothing
-	const float IdleBlendSpeed = 3.0f;          // idle sway activation blend
 
 	// ============================================
 	// PER-INSTANCE STATE TRACKING (static map)
@@ -1673,10 +1699,8 @@ FVector AFPSCharacter::CalculateLeanVector(float DeltaTime)
 	{
 		FVector CurrentLean = FVector::ZeroVector;         // Final interpolated lean (3D)
 		float WalkCycleTime = 0.0f;                        // Walk bob phase accumulator
-		float IdleSwayTime = 0.0f;                         // Idle sway phase accumulator
 		FRotator PreviousControlRotation = FRotator::ZeroRotator; // For mouse delta
 		FVector2D MouseLagOffset = FVector2D::ZeroVector;  // Spring-based mouse lag (XY only)
-		float IdleActivation = 0.0f;                       // Idle sway blend alpha
 	};
 	static TMap<const AFPSCharacter*, LeanState> StateMap;
 	LeanState& State = StateMap.FindOrAdd(this);
@@ -1699,14 +1723,6 @@ FVector AFPSCharacter::CalculateLeanVector(float DeltaTime)
 	float VelocityMag = LocalVelocity.Size();
 
 	// ============================================
-	// IDLE SWAY ACTIVATION (blend based on velocity)
-	// ============================================
-	// When stationary: IdleActivation = 1.0 (full idle sway)
-	// When moving: IdleActivation = 0.0 (disable idle sway)
-	float TargetIdleActivation = (VelocityMag < 50.0f) ? 1.0f : 0.0f;
-	State.IdleActivation = FMath::FInterpTo(State.IdleActivation, TargetIdleActivation, DeltaTime, IdleBlendSpeed);
-
-	// ============================================
 	// UPDATE WALK CYCLE TIME (for bob phase)
 	// ============================================
 	if (VelocityMag > 10.0f)
@@ -1715,11 +1731,6 @@ FVector AFPSCharacter::CalculateLeanVector(float DeltaTime)
 		State.WalkCycleTime += DeltaTime * BobFrequency * NormalizedSpeed;
 	}
 	// Don't reset when stopping - preserves phase, prevents jarring snap
-
-	// ============================================
-	// UPDATE IDLE SWAY TIME (always running)
-	// ============================================
-	State.IdleSwayTime += DeltaTime;
 
 	// ============================================
 	// CALCULATE VELOCITY-BASED LEAN (follow movement direction)
@@ -1814,29 +1825,14 @@ FVector AFPSCharacter::CalculateLeanVector(float DeltaTime)
 	}
 
 	// ============================================
-	// CALCULATE IDLE SWAY (breathing/tremor)
-	// ============================================
-	FVector IdleSwayOffset = FVector::ZeroVector;
-
-	if (State.IdleActivation > 0.01f)
-	{
-		// Sine waves at different frequencies (creates figure-8 pattern in XY, subtle Z breathing)
-		float IdleX = FMath::Sin(State.IdleSwayTime * IdleSwayFrequencyX * 2.0f * PI);
-		float IdleY = FMath::Sin(State.IdleSwayTime * IdleSwayFrequencyY * 2.0f * PI);
-		float IdleZ = FMath::Cos(State.IdleSwayTime * 0.8f * 2.0f * PI);  // Slower breathing rate
-
-		IdleSwayOffset.X = IdleX * IdleSwayAmplitude * State.IdleActivation;
-		IdleSwayOffset.Y = IdleY * IdleSwayAmplitude * State.IdleActivation;
-		IdleSwayOffset.Z = IdleZ * (IdleSwayAmplitude * 0.75f) * State.IdleActivation;  // 75% amplitude for Z
-	}
-
-	// ============================================
 	// COMBINE ALL OFFSETS INTO TARGET
 	// ============================================
+	// NOTE: Breathing sway is now calculated separately in CalculateBreathing()
+	// This keeps leaning (movement-based) separate from breathing (idle-based)
 	FVector TargetOffset;
-	TargetOffset.X = VelocityForwardLean + BobForward + MouseTiltOffset.X + IdleSwayOffset.X;
-	TargetOffset.Y = VelocityLateralLean + BobHorizontal + MouseTiltOffset.Y + IdleSwayOffset.Y;
-	TargetOffset.Z = VerticalBob + IdleSwayOffset.Z;  // Z = vertical bob + breathing
+	TargetOffset.X = VelocityForwardLean + BobForward + MouseTiltOffset.X;
+	TargetOffset.Y = VelocityLateralLean + BobHorizontal + MouseTiltOffset.Y;
+	TargetOffset.Z = VerticalBob;  // Z = vertical bob only
 
 	// Apply aiming scale (reduces all sway during ADS)
 	TargetOffset *= CurrentLeaningScale;
@@ -1847,6 +1843,92 @@ FVector AFPSCharacter::CalculateLeanVector(float DeltaTime)
 	State.CurrentLean = FMath::VInterpTo(State.CurrentLean, TargetOffset, DeltaTime, LeanInterpSpeed);
 
 	return State.CurrentLean;
+}
+
+// ============================================
+// BREATHING SYSTEM IMPLEMENTATION
+// ============================================
+//
+// Standalone breathing calculation function
+// Uses CurrentBreathingScale from ActiveItem weapon (hip-fire idle breathing)
+// Interpolates to AimBreathingScale from sight when aiming (reduced breathing during ADS)
+//
+FVector AFPSCharacter::CalculateBreathing(float DeltaTime)
+{
+	// ============================================
+	// HARDCODED PARAMETERS
+	// ============================================
+	const float IdleSwayAmplitude = 0.4f;       // cm - breathing amplitude
+	const float IdleSwayFrequencyX = 0.45f;     // Hz - breathing rate X (27 cycles/min, 1 cycle per 2.2 sec)
+	const float IdleSwayFrequencyY = 0.55f;     // Hz - breathing rate Y (33 cycles/min, 1 cycle per 1.8 sec)
+	const float IdleSwayFrequencyZ = 0.35f;     // Hz - breathing rate Z (21 cycles/min, 1 cycle per 2.9 sec)
+	const float IdleBlendSpeed = 3.0f;          // idle sway activation blend
+	const float LeanInterpSpeed = 8.0f;         // smooth interpolation
+
+	// ============================================
+	// PER-INSTANCE STATE TRACKING (static map)
+	// ============================================
+	struct BreathingState
+	{
+		FVector CurrentBreathing = FVector::ZeroVector;  // Final interpolated breathing
+		float IdleSwayTime = 0.0f;                       // Idle sway phase accumulator
+		float IdleActivation = 0.0f;                     // Idle sway blend alpha
+	};
+	static TMap<const AFPSCharacter*, BreathingState> StateMap;
+	BreathingState& State = StateMap.FindOrAdd(this);
+
+	// Early exit if no movement component
+	if (!CMC)
+	{
+		return FVector::ZeroVector;
+	}
+
+	// ============================================
+	// GET VELOCITY (local space)
+	// ============================================
+	FVector WorldVelocity = CMC->Velocity;
+	WorldVelocity.Z = 0.0f; // Ignore vertical movement
+	float VelocityMag = WorldVelocity.Size();
+
+	// ============================================
+	// IDLE SWAY ACTIVATION (blend based on velocity)
+	// ============================================
+	// When stationary: IdleActivation = 1.0 (full idle sway)
+	// When moving: IdleActivation = 0.0 (disable idle sway)
+	float TargetIdleActivation = (VelocityMag < 50.0f) ? 1.0f : 0.0f;
+	State.IdleActivation = FMath::FInterpTo(State.IdleActivation, TargetIdleActivation, DeltaTime, IdleBlendSpeed);
+
+	// ============================================
+	// UPDATE IDLE SWAY TIME (always running)
+	// ============================================
+	State.IdleSwayTime += DeltaTime;
+
+	// ============================================
+	// CALCULATE IDLE SWAY (breathing/tremor)
+	// ============================================
+	FVector TargetBreathing = FVector::ZeroVector;
+
+	if (State.IdleActivation > 0.01f)
+	{
+		// Sine waves at different frequencies (creates figure-8 pattern in XY, subtle Z breathing)
+		float IdleX = FMath::Sin(State.IdleSwayTime * IdleSwayFrequencyX * 2.0f * PI);
+		float IdleY = FMath::Sin(State.IdleSwayTime * IdleSwayFrequencyY * 2.0f * PI);
+		float IdleZ = FMath::Cos(State.IdleSwayTime * IdleSwayFrequencyZ * 2.0f * PI);  // Slower breathing rate
+
+		TargetBreathing.X = IdleX * IdleSwayAmplitude * State.IdleActivation;
+		TargetBreathing.Y = IdleY * IdleSwayAmplitude * State.IdleActivation;
+		TargetBreathing.Z = IdleZ * (IdleSwayAmplitude * 0.75f) * State.IdleActivation;  // 75% amplitude for Z
+
+		// Apply breathing scale (CurrentBreathingScale interpolates hip → ADS)
+		TargetBreathing *= CurrentBreathingScale;
+	}
+
+	// ============================================
+	// SMOOTH INTERPOLATION (final spring damping)
+	// ============================================
+	State.CurrentBreathing = FMath::VInterpTo(State.CurrentBreathing, TargetBreathing, DeltaTime, LeanInterpSpeed);
+
+	return State.CurrentBreathing;
 }
 
 // ============================================

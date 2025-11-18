@@ -32,6 +32,7 @@ public:
 	virtual float GetAimingFOV_Implementation() const override;
 	virtual float GetAimLookSpeed_Implementation() const override;
 	virtual float GetAimLeaningScale_Implementation() const override;
+	virtual float GetAimBreathingScale_Implementation() const override;
 
 	// ============================================
 	// VISIBILITY CONTROL
@@ -70,6 +71,10 @@ protected:
 	// Leaning scale when aiming (0.0 = no lean, 1.0 = full lean)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sight")
 	float AimLeaningScale = 1.0f;
+
+	// Breathing scale when aiming (0.0 = no breathing, 1.0 = full breathing)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sight")
+	float AimBreathingScale = 0.3f;
 
 	// Hide FPS weapon mesh when aiming (true for sniper scopes, false for iron sights/red dots)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Sight")

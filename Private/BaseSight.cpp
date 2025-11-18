@@ -48,6 +48,11 @@ float ABaseSight::GetAimLeaningScale_Implementation() const
 	return AimLeaningScale;
 }
 
+float ABaseSight::GetAimBreathingScale_Implementation() const
+{
+	return AimBreathingScale;
+}
+
 void ABaseSight::SetOwner(AActor* NewOwner)
 {
 	Super::SetOwner(NewOwner);
