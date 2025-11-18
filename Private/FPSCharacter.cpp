@@ -1982,32 +1982,31 @@ void AFPSCharacter::UpdateLeaningVisualFeedback(const FVector& BreathingVector)
 	}
 
 	// ============================================
-	// CROSSHAIR UPDATE (with lean alpha from movement + look input)
+	// CROSSHAIR UPDATE (based on character velocity + look input)
 	// ============================================
-	// Update crosshair dynamically based on aiming state and lean intensity
+	// Update crosshair dynamically based on aiming state and movement/look intensity
 	if (CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
 	{
-		float LeanAlpha = 0.0f;
-
-		// 1. Movement contribution (from LeanVector magnitude)
-		float LeanMagnitude = LeanVector.Size();
-		const float LeanDeadzone = 0.1f;  // cm
-		const float MaxLeanMagnitude = 17.0f;  // cm
-
-		float MovementAlpha = 0.0f;
-		if (LeanMagnitude > LeanDeadzone)
-		{
-			MovementAlpha = FMath::Clamp((LeanMagnitude - LeanDeadzone) / (MaxLeanMagnitude - LeanDeadzone), 0.0f, 1.0f);
-		}
+		// 1. Movement contribution (from character velocity)
+		// Normalize by max sprint speed (650 cm/s)
+		// Result: 0.0 = standing, 0.23 = walk, 0.69 = jog, 1.0 = sprint
+		float Velocity = GetVelocity().Size();
+		const float MaxSprintSpeed = 650.0f;
+		float MovementAlpha = FMath::Clamp(Velocity / MaxSprintSpeed, 0.0f, 1.0f);
 
 		// 2. Look input contribution (from RAW mouse delta)
 		// Typical mouse speed: slow ~20 deg/s, medium ~100 deg/s, fast ~300 deg/s
-		const float MaxMouseSpeed = 150.0f;  // degrees per second (lowered for more responsive crosshair)
-		float LookAlpha = FMath::Clamp(LeanState_RawMouseDelta / MaxMouseSpeed, 0.0f, 1.0f);
+		// Scaled down to prevent dominating movement alpha
+		const float MaxMouseSpeed = 400.0f;  // Higher threshold for less sensitivity
+		const float LookInfluence = 0.3f;     // Look contributes up to 30% of total alpha
+		float LookAlpha = FMath::Clamp(LeanState_RawMouseDelta / MaxMouseSpeed, 0.0f, 1.0f) * LookInfluence;
 
-		// 3. Combined alpha: use maximum (either movement or look triggers crosshair expansion)
-		// When idle: LeanVector ≈ 0 AND RawMouseDelta = 0 → LeanAlpha = 0
-		LeanAlpha = FMath::Max(MovementAlpha, LookAlpha);
+		// 3. Combined alpha: additive (movement + look, clamped to 1.0)
+		// When idle: Velocity = 0, RawMouseDelta = 0 → LeanAlpha = 0
+		// When walking: Velocity = 150, RawMouseDelta = 0 → LeanAlpha = 0.23
+		// When sprinting: Velocity = 650, RawMouseDelta = 0 → LeanAlpha = 1.0
+		// When standing + fast look: Velocity = 0, RawMouseDelta = 400 → LeanAlpha = 0.3
+		float LeanAlpha = FMath::Clamp(MovementAlpha + LookAlpha, 0.0f, 1.0f);
 
 		// Update crosshair with aiming state and lean alpha
 		IPlayerHUDInterface::Execute_UpdateCrossHair(CachedPlayerController, bIsAiming, LeanAlpha);
