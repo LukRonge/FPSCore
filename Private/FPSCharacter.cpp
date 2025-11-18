@@ -267,6 +267,26 @@ void AFPSCharacter::Tick(float DeltaTime)
 
 		// Apply final position to Arms mesh (first-person hands)
 		Arms->SetRelativeLocation(FinalArmsOffset);
+
+		// ============================================
+		// BREATHING CAMERA ROTATION (ADS ONLY)
+		// ============================================
+		// Convert breathing offset to camera rotation when aiming
+		// This creates realistic aim wobble during ADS
+		if (bIsAiming && Camera)
+		{
+			BreathingRotation = CalculateBreathingRotation(BreathingVector);
+			Camera->SetRelativeRotation(BreathingRotation);
+		}
+		else
+		{
+			// Reset camera rotation when not aiming
+			if (Camera && !BreathingRotation.IsZero())
+			{
+				BreathingRotation = FRotator::ZeroRotator;
+				Camera->SetRelativeRotation(BreathingRotation);
+			}
+		}
 	}
 }
 
@@ -1929,6 +1949,33 @@ FVector AFPSCharacter::CalculateBreathing(float DeltaTime)
 	State.CurrentBreathing = FMath::VInterpTo(State.CurrentBreathing, TargetBreathing, DeltaTime, LeanInterpSpeed);
 
 	return State.CurrentBreathing;
+}
+
+// ============================================
+// BREATHING ROTATION CALCULATION (Camera sway)
+// ============================================
+//
+// Converts breathing offset (cm) to camera rotation (degrees)
+// Used for realistic aim wobble during ADS
+//
+FRotator AFPSCharacter::CalculateBreathingRotation(const FVector& BreathingVector) const
+{
+	// ============================================
+	// HARDCODED PARAMETERS
+	// ============================================
+	const float OffsetToRotationScale = 0.8f;   // degrees per cm (tuned for realistic wobble)
+
+	// ============================================
+	// CONVERT OFFSET TO ROTATION
+	// ============================================
+	// BreathingVector.Y (lateral offset, cm) → Yaw (horizontal rotation, degrees)
+	// BreathingVector.Z (vertical offset, cm) → Pitch (vertical rotation, degrees)
+	// Invert Z for natural pitch direction (positive Z up → negative Pitch down)
+
+	float BreathingYaw = BreathingVector.Y * OffsetToRotationScale;
+	float BreathingPitch = -BreathingVector.Z * OffsetToRotationScale;
+
+	return FRotator(BreathingPitch, BreathingYaw, 0.0f);
 }
 
 // ============================================

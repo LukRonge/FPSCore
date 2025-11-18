@@ -208,6 +208,11 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Leaning")
 	FVector LeanVector = FVector::ZeroVector;
 
+	// Current breathing rotation (camera sway when aiming)
+	// Applied to camera rotation during ADS to simulate breathing-induced aim wobble
+	UPROPERTY(BlueprintReadOnly, Category = "Leaning")
+	FRotator BreathingRotation = FRotator::ZeroRotator;
+
 	// Calculate leaning vector based on movement (velocity-based lean + perpendicular bob + vertical bob)
 	// Self-contained function with hardcoded parameters and internal static state tracking
 	// Returns 3D offset: X = forward offset (cm), Y = lateral offset (cm), Z = vertical offset (cm)
@@ -220,6 +225,13 @@ public:
 	// Returns 3D offset: X = forward offset (cm), Y = lateral offset (cm), Z = vertical offset (cm)
 	UFUNCTION(BlueprintCallable, Category = "Leaning")
 	FVector CalculateBreathing(float DeltaTime);
+
+	// Calculate breathing rotation for camera sway (ADS aim wobble)
+	// Converts breathing offset vector to Pitch/Yaw rotation
+	// Input: BreathingVector from CalculateBreathing()
+	// Returns: FRotator with Pitch (vertical) and Yaw (horizontal) rotation in degrees
+	UFUNCTION(BlueprintCallable, Category = "Leaning")
+	FRotator CalculateBreathingRotation(const FVector& BreathingVector) const;
 
 	// ============================================
 	// INVENTORY SYSTEM
