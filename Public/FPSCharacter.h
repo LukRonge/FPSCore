@@ -95,6 +95,10 @@ protected:
 	// Returns pitch in degrees that should be replicated for correct weapon ballistics
 	float CalculateNetworkPitchFromCamera() const;
 
+	// Update aiming interpolation (LOCAL ONLY - called from Tick)
+	// Handles AimingAlpha interpolation, Arms position lerp, and aiming state application
+	void UpdateAimingInterpolation(float DeltaTime);
+
 public:
 	virtual void Tick(float DeltaTime) override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
@@ -277,14 +281,17 @@ public:
 	// AIMING INTERPOLATION (LOCAL ONLY)
 	// ============================================
 
-	// ✅ NEW: Separate base position tracking (without sway) for interpolation
-	// This allows sway to be additive without interfering with ADS interpolation completion
-	FVector InterpolatedArmsOffset = FVector::ZeroVector;
-
 	// Aiming interpolation speed (constant)
 	const float AimingInterpSpeed = 30.0f;
 
-	// Flag to track if aiming crosshair was already set (prevents calling UpdateCrossHair every frame)
+	// Current aiming interpolation alpha (0.0 = hip, 1.0 = ADS)
+	// LOCAL ONLY - not replicated, visual interpolation only
+	UPROPERTY(BlueprintReadOnly, Category = "Animation")
+	float AimingAlpha = 0.0f;
+
+	// Flag to track if aiming state (FOV, crosshair, look speed) has been applied
+	// Prevents repeated calls when AimingAlpha > 0.8
+	// LOCAL ONLY - not replicated
 	bool bAimingCrosshairSet = false;
 
 	// Note: bIsAiming already exists at line 157 (replicated, used for look sensitivity)

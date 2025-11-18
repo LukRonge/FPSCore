@@ -186,7 +186,7 @@ void AFPSCharacter::BeginPlay()
 	if (IsLocallyControlled())
 	{
 		ArmsOffset = DefaultArmsOffset;
-		Arms->SetRelativeLocation(ArmsOffset);
+		// Note: Arms position is now set in Tick() via interpolation
 
 		// Initialize camera FOV
 		Camera->SetFieldOfView(DefaultFOV);
@@ -234,14 +234,15 @@ void AFPSCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	DeltaSeconds = DeltaTime;	
+	DeltaSeconds = DeltaTime;
 
 	// Check for interactable objects (only for locally controlled player)
 	if (IsLocallyControlled())
 	{
 		CheckInteractionTrace();
 
-		
+		// Update aiming interpolation (arms position, FOV, crosshair, etc.)
+		UpdateAimingInterpolation(DeltaTime);
 	}
 }
 
@@ -463,6 +464,59 @@ float AFPSCharacter::CalculateNetworkPitchFromCamera() const
 	return PitchDegrees;
 }
 
+void AFPSCharacter::UpdateAimingInterpolation(float DeltaTime)
+{
+	// ============================================
+	// AIMING INTERPOLATION (LOCAL ONLY)
+	// ============================================
+	// This function is only called for locally controlled players
+	// Handles smooth transition between hip fire and ADS
+
+	// Interpolate AimingAlpha based on bIsAiming state
+	// When bIsAiming = true, interpolate from 0.0 to 1.0
+	// When bIsAiming = false, interpolate from 1.0 to 0.0
+	float TargetAlpha = bIsAiming ? 1.0f : 0.0f;
+	AimingAlpha = FMath::FInterpTo(AimingAlpha, TargetAlpha, DeltaTime, AimingInterpSpeed);
+
+	// Lerp between ArmsOffset (hip fire) and AimArmsOffset (ADS)
+	FVector InterpolatedArmsOffset = FMath::Lerp(ArmsOffset, AimArmsOffset, AimingAlpha);
+
+	// Apply interpolated position to Arms mesh (first-person hands)
+	Arms->SetRelativeLocation(InterpolatedArmsOffset);
+
+	// ============================================
+	// AIMING THRESHOLD (AimingAlpha > 0.8)
+	// ============================================
+	// When interpolation reaches 80%, apply aiming state (FOV, crosshair, look speed, hide FPS mesh)
+	// This happens before full interpolation to provide snappy feel
+	if (AimingAlpha > 0.8f && bIsAiming && !bAimingCrosshairSet && ActiveItem && ActiveItem->Implements<USightInterface>())
+	{
+		// Update crosshair to aiming state
+		if (CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
+		{
+			IPlayerHUDInterface::Execute_UpdateCrossHair(CachedPlayerController, true, 0.0f);
+			bAimingCrosshairSet = true;
+		}
+
+		// Set camera FOV for aiming
+		if (Camera)
+		{
+			float AimingFOV = ISightInterface::Execute_GetAimingFOV(ActiveItem);
+			Camera->SetFieldOfView(AimingFOV);
+		}
+
+		// Set look speed and leaning scale for aiming
+		CurrentLookSpeed = ISightInterface::Execute_GetAimLookSpeed(ActiveItem);
+		CurrentLeaningScale = ISightInterface::Execute_GetAimLeaningScale(ActiveItem);
+
+		// Hide Arms if sight requires it (e.g., sniper scope with full-screen overlay)
+		if (ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(ActiveItem) && Arms->IsVisible())
+		{
+			Arms->SetVisibility(false, true);
+		}
+	}
+}
+
 void AFPSCharacter::SetupArmsLocation(AActor* Item)
 {
 	if (!IsLocallyControlled())
@@ -479,7 +533,8 @@ void AFPSCharacter::SetupArmsLocation(AActor* Item)
 		ArmsOffset = DefaultArmsOffset;
 	}
 
-	Arms->SetRelativeLocation(ArmsOffset);
+	// Note: Arms position is now set in Tick() via interpolation
+	// This function only updates ArmsOffset (base hip fire position)
 }
 
 void AFPSCharacter::UpdateItemAnimLayer(AActor* Item)
@@ -821,7 +876,6 @@ void AFPSCharacter::AimingPressed()
 	// Formula: NewArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace
 	AimArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace;
 	bIsAiming = true;
-	bAimingCrosshairSet = false; // Reset flag
 }
 
 void AFPSCharacter::AimingReleased()
@@ -838,18 +892,15 @@ void AFPSCharacter::AimingReleased()
 		return;
 	}
 
-	// Check if active item is holdable (once)
+	// Check if active item is holdable (for leaning scale restoration)
 	bool bHasHoldableItem = ActiveItem && ActiveItem->Implements<UHoldableInterface>();
-
-	// Calculate target Arms offset (default hands position)
-	FVector DefaultArmssPosition = bHasHoldableItem
-		? IHoldableInterface::Execute_GetArmsOffset(ActiveItem)
-		: DefaultArmsOffset;
 
 	// Restore Arms (and attached weapon) visibility
 	Arms->SetVisibility(true, true);
+
 	// Restore default camera FOV
 	Camera->SetFieldOfView(DefaultFOV);
+
 	// Restore default look speed
 	CurrentLookSpeed = 1.0f;
 
@@ -858,12 +909,14 @@ void AFPSCharacter::AimingReleased()
 		? IHoldableInterface::Execute_GetLeaningScale(ActiveItem)
 		: 1.0f;
 
+	// Reset aiming state flags
 	bIsAiming = false;
+	bAimingCrosshairSet = false; // Reset flag so next aim can apply state again
 
 	// Update HUD crosshair to normal state
-	if (Controller && Controller->Implements<UPlayerHUDInterface>())
+	if (CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
 	{
-		IPlayerHUDInterface::Execute_UpdateCrossHair(Controller, false, 0.0f);
+		IPlayerHUDInterface::Execute_UpdateCrossHair(CachedPlayerController, false, 0.0f);
 	}
 }
 
