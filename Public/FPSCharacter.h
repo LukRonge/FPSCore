@@ -95,9 +95,10 @@ protected:
 	// Returns pitch in degrees that should be replicated for correct weapon ballistics
 	float CalculateNetworkPitchFromCamera() const;
 
-	// Update aiming interpolation (LOCAL ONLY - called from Tick)
+	// Calculate interpolated arms offset (LOCAL ONLY - called from Tick)
 	// Handles AimingAlpha interpolation, Arms position lerp, and aiming state application
-	void UpdateAimingInterpolation(float DeltaTime);
+	// Returns interpolated FVector between ArmsOffset (hip) and AimArmsOffset (ADS)
+	FVector CalculateInterpolatedArmsOffset(float DeltaTime);
 
 public:
 	virtual void Tick(float DeltaTime) override;
@@ -182,16 +183,16 @@ public:
 	// LEANING SYSTEM (Postprocess visual offset)
 	// ============================================
 
-	// Current leaning vector (2D offset in cm): X = lateral (left/right), Y = forward/backward
+	// Current leaning vector (3D offset in cm): X = forward/backward, Y = lateral (left/right), Z = vertical (up/down)
 	// Applied as postprocess on top of base arms position (does not affect aiming interpolation)
 	UPROPERTY(BlueprintReadOnly, Category = "Leaning")
-	FVector2D LeanVector = FVector2D::ZeroVector;
+	FVector LeanVector = FVector::ZeroVector;
 
-	// Calculate leaning vector based on movement (velocity-based lean + perpendicular bob)
+	// Calculate leaning vector based on movement (velocity-based lean + perpendicular bob + vertical bob)
 	// Self-contained function with hardcoded parameters and internal static state tracking
-	// Returns 2D offset: X = lateral offset (cm), Y = forward offset (cm)
+	// Returns 3D offset: X = forward offset (cm), Y = lateral offset (cm), Z = vertical offset (cm)
 	UFUNCTION(BlueprintCallable, Category = "Leaning")
-	FVector2D CalculateLeanVector(float DeltaTime);
+	FVector CalculateLeanVector(float DeltaTime);
 
 	// ============================================
 	// INVENTORY SYSTEM
@@ -273,6 +274,11 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, Category = "Animation")
 	FVector AimArmsOffset = FVector::ZeroVector;
+
+	// Interpolated Arms offset (result of lerp between ArmsOffset and AimArmsOffset)
+	// Updated each frame in Tick via CalculateInterpolatedArmsOffset()
+	UPROPERTY(BlueprintReadOnly, Category = "Animation")
+	FVector InterpolatedArmsOffset = FVector::ZeroVector;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
 	FVector DefaultArmsOffset = FVector::ZeroVector;

@@ -241,8 +241,23 @@ void AFPSCharacter::Tick(float DeltaTime)
 	{
 		CheckInteractionTrace();
 
-		// Update aiming interpolation (arms position, FOV, crosshair, etc.)
-		UpdateAimingInterpolation(DeltaTime);
+		// Calculate interpolated arms offset (aiming interpolation)
+		InterpolatedArmsOffset = CalculateInterpolatedArmsOffset(DeltaTime);
+
+		// Update weapon leaning/sway based on movement
+		LeanVector = CalculateLeanVector(DeltaTime);
+
+		// Combine aiming offset + weapon lean/sway
+		// LeanVector.X = Forward/back offset (cm)
+		// LeanVector.Y = Lateral left/right offset (cm)
+		// LeanVector.Z = Vertical up/down offset (cm)
+		FVector FinalArmsOffset = InterpolatedArmsOffset;
+		FinalArmsOffset.X += LeanVector.X; // Add forward/back sway
+		FinalArmsOffset.Y += LeanVector.Y; // Add lateral sway
+		FinalArmsOffset.Z += LeanVector.Z; // Add vertical bob
+
+		// Apply final position to Arms mesh (first-person hands)
+		Arms->SetRelativeLocation(FinalArmsOffset);
 	}
 }
 
@@ -464,7 +479,7 @@ float AFPSCharacter::CalculateNetworkPitchFromCamera() const
 	return PitchDegrees;
 }
 
-void AFPSCharacter::UpdateAimingInterpolation(float DeltaTime)
+FVector AFPSCharacter::CalculateInterpolatedArmsOffset(float DeltaTime)
 {
 	// ============================================
 	// AIMING INTERPOLATION (LOCAL ONLY)
@@ -479,10 +494,7 @@ void AFPSCharacter::UpdateAimingInterpolation(float DeltaTime)
 	AimingAlpha = FMath::FInterpTo(AimingAlpha, TargetAlpha, DeltaTime, AimingInterpSpeed);
 
 	// Lerp between ArmsOffset (hip fire) and AimArmsOffset (ADS)
-	FVector InterpolatedArmsOffset = FMath::Lerp(ArmsOffset, AimArmsOffset, AimingAlpha);
-
-	// Apply interpolated position to Arms mesh (first-person hands)
-	Arms->SetRelativeLocation(InterpolatedArmsOffset);
+	FVector Result = FMath::Lerp(ArmsOffset, AimArmsOffset, AimingAlpha);
 
 	// ============================================
 	// AIMING THRESHOLD (AimingAlpha > 0.8)
@@ -515,6 +527,9 @@ void AFPSCharacter::UpdateAimingInterpolation(float DeltaTime)
 			Arms->SetVisibility(false, true);
 		}
 	}
+
+	// Return interpolated arms offset
+	return Result;
 }
 
 void AFPSCharacter::SetupArmsLocation(AActor* Item)
@@ -1619,28 +1634,49 @@ void AFPSCharacter::GetDropTransformAndImpulse_Implementation(AActor* Item, FTra
 // Self-contained function that calculates weapon sway based on movement
 // All parameters are hardcoded for simplicity
 // State is tracked via static variables (per-instance via this pointer map)
-// Returns 2D offset: X = lateral (left/right), Y = forward (forward/back) in cm
+// Returns 3D offset: X = forward/back (cm), Y = lateral left/right (cm), Z = vertical up/down (cm)
 
-FVector2D AFPSCharacter::CalculateLeanVector(float DeltaTime)
+FVector AFPSCharacter::CalculateLeanVector(float DeltaTime)
 {
 	// ============================================
-	// HARDCODED PARAMETERS
+	// HARDCODED PARAMETERS (REALISTIC VALUES)
 	// ============================================
-	const float MaxLateralOffset = 1.2f;  // cm - lateral lean offset
-	const float MaxForwardOffset = 0.6f;  // cm - forward lean offset
-	const float BobAmplitudeHorizontal = 0.8f;  // cm
-	const float BobAmplitudeVertical = 1.0f;  // cm (not returned, but calculated)
-	const float BobFrequency = 8.0f;  // cycles per jog speed
-	const float LeanInterpSpeed = 8.0f;  // smooth interpolation
+	// Based on research: Insurgency, Escape from Tarkov, Ready or Not, CS:GO
+	// TUNED: Refined values for smoother forward/backward and lateral movement
+
+	// Velocity-based lean (weapon follows movement direction)
+	const float MaxLateralOffset = 3.8f;        // cm - lateral sway (tuned: was 4.5, original 1.2)
+	const float MaxForwardOffset = 1.2f;        // cm - forward sway (tuned: was 2.5, original 0.6)
+
+	// Walking bob (perpendicular oscillation)
+	const float BobAmplitudeHorizontal = 2.4f;  // cm - horizontal bob (tuned: was 2.8, original 0.8)
+	const float BobAmplitudeVertical = 3.5f;    // cm - vertical bob (not returned)
+	const float BobFrequency = 8.0f;            // cycles per jog speed
+
+	// Mouse input influence (weapon tilt/lag)
+	const float MouseTiltStrength = 7.0f;       // cm - tilt effect (tuned: was 12.0, more controlled)
+	const float MouseLagSpeed = 6.0f;           // spring damping (tuned: was 5.0, faster response)
+
+	// Idle sway (breathing/tremor when stationary)
+	const float IdleSwayAmplitude = 0.4f;       // cm - breathing amplitude
+	const float IdleSwayFrequencyX = 1.2f;      // cycles/sec - breathing rate X
+	const float IdleSwayFrequencyY = 1.5f;      // cycles/sec - breathing rate Y
+
+	// Interpolation speeds
+	const float LeanInterpSpeed = 8.0f;         // velocity-based lean smoothing
+	const float IdleBlendSpeed = 3.0f;          // idle sway activation blend
 
 	// ============================================
 	// PER-INSTANCE STATE TRACKING (static map)
 	// ============================================
 	struct LeanState
 	{
-		FVector PreviousVelocity = FVector::ZeroVector;
-		float WalkCycleTime = 0.0f;
-		FVector2D CurrentLean = FVector2D::ZeroVector;
+		FVector CurrentLean = FVector::ZeroVector;         // Final interpolated lean (3D)
+		float WalkCycleTime = 0.0f;                        // Walk bob phase accumulator
+		float IdleSwayTime = 0.0f;                         // Idle sway phase accumulator
+		FRotator PreviousControlRotation = FRotator::ZeroRotator; // For mouse delta
+		FVector2D MouseLagOffset = FVector2D::ZeroVector;  // Spring-based mouse lag (XY only)
+		float IdleActivation = 0.0f;                       // Idle sway blend alpha
 	};
 	static TMap<const AFPSCharacter*, LeanState> StateMap;
 	LeanState& State = StateMap.FindOrAdd(this);
@@ -1648,7 +1684,7 @@ FVector2D AFPSCharacter::CalculateLeanVector(float DeltaTime)
 	// Early exit if no movement component
 	if (!CMC)
 	{
-		return FVector2D::ZeroVector;
+		return FVector::ZeroVector;
 	}
 
 	// ============================================
@@ -1663,6 +1699,14 @@ FVector2D AFPSCharacter::CalculateLeanVector(float DeltaTime)
 	float VelocityMag = LocalVelocity.Size();
 
 	// ============================================
+	// IDLE SWAY ACTIVATION (blend based on velocity)
+	// ============================================
+	// When stationary: IdleActivation = 1.0 (full idle sway)
+	// When moving: IdleActivation = 0.0 (disable idle sway)
+	float TargetIdleActivation = (VelocityMag < 50.0f) ? 1.0f : 0.0f;
+	State.IdleActivation = FMath::FInterpTo(State.IdleActivation, TargetIdleActivation, DeltaTime, IdleBlendSpeed);
+
+	// ============================================
 	// UPDATE WALK CYCLE TIME (for bob phase)
 	// ============================================
 	if (VelocityMag > 10.0f)
@@ -1670,7 +1714,12 @@ FVector2D AFPSCharacter::CalculateLeanVector(float DeltaTime)
 		float NormalizedSpeed = VelocityMag / 450.0f; // Normalize to jog speed
 		State.WalkCycleTime += DeltaTime * BobFrequency * NormalizedSpeed;
 	}
-	// Don't reset when stopping - preserves phase, prevents shaking
+	// Don't reset when stopping - preserves phase, prevents jarring snap
+
+	// ============================================
+	// UPDATE IDLE SWAY TIME (always running)
+	// ============================================
+	State.IdleSwayTime += DeltaTime;
 
 	// ============================================
 	// CALCULATE VELOCITY-BASED LEAN (follow movement direction)
@@ -1678,44 +1727,124 @@ FVector2D AFPSCharacter::CalculateLeanVector(float DeltaTime)
 	float VelLateral = FMath::Clamp(LocalVelocity.Y / 450.0f, -1.0f, 1.0f);  // Normalize
 	float VelForward = FMath::Clamp(LocalVelocity.X / 450.0f, -1.0f, 1.0f);  // Normalize
 
-	// Lean follows velocity (moving RIGHT → lean RIGHT)
-	float TargetLateralLean = VelLateral * MaxLateralOffset;
-	float TargetForwardLean = VelForward * MaxForwardOffset;
+	// Lean follows velocity (moving RIGHT → lean RIGHT, moving FORWARD → lean FORWARD)
+	float VelocityLateralLean = VelLateral * MaxLateralOffset;
+	float VelocityForwardLean = VelForward * MaxForwardOffset;
 
 	// ============================================
 	// CALCULATE PERPENDICULAR BOB (walking cycle)
 	// ============================================
-	// Normalize velocity direction (for perpendicular bob)
-	FVector2D VelDir = FVector2D::ZeroVector;
+	// Bob perpendicular to movement direction (creates natural "swagger")
+	float BobHorizontal = 0.0f;
+	float BobForward = 0.0f;
+
 	if (VelocityMag > 10.0f)
 	{
+		// Normalize velocity direction
+		FVector2D VelDir;
 		VelDir.X = LocalVelocity.X / VelocityMag;  // Forward component
 		VelDir.Y = LocalVelocity.Y / VelocityMag;  // Right component
+
+		// Forward movement (W) → horizontal bob (left-right swing)
+		BobHorizontal = FMath::Sin(State.WalkCycleTime) * BobAmplitudeHorizontal;
+		BobHorizontal *= FMath::Abs(VelDir.X); // Scale by forward component
+
+		// Strafe movement (A/D) → horizontal bob (perpendicular to strafe)
+		// FIX: Both forward AND strafe create horizontal bob (not forward bob)
+		float StrafeBobHorizontal = FMath::Sin(State.WalkCycleTime) * BobAmplitudeHorizontal * 0.7f;
+		StrafeBobHorizontal *= FMath::Abs(VelDir.Y); // Scale by strafe component
+		BobHorizontal += StrafeBobHorizontal;
+
+		// Vertical bob component (subtle forward/back during walk cycle)
+		// TUNED: Reduced from 0.3 to 0.15 for gentler forward/back oscillation
+		BobForward = FMath::Cos(State.WalkCycleTime * 2.0f) * (BobAmplitudeHorizontal * 0.15f);
 	}
 
-	// Bob perpendicular to movement direction
-	// Forward movement (W) → horizontal bob (left-right)
-	// Strafe movement (D) → forward bob (forward-back)
-	float BobHorizontal = FMath::Cos(State.WalkCycleTime) * BobAmplitudeHorizontal;
-	BobHorizontal *= FMath::Abs(VelDir.X); // Scale by forward component
+	// ============================================
+	// CALCULATE VERTICAL BOB (Z-axis)
+	// ============================================
+	// Primary component: Up/down bounce during walk cycle
+	// Frequency: 1× horizontal bob (one full cycle per walk cycle)
+	// TUNED: Reduced from 2.0× to 1.0× for slower, more natural rhythm
+	float VerticalBob = 0.0f;
 
-	float BobForward = FMath::Sin(State.WalkCycleTime) * BobAmplitudeHorizontal * 0.5f;
-	BobForward *= FMath::Abs(VelDir.Y); // Scale by strafe component
+	if (VelocityMag > 10.0f)
+	{
+		// Sin wave at same frequency as horizontal bob (smooth, slow bounce)
+		// Always positive (weapon goes DOWN, not up - realistic foot impact)
+		float NormalizedSpeed = FMath::Clamp(VelocityMag / 450.0f, 0.0f, 1.0f);
+		VerticalBob = FMath::Abs(FMath::Sin(State.WalkCycleTime * 1.0f)) * BobAmplitudeVertical;
+		VerticalBob *= NormalizedSpeed;  // Scale by movement speed
+
+		// Invert to negative (weapon drops DOWN on step)
+		VerticalBob = -VerticalBob;
+	}
 
 	// ============================================
-	// COMBINE LEAN + BOB INTO TARGET OFFSET
+	// CALCULATE MOUSE INPUT INFLUENCE (weapon tilt/lag)
 	// ============================================
-	FVector2D TargetOffset;
-	TargetOffset.X = TargetLateralLean + BobHorizontal;  // Lateral (left/right) in cm
-	TargetOffset.Y = TargetForwardLean + BobForward;      // Forward (forward/back) in cm
+	FVector2D MouseTiltOffset = FVector2D::ZeroVector;
 
-	// Apply aiming scale (reduces lean/bob during ADS)
+	// Get current control rotation
+	if (AController* Ctrl = GetController())
+	{
+		FRotator CurrentRotation = Ctrl->GetControlRotation();
+
+		// Calculate mouse delta (angular velocity)
+		FRotator DeltaRotation = CurrentRotation - State.PreviousControlRotation;
+		DeltaRotation.Normalize(); // Clamp to ±180°
+
+		// Convert angular velocity to tilt offset
+		// Yaw (horizontal mouse) → lateral offset (weapon lags left/right)
+		// Pitch (vertical mouse) → forward offset (weapon lags up/down)
+		float MouseYawDelta = DeltaRotation.Yaw / DeltaTime;   // degrees per second
+		float MousePitchDelta = DeltaRotation.Pitch / DeltaTime; // degrees per second
+
+		// Target tilt based on mouse speed
+		FVector2D TargetMouseTilt;
+		TargetMouseTilt.X = FMath::Clamp(MousePitchDelta * 0.002f, -1.0f, 1.0f) * MouseTiltStrength;
+		TargetMouseTilt.Y = FMath::Clamp(-MouseYawDelta * 0.002f, -1.0f, 1.0f) * MouseTiltStrength;
+
+		// Spring interpolation (weapon lags behind camera)
+		State.MouseLagOffset = FMath::Vector2DInterpTo(State.MouseLagOffset, TargetMouseTilt, DeltaTime, MouseLagSpeed);
+		MouseTiltOffset = State.MouseLagOffset;
+
+		// Store rotation for next frame
+		State.PreviousControlRotation = CurrentRotation;
+	}
+
+	// ============================================
+	// CALCULATE IDLE SWAY (breathing/tremor)
+	// ============================================
+	FVector IdleSwayOffset = FVector::ZeroVector;
+
+	if (State.IdleActivation > 0.01f)
+	{
+		// Sine waves at different frequencies (creates figure-8 pattern in XY, subtle Z breathing)
+		float IdleX = FMath::Sin(State.IdleSwayTime * IdleSwayFrequencyX * 2.0f * PI);
+		float IdleY = FMath::Sin(State.IdleSwayTime * IdleSwayFrequencyY * 2.0f * PI);
+		float IdleZ = FMath::Cos(State.IdleSwayTime * 0.8f * 2.0f * PI);  // Slower breathing rate
+
+		IdleSwayOffset.X = IdleX * IdleSwayAmplitude * State.IdleActivation;
+		IdleSwayOffset.Y = IdleY * IdleSwayAmplitude * State.IdleActivation;
+		IdleSwayOffset.Z = IdleZ * (IdleSwayAmplitude * 0.75f) * State.IdleActivation;  // 75% amplitude for Z
+	}
+
+	// ============================================
+	// COMBINE ALL OFFSETS INTO TARGET
+	// ============================================
+	FVector TargetOffset;
+	TargetOffset.X = VelocityForwardLean + BobForward + MouseTiltOffset.X + IdleSwayOffset.X;
+	TargetOffset.Y = VelocityLateralLean + BobHorizontal + MouseTiltOffset.Y + IdleSwayOffset.Y;
+	TargetOffset.Z = VerticalBob + IdleSwayOffset.Z;  // Z = vertical bob + breathing
+
+	// Apply aiming scale (reduces all sway during ADS)
 	TargetOffset *= CurrentLeaningScale;
 
 	// ============================================
-	// SMOOTH INTERPOLATION
+	// SMOOTH INTERPOLATION (final spring damping)
 	// ============================================
-	State.CurrentLean = FMath::Vector2DInterpTo(State.CurrentLean, TargetOffset, DeltaTime, LeanInterpSpeed);
+	State.CurrentLean = FMath::VInterpTo(State.CurrentLean, TargetOffset, DeltaTime, LeanInterpSpeed);
 
 	return State.CurrentLean;
 }
