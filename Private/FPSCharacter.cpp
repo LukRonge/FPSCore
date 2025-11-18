@@ -235,6 +235,32 @@ void AFPSCharacter::Tick(float DeltaTime)
 
 	DeltaSeconds = DeltaTime;
 
+	// ============================================
+	// SPRINT INTENT ACTIVATION (LOCAL ONLY)
+	// ============================================
+	// Automatically activate/deactivate Sprint mode based on sprint intent + movement direction
+	if (IsLocallyControlled())
+	{
+		if (bSprintIntentActive)
+		{
+			// Check if moving forward (Y > 0.3)
+			float SprintMultiplier = GetSprintDirectionMultiplier(CurrentMovementVector);
+
+			if (SprintMultiplier > 0.0f && CurrentMovementMode != EFPSMovementMode::Sprint)
+			{
+				// Activate Sprint mode (moving forward with sprint intent)
+				UpdateMovementSpeed(EFPSMovementMode::Sprint);
+				Server_SetMovementMode(EFPSMovementMode::Sprint);
+			}
+			else if (SprintMultiplier <= 0.0f && CurrentMovementMode == EFPSMovementMode::Sprint)
+			{
+				// Deactivate Sprint mode (not moving forward, revert to Jog)
+				UpdateMovementSpeed(EFPSMovementMode::Jog);
+				Server_SetMovementMode(EFPSMovementMode::Jog);
+			}
+		}
+	}
+
 	// Check for interactable objects (only for locally controlled player)
 	if (IsLocallyControlled())
 	{
@@ -697,12 +723,8 @@ void AFPSCharacter::Move(const FInputActionValue& Value)
 		CurrentMovementVector = FVector2D::ZeroVector;
 	}
 
-	if (CurrentMovementMode == EFPSMovementMode::Sprint && CMC)
-	{
-		float SprintMultiplier = GetSprintDirectionMultiplier(CurrentMovementVector);
-		float ClampedSpeed = FMath::Lerp(JogSpeed, SprintSpeed, SprintMultiplier);
-		CMC->MaxWalkSpeed = ClampedSpeed;
-	}
+	// Note: Sprint direction clamping removed - handled automatically in Tick()
+	// Sprint mode is now activated/deactivated based on bSprintIntentActive + movement direction
 
 	const FVector ForwardDirection = GetActorForwardVector();
 	const FVector RightDirection = GetActorRightVector();
@@ -730,18 +752,31 @@ void AFPSCharacter::WalkReleased()
 
 void AFPSCharacter::SprintPressed()
 {
-	UpdateMovementSpeed(EFPSMovementMode::Sprint);
-	Server_SetMovementMode(EFPSMovementMode::Sprint);
+	// Set sprint intent (actual Sprint mode activated in Tick if moving forward)
+	bSprintIntentActive = true;
 }
 
 void AFPSCharacter::SprintReleased()
 {
-	UpdateMovementSpeed(EFPSMovementMode::Jog);
-	Server_SetMovementMode(EFPSMovementMode::Jog);
+	// Clear sprint intent and immediately revert to Jog
+	bSprintIntentActive = false;
+
+	// Only revert if currently in Sprint mode
+	if (CurrentMovementMode == EFPSMovementMode::Sprint)
+	{
+		UpdateMovementSpeed(EFPSMovementMode::Jog);
+		Server_SetMovementMode(EFPSMovementMode::Jog);
+	}
 }
 
 void AFPSCharacter::CrouchPressed()
 {
+	// Block crouch if actively sprinting (moving forward)
+	if (CurrentMovementMode == EFPSMovementMode::Sprint && IsActivelyMoving())
+	{
+		return;
+	}
+
 	UpdateMovementSpeed(EFPSMovementMode::Crouch);
 	Server_SetMovementMode(EFPSMovementMode::Crouch);
 	Crouch();
@@ -846,6 +881,12 @@ void AFPSCharacter::UseStarted()
 		return;
 	}
 
+	// Block fire if actively sprinting (moving forward)
+	if (CurrentMovementMode == EFPSMovementMode::Sprint && IsActivelyMoving())
+	{
+		return;
+	}
+
 	// Check if we have an active item
 	if (!ActiveItem || !ActiveItem->Implements<UUsableInterface>())
 	{
@@ -884,6 +925,12 @@ void AFPSCharacter::AimingPressed()
 {
 	// Only locally controlled players can aim
 	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	// Block aim if actively sprinting (moving forward)
+	if (CurrentMovementMode == EFPSMovementMode::Sprint && IsActivelyMoving())
 	{
 		return;
 	}
@@ -978,6 +1025,28 @@ void AFPSCharacter::AimingReleased()
 	// Note: HipLeaningScale and HipBreathingScale are already set from EquipItem()
 	// Current* values will be interpolated in CalculateInterpolatedArmsOffset()
 	// Crosshair is updated continuously in Tick() with LeanAlpha
+}
+
+bool AFPSCharacter::IsActivelyMoving() const
+{
+	// Check if CMC is valid
+	if (!CMC)
+	{
+		return false;
+	}
+
+	// ShouldMove calculation (from AnimBP logic)
+	// 1. Check if character has velocity (normalized by walk speed 150 cm/s)
+	float VelocitySize = GetVelocity().Size();
+	float NormalizedVelocity = VelocitySize / 150.0f;
+	bool bHasVelocity = NormalizedVelocity > 0.01f; // Velocity threshold (1.5 cm/s minimum)
+
+	// 2. Check if character has input acceleration (player is pressing movement keys)
+	FVector CurrentAcceleration = CMC->GetCurrentAcceleration();
+	bool bHasAcceleration = !CurrentAcceleration.IsNearlyZero();
+
+	// Character is actively moving if BOTH velocity and acceleration are present
+	return bHasVelocity && bHasAcceleration;
 }
 
 void AFPSCharacter::Server_SetMovementMode_Implementation(EFPSMovementMode NewMode)

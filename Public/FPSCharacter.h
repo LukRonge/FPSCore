@@ -161,6 +161,11 @@ public:
 	UPROPERTY(BlueprintReadWrite, Replicated, Category = "Look")
 	bool bIsAiming = false;
 
+	// Sprint intent flag (local only, not replicated)
+	// When true, character WANTS to sprint (sprint key is held)
+	// Actual Sprint mode is activated only when moving forward (checked in Tick)
+	bool bSprintIntentActive = false;
+
 	UPROPERTY(BlueprintReadWrite, Category = "Look")
 	bool DoingTraversalAction = false;
 
@@ -241,6 +246,15 @@ public:
 	void UpdateLeaningVisualFeedback(const FVector& BreathingVector);
 
 private:
+	// ============================================
+	// MOVEMENT STATE HELPERS
+	// ============================================
+
+	// Check if character is actively sprinting (moving forward while in sprint mode)
+	// Returns true if: CurrentMovementMode == Sprint AND character has velocity AND has input acceleration
+	// Used to block Fire/Aim/Crouch during active sprint movement
+	bool IsActivelyMoving() const;
+
 	// ============================================
 	// LEANING & BREATHING STATE TRACKING (LOCAL ONLY)
 	// ============================================
