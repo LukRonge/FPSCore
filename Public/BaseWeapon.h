@@ -425,6 +425,12 @@ public:
 	// Set FPS mesh visibility
 	virtual void SetFPSMeshVisibility_Implementation(bool bVisible) override;
 
+	// Set aiming state (called by FPSCharacter)
+	virtual void SetAiming_Implementation(bool bAiming) override;
+
+	// Get current aiming state
+	virtual bool GetIsAiming_Implementation() const override;
+
 	// ============================================
 	// AMMO CONSUMER INTERFACE
 	// ============================================

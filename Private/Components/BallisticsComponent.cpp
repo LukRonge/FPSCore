@@ -133,16 +133,6 @@ bool UBallisticsComponent::ProcessHit(
 	float DistanceTraveled = (ImpactPoint - LastHitLocation).Size();
 	ApplyDistanceDecay(Speed, Mass, DropFactor, KineticEnergy, DistanceTraveled);
 
-	// Debug sphere
-	float SphereRadius = FMath::Clamp(KineticEnergy * 10.0f, 5.0f, 30.0f);
-	FColor SphereColor = KineticEnergy >= 2.0f ? FColor::Red : (KineticEnergy >= 1.0f ? FColor::Orange : FColor::Yellow);
-
-	UE_LOG(LogTemp, Warning, TEXT("[KE] Hit[%d] - Actor=%s, KE=%.3f J, Radius=%.1f cm, Color=%s"),
-		HitIndex, *HitActor->GetName(), KineticEnergy, SphereRadius,
-		KineticEnergy >= 2.0f ? TEXT("RED") : (KineticEnergy >= 1.0f ? TEXT("ORANGE") : TEXT("YELLOW")));
-
-	DrawDebugSphere(GetWorld(), ImpactPoint, SphereRadius, 12, SphereColor, false, 3.0f, 0, 2.0f);
-
 	// Notify owner via IBallisticsHandlerInterface for impact VFX
 	FName MaterialName;
 	bool bIsThin = IsThinMaterial(PhysMaterial, MaterialName);

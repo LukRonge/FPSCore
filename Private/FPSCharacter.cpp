@@ -933,6 +933,12 @@ void AFPSCharacter::AimingPressed()
 	AimLeaningScale = ISightInterface::Execute_GetAimLeaningScale(ActiveItem);
 	AimBreathingScale = ISightInterface::Execute_GetAimBreathingScale(ActiveItem);
 
+	// Notify ActiveItem about aiming state change via IHoldableInterface
+	if (ActiveItem->Implements<UHoldableInterface>())
+	{
+		IHoldableInterface::Execute_SetAiming(ActiveItem, true);
+	}
+
 	bIsAiming = true;
 }
 
@@ -958,6 +964,12 @@ void AFPSCharacter::AimingReleased()
 
 	// Restore default look speed
 	CurrentLookSpeed = 1.0f;
+
+	// Notify ActiveItem about aiming state change via IHoldableInterface
+	if (ActiveItem && ActiveItem->Implements<UHoldableInterface>())
+	{
+		IHoldableInterface::Execute_SetAiming(ActiveItem, false);
+	}
 
 	// Reset aiming state flags
 	bIsAiming = false;

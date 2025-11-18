@@ -6,6 +6,7 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "Interfaces/ViewPointProviderInterface.h"
 #include "Interfaces/AmmoConsumerInterface.h"
+#include "Interfaces/HoldableInterface.h"
 
 UFireComponent::UFireComponent()
 {
@@ -78,25 +79,55 @@ FVector UFireComponent::ApplySpread(FVector Direction) const
 	// Normalize input direction
 	Direction.Normalize();
 
-	// Calculate random spread variation
-	float RandomSpread = FMath::RandRange(RandomSpreadMin, RandomSpreadMax);
+	// Hardcoded common spread constants (not exposed in defaults)
+	const float BaseSpread = 0.5f;           // Base spread cone angle (degrees)
+	const float RandomSpreadMin = 0.0f;      // Random variation min (degrees)
+	const float RandomSpreadMax = 1.0f;      // Random variation max (degrees)
+	const float MovementSpreadMultiplier = 2.0f; // Movement penalty multiplier (3x spread at full sprint)
 
-	// Calculate movement-based spread
-	float MovementSpread = 0.0f;
-	if (AActor* Owner = GetOwner())
+	// Get normalized movement velocity (0.0 = standing, 1.0 = sprint speed)
+	float NormalizedVelocity = 0.0f;
+
+	// FireComponent owner is BaseWeapon, BaseWeapon owner is Character
+	AActor* WeaponActor = GetOwner(); // BaseWeapon
+	if (WeaponActor)
 	{
-		// Get owner velocity
-		FVector Velocity = Owner->GetVelocity();
-		float Speed = Velocity.Size();
+		AActor* CharacterActor = WeaponActor->GetOwner(); // Character
+		if (CharacterActor)
+		{
+			FVector Velocity = CharacterActor->GetVelocity();
+			float Speed = Velocity.Size();
 
-		// Scale spread by movement speed (cm/s to spread degrees)
-		// Formula: (Speed / 100.0) * Multiplier
-		MovementSpread = (Speed / 100.0f) * MovementSpreadMultiplier;
+			// Normalize by max sprint speed (650 cm/s)
+			// Result: 0.0 = standing, 1.0 = sprinting, >1.0 clamped
+			NormalizedVelocity = FMath::Clamp(Speed / 650.0f, 0.0f, 1.0f);
+		}
 	}
 
-	// Combine all spread components
-	// ConeHalfAngle = Recoil + Spread + RandomSpread + MovementSpread
-	float TotalSpread = Recoil + Spread + RandomSpread + MovementSpread;
+	// Calculate base random spread (not affected by movement yet)
+	float RandomSpread = FMath::RandRange(RandomSpreadMin, RandomSpreadMax);
+
+	// Check if weapon is aiming (ADS disables movement penalty)
+	bool bIsAiming = false;
+	if (WeaponActor && WeaponActor->Implements<UHoldableInterface>())
+	{
+		// Get IsAiming state via IHoldableInterface
+		bIsAiming = IHoldableInterface::Execute_GetIsAiming(WeaponActor);
+	}
+
+	// Calculate movement penalty (1.0 at standing, 3.0 at full sprint)
+	// When aiming (ADS), movement penalty is disabled (always 1.0)
+	float MovementPenalty = 1.0f;
+	if (!bIsAiming)
+	{
+		// Hip-fire: Apply movement penalty
+		MovementPenalty = 1.0f + (NormalizedVelocity * MovementSpreadMultiplier);
+	}
+
+	// Apply movement penalty to combined spread, then apply SpreadScale multiplier
+	// ADS: TotalSpread = (BaseSpread + RandomSpread) * 1.0 * SpreadScale
+	// Hip: TotalSpread = (BaseSpread + RandomSpread) * MovementPenalty * SpreadScale
+	float TotalSpread = (BaseSpread + RandomSpread) * MovementPenalty * SpreadScale;
 
 	// Convert total spread from degrees to radians
 	float SpreadRadians = FMath::DegreesToRadians(TotalSpread);
@@ -188,17 +219,20 @@ void UFireComponent::Fire()
 		return;
 	}
 
-	// 2. Call BallisticsComponent to shoot
+	// 2. Apply spread to direction
+	FVector SpreadDirection = ApplySpread(ViewDirection);
+
+	// 3. Call BallisticsComponent to shoot
 	if (BallisticsComponent)
 	{
-		BallisticsComponent->Shoot(ViewLocation, ViewDirection);
+		BallisticsComponent->Shoot(ViewLocation, SpreadDirection);
 	}
 	else
 	{
 		UE_LOG(LogTemp, Error, TEXT("FireComponent::Fire() - BallisticsComponent is null!"));
 	}
 
-	// 3. Apply recoil
+	// 4. Apply recoil
 	ApplyRecoil();
 }
 

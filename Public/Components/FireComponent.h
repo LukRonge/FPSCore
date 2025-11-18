@@ -60,36 +60,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
 	float FireRate = 600.0f;
 
-	// Weapon spread/accuracy (degrees)
-	// Base spread cone angle - 0 = perfect accuracy, higher = more spread
-	// Example: 0.5 degrees = tight grouping, 5.0 degrees = shotgun spread
+	// Spread scale multiplier (0.0 = no spread, 1.0 = normal spread, 2.0 = double spread)
+	// Applied to base spread cone angle (hardcoded base value + random variation + movement penalty)
+	// Example: 0.5 = very accurate, 1.0 = normal accuracy, 2.0 = inaccurate
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
-	float Spread = 0.5f;
+	float SpreadScale = 1.0f;
 
-	// Recoil base angle (degrees)
-	// Base vertical recoil kick per shot
-	// Example: 0.5 degrees = light recoil, 2.0 degrees = heavy recoil
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
-	float Recoil = 0.5f;
-
-	// Random spread variation minimum (degrees)
-	// Adds unpredictable variation to each shot
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
-	float RandomSpreadMin = 0.0f;
-
-	// Random spread variation maximum (degrees)
-	// Maximum random spread variation per shot
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
-	float RandomSpreadMax = 0.2f;
-
-	// Movement spread multiplier
-	// How much owner velocity affects spread (0 = no effect, 1.0 = full effect)
-	// Formula: MovementSpread = (OwnerVelocity.Size() / 100.0) * MovementSpreadMultiplier
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
-	float MovementSpreadMultiplier = 0.5f;
-
-	// Recoil intensity multiplier (legacy - for camera shake)
-	// Applied to camera/mesh rotation after each shot
+	// Recoil intensity multiplier (0.0 = no recoil, 1.0 = normal recoil, 2.0 = double recoil)
+	// Applied to base recoil value (hardcoded)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
 	float RecoilScale = 1.0f;
 
@@ -140,7 +118,8 @@ public:
 
 	/**
 	 * Apply spread to direction vector
-	 * Adds random cone spread based on Spread property
+	 * Applies spread cone based on SpreadScale multiplier
+	 * Includes: base spread + random variation + movement penalty
 	 *
 	 * @param Direction - Original aim direction (normalized)
 	 * @return Direction with spread applied (normalized)
@@ -167,11 +146,10 @@ protected:
 	 * Fire one shot
 	 * Override in subclasses for fire mode-specific logic
 	 * Base implementation:
-	 * 1. Consume ammo
-	 * 2. Get muzzle location and direction
-	 * 3. Apply spread
-	 * 4. Call BallisticsComponent->Shoot()
-	 * 5. Apply recoil
+	 * 1. Consume ammo (via IAmmoConsumerInterface)
+	 * 2. Apply spread to direction (using SpreadScale)
+	 * 3. Call BallisticsComponent->Shoot(Location, SpreadDirection)
+	 * 4. Apply recoil (using RecoilScale)
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fire")
 	virtual void Fire();

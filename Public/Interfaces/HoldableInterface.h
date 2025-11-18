@@ -91,4 +91,21 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
 	float GetBreathingScale() const;
 	virtual float GetBreathingScale_Implementation() const { return 1.0f; }
+
+	// ============================================
+	// AIMING STATE (Called by owner character)
+	// ============================================
+
+	// Set aiming state (called by FPSCharacter when aiming starts/stops)
+	// Used to notify item about owner's aiming state
+	// @param bAiming - True if owner is aiming, false if not aiming
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	void SetAiming(bool bAiming);
+	virtual void SetAiming_Implementation(bool bAiming) { }
+
+	// Get current aiming state
+	// Used by FireComponent to check if weapon is in ADS
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	bool GetIsAiming() const;
+	virtual bool GetIsAiming_Implementation() const { return false; }
 };

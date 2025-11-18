@@ -731,3 +731,16 @@ void ABaseWeapon::SetFPSMeshVisibility_Implementation(bool bVisible)
 		FPSMesh->SetVisibility(bVisible, true);
 	}
 }
+
+void ABaseWeapon::SetAiming_Implementation(bool bAiming)
+{
+	// Update aiming state (called by FPSCharacter when aiming starts/stops)
+	IsAiming = bAiming;
+
+	UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::SetAiming() - IsAiming set to: %s"), bAiming ? TEXT("TRUE") : TEXT("FALSE"));
+}
+
+bool ABaseWeapon::GetIsAiming_Implementation() const
+{
+	return IsAiming;
+}
