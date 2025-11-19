@@ -106,6 +106,98 @@ public:
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void UnPossessed() override;
 
+	// ============================================
+	// DAMAGE SYSTEM
+	// ============================================
+
+	/**
+	 * Current health value (replicated)
+	 * Server authority - only server modifies this value
+	 * Clients receive updates via replication
+	 */
+	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Health")
+	float Health = 100.0f;
+
+	/**
+	 * Maximum health value
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Health")
+	float MaxHealth = 100.0f;
+
+	/**
+	 * Hit reaction animation montages
+	 * Array of montages to play when character takes damage
+	 * Random montage is selected from array on each hit
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Damage")
+	TArray<UAnimMontage*> HitReactionMontages;
+
+	/**
+	 * Bone damage multipliers for hit location damage calculation
+	 * Maps bone name to damage multiplier (e.g., "head" = 2.0 for headshot)
+	 *
+	 * Examples:
+	 * - head: 2.0 (200% damage - instant kill headshot)
+	 * - neck_01/02: 1.5 (150% damage - critical hit)
+	 * - spine_03/04/05: 0.4-0.45 (torso - normal damage)
+	 * - limbs: 0.15-0.6 (reduced damage)
+	 * - fingers: 0.1-0.2 (minimal damage)
+	 * - IK/helper bones: 0.0 (no damage)
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Damage")
+	TMap<FName, float> BoneDamageMultipliers;
+
+	/**
+	 * Get damage multiplier for specific bone
+	 * @param BoneName - Name of bone hit
+	 * @return Damage multiplier (1.0 if bone not found in map)
+	 */
+	UFUNCTION(BlueprintPure, Category = "Damage")
+	float GetBoneDamageMultiplier(FName BoneName) const;
+
+	/**
+	 * Take damage from external sources
+	 * Called automatically by UGameplayStatics::ApplyDamage() or ApplyPointDamage()
+	 *
+	 * @param DamageAmount - Amount of damage to apply
+	 * @param DamageEvent - Data structure with additional damage info (type, impulse, etc.)
+	 * @param EventInstigator - Controller responsible for damage (for kill credit)
+	 * @param DamageCauser - Actor that caused damage (weapon, projectile, etc.)
+	 * @return Actual damage applied (after armor, multipliers, etc.)
+	 */
+	virtual float TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
+
+	/**
+	 * Client RPC to update UI on owning client
+	 * Called from TakeDamage on server, executes on owning client only
+	 *
+	 * @param NewHealth - New health value after damage
+	 */
+	UFUNCTION(Client, Reliable)
+	void Client_UpdateDamageUI(float NewHealth);
+
+	/**
+	 * Multicast RPC for hit reaction animation/effects
+	 * Called from TakeDamage on server, executes on ALL clients
+	 */
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_HitReaction();
+
+	/**
+	 * Process death logic (SERVER ONLY)
+	 * Called from TakeDamage when Health <= 0
+	 * Handles ragdoll, death animation, respawn timer, etc.
+	 */
+	void ProcessDeath();
+
+	/**
+	 * Client RPC for death processing on owning client
+	 * Called from ProcessDeath on server, executes on owning client only
+	 * Handles client-side death effects (death camera, UI updates, etc.)
+	 */
+	UFUNCTION(Client, Reliable)
+	void Client_ProcessDeath();
+
 	// Pitch control
 	UFUNCTION(BlueprintCallable, Category = "Animation")
 	void UpdatePitch(float Y);

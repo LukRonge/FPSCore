@@ -156,13 +156,16 @@ bool UBallisticsComponent::ProcessHit(
 	float FinalDamage = CurrentAmmoType->Damage * KineticEnergy;
 	if (FinalDamage > 0.0f)
 	{
+		AActor* Weapon = GetOwner();  // BaseWeapon
+		AActor* Character = Weapon ? Weapon->GetOwner() : nullptr;  // FPSCharacter (weapon's owner)
+
 		UGameplayStatics::ApplyPointDamage(
 			HitActor,
 			FinalDamage,
 			Direction,
 			Hit,
-			GetOwner()->GetInstigatorController(),
-			GetOwner(),
+			Weapon ? Weapon->GetInstigatorController() : nullptr,
+			Character,  // DamageCauser = FPSCharacter who fired the weapon
 			UDamageType::StaticClass()
 		);
 	}

@@ -31,6 +31,7 @@
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "Kismet/KismetMaterialLibrary.h"
+#include "Engine/DamageEvents.h"
 
 AFPSCharacter::AFPSCharacter()
 {
@@ -93,6 +94,195 @@ AFPSCharacter::AFPSCharacter()
 	// Inventory component
 	InventoryComp = CreateDefaultSubobject<UInventoryComponent>(TEXT("InventoryComponent"));
 
+	// ============================================
+	// BONE DAMAGE MULTIPLIERS INITIALIZATION
+	// ============================================
+	// Initialize bone damage multipliers for hit location damage
+	// Format: BoneName -> DamageMultiplier
+	// head = 2.0 (headshot), torso = 0.4-0.45, limbs = 0.15-0.6
+
+	BoneDamageMultipliers.Add(FName("root"), 0.5f);
+	BoneDamageMultipliers.Add(FName("pelvis"), 0.4f);
+	BoneDamageMultipliers.Add(FName("spine_01"), 0.35f);
+	BoneDamageMultipliers.Add(FName("spine_02"), 0.375f);
+	BoneDamageMultipliers.Add(FName("spine_03"), 0.4f);
+	BoneDamageMultipliers.Add(FName("spine_04"), 0.425f);
+	BoneDamageMultipliers.Add(FName("spine_05"), 0.45f);
+	BoneDamageMultipliers.Add(FName("neck_01"), 1.5f);
+	BoneDamageMultipliers.Add(FName("neck_02"), 1.5f);
+	BoneDamageMultipliers.Add(FName("head"), 2.0f);
+
+	// Left arm
+	BoneDamageMultipliers.Add(FName("clavicle_l"), 0.3f);
+	BoneDamageMultipliers.Add(FName("upperarm_l"), 0.25f);
+	BoneDamageMultipliers.Add(FName("lowerarm_l"), 0.225f);
+	BoneDamageMultipliers.Add(FName("lowerarm_twist_02_l"), 0.225f);
+	BoneDamageMultipliers.Add(FName("lowerarm_twist_01_l"), 0.225f);
+	BoneDamageMultipliers.Add(FName("lowerarm_correctiveRoot_l"), 0.225f);
+	BoneDamageMultipliers.Add(FName("lowerarm_in_l"), 0.225f);
+	BoneDamageMultipliers.Add(FName("lowerarm_out_l"), 0.225f);
+	BoneDamageMultipliers.Add(FName("lowerarm_fwd_l"), 0.225f);
+	BoneDamageMultipliers.Add(FName("lowerarm_bck_l"), 0.225f);
+	BoneDamageMultipliers.Add(FName("hand_l"), 0.15f);
+	BoneDamageMultipliers.Add(FName("wrist_inner_l"), 0.15f);
+	BoneDamageMultipliers.Add(FName("wrist_outer_l"), 0.15f);
+
+	// Left fingers
+	BoneDamageMultipliers.Add(FName("index_metacarpal_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("index_01_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("index_02_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("index_03_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("middle_metacarpal_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("middle_01_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("middle_02_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("middle_03_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("thumb_01_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("thumb_02_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("thumb_03_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("pinky_metacarpal_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("pinky_01_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("pinky_02_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("pinky_03_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("ring_metacarpal_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("ring_01_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("ring_02_l"), 0.1f);
+	BoneDamageMultipliers.Add(FName("ring_03_l"), 0.1f);
+
+	// Left arm twist bones
+	BoneDamageMultipliers.Add(FName("upperarm_twist_01_l"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_twistCor_01_l"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_twist_02_l"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_tricep_l"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_bicep_l"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_twistCor_02_l"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_correctiveRoot_l"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_bck_l"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_fwd_l"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_in_l"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_out_l"), 0.5f);
+	BoneDamageMultipliers.Add(FName("clavicle_out_l"), 0.6f);
+	BoneDamageMultipliers.Add(FName("clavicle_scap_l"), 0.6f);
+	BoneDamageMultipliers.Add(FName("clavicle_pec_l"), 0.6f);
+
+	// Right arm
+	BoneDamageMultipliers.Add(FName("clavicle_r"), 0.6f);
+	BoneDamageMultipliers.Add(FName("upperarm_r"), 0.5f);
+	BoneDamageMultipliers.Add(FName("lowerarm_r"), 0.45f);
+	BoneDamageMultipliers.Add(FName("lowerarm_twist_02_r"), 0.45f);
+	BoneDamageMultipliers.Add(FName("lowerarm_twist_01_r"), 0.45f);
+	BoneDamageMultipliers.Add(FName("lowerarm_correctiveRoot_r"), 0.45f);
+	BoneDamageMultipliers.Add(FName("lowerarm_out_r"), 0.45f);
+	BoneDamageMultipliers.Add(FName("lowerarm_in_r"), 0.45f);
+	BoneDamageMultipliers.Add(FName("lowerarm_fwd_r"), 0.45f);
+	BoneDamageMultipliers.Add(FName("lowerarm_bck_r"), 0.45f);
+	BoneDamageMultipliers.Add(FName("hand_r"), 0.3f);
+	BoneDamageMultipliers.Add(FName("wrist_inner_r"), 0.3f);
+	BoneDamageMultipliers.Add(FName("wrist_outer_r"), 0.3f);
+
+	// Right fingers
+	BoneDamageMultipliers.Add(FName("pinky_metacarpal_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("pinky_01_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("pinky_02_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("pinky_03_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("ring_metacarpal_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("ring_01_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("ring_02_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("ring_03_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("middle_metacarpal_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("middle_01_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("middle_02_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("middle_03_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("index_metacarpal_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("index_01_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("index_02_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("index_03_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("thumb_01_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("thumb_02_r"), 0.2f);
+	BoneDamageMultipliers.Add(FName("thumb_03_r"), 0.2f);
+
+	// Right arm twist bones
+	BoneDamageMultipliers.Add(FName("upperarm_twist_01_r"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_twistCor_01_r"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_twist_02_r"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_tricep_r"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_bicep_r"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_twistCor_02_r"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_correctiveRoot_r"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_bck_r"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_in_r"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_fwd_r"), 0.5f);
+	BoneDamageMultipliers.Add(FName("upperarm_out_r"), 0.5f);
+	BoneDamageMultipliers.Add(FName("clavicle_out_r"), 0.6f);
+	BoneDamageMultipliers.Add(FName("clavicle_scap_r"), 0.6f);
+	BoneDamageMultipliers.Add(FName("clavicle_pec_r"), 0.6f);
+
+	// Torso correctives
+	BoneDamageMultipliers.Add(FName("spine_04_latissimus_l"), 0.85f);
+	BoneDamageMultipliers.Add(FName("spine_04_latissimus_r"), 0.85f);
+
+	// Right leg
+	BoneDamageMultipliers.Add(FName("thigh_r"), 0.6f);
+	BoneDamageMultipliers.Add(FName("calf_r"), 0.55f);
+	BoneDamageMultipliers.Add(FName("foot_r"), 0.3f);
+	BoneDamageMultipliers.Add(FName("ball_r"), 0.3f);
+	BoneDamageMultipliers.Add(FName("ankle_fwd_r"), 0.35f);
+	BoneDamageMultipliers.Add(FName("ankle_bck_r"), 0.35f);
+	BoneDamageMultipliers.Add(FName("calf_twist_02_r"), 0.55f);
+	BoneDamageMultipliers.Add(FName("calf_twistCor_02_r"), 0.55f);
+	BoneDamageMultipliers.Add(FName("calf_twist_01_r"), 0.55f);
+	BoneDamageMultipliers.Add(FName("calf_correctiveRoot_r"), 0.55f);
+	BoneDamageMultipliers.Add(FName("calf_kneeBack_r"), 0.55f);
+	BoneDamageMultipliers.Add(FName("calf_knee_r"), 0.55f);
+	BoneDamageMultipliers.Add(FName("thigh_twist_01_r"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_twistCor_01_r"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_twist_02_r"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_twistCor_02_r"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_correctiveRoot_r"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_fwd_r"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_bck_r"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_out_r"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_in_r"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_bck_lwr_r"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_fwd_lwr_r"), 0.6f);
+
+	// Left leg
+	BoneDamageMultipliers.Add(FName("thigh_l"), 0.6f);
+	BoneDamageMultipliers.Add(FName("calf_l"), 0.55f);
+	BoneDamageMultipliers.Add(FName("foot_l"), 0.3f);
+	BoneDamageMultipliers.Add(FName("ball_l"), 0.3f);
+	BoneDamageMultipliers.Add(FName("ankle_bck_l"), 0.35f);
+	BoneDamageMultipliers.Add(FName("ankle_fwd_l"), 0.35f);
+	BoneDamageMultipliers.Add(FName("calf_twist_02_l"), 0.55f);
+	BoneDamageMultipliers.Add(FName("calf_twistCor_02_l"), 0.55f);
+	BoneDamageMultipliers.Add(FName("calf_twist_01_l"), 0.55f);
+	BoneDamageMultipliers.Add(FName("calf_correctiveRoot_l"), 0.55f);
+	BoneDamageMultipliers.Add(FName("calf_kneeBack_l"), 0.55f);
+	BoneDamageMultipliers.Add(FName("calf_knee_l"), 0.55f);
+	BoneDamageMultipliers.Add(FName("thigh_twist_01_l"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_twistCor_01_l"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_twist_02_l"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_twistCor_02_l"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_correctiveRoot_l"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_bck_l"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_fwd_l"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_out_l"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_bck_lwr_l"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_in_l"), 0.6f);
+	BoneDamageMultipliers.Add(FName("thigh_fwd_lwr_l"), 0.6f);
+
+	// IK and helper bones (no damage)
+	BoneDamageMultipliers.Add(FName("weapon_l"), 0.0f);
+	BoneDamageMultipliers.Add(FName("weapon_r"), 0.0f);
+	BoneDamageMultipliers.Add(FName("ik_foot_root"), 0.0f);
+	BoneDamageMultipliers.Add(FName("ik_foot_l"), 0.0f);
+	BoneDamageMultipliers.Add(FName("ik_foot_r"), 0.0f);
+	BoneDamageMultipliers.Add(FName("ik_hand_root"), 0.0f);
+	BoneDamageMultipliers.Add(FName("ik_hand_gun"), 0.0f);
+	BoneDamageMultipliers.Add(FName("ik_hand_l"), 0.0f);
+	BoneDamageMultipliers.Add(FName("ik_hand_r"), 0.0f);
+	BoneDamageMultipliers.Add(FName("interaction"), 0.0f);
+	BoneDamageMultipliers.Add(FName("center_of_mass"), 0.0f);
+	BoneDamageMultipliers.Add(FName(""), 0.0f);  // Empty bone name fallback
 }
 
 void AFPSCharacter::PostInitializeComponents()
@@ -226,6 +416,7 @@ void AFPSCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	DOREPLIFETIME(AFPSCharacter, CurrentMovementMode);
 	DOREPLIFETIME(AFPSCharacter, bIsDeath);
 	DOREPLIFETIME(AFPSCharacter, bIsAiming);
+	DOREPLIFETIME(AFPSCharacter, Health);
 	// Note: InventoryComp has its own replication (Items array)
 }
 
@@ -2106,4 +2297,222 @@ void AFPSCharacter::GetShootingViewPoint_Implementation(FVector& OutLocation, FR
 float AFPSCharacter::GetViewPitch_Implementation() const
 {
 	return Pitch;
+}
+
+// ============================================
+// DAMAGE SYSTEM IMPLEMENTATION
+// ============================================
+
+float AFPSCharacter::GetBoneDamageMultiplier(FName BoneName) const
+{
+	// Look up bone damage multiplier in map
+	const float* Multiplier = BoneDamageMultipliers.Find(BoneName);
+
+	// Return multiplier if found, otherwise return 1.0 (default - no modification)
+	return Multiplier ? *Multiplier : 1.0f;
+}
+
+float AFPSCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
+{
+	// CRITICAL: Call parent implementation first (AActor::TakeDamage)
+	// Parent handles damage broadcast delegates and other base functionality
+	float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+
+	// Early exit if no damage
+	if (ActualDamage <= 0.0f)
+	{
+		return 0.0f;
+	}
+
+	// SERVER AUTHORITY: Damage logic runs on server only
+	// Clients receive health updates via replication (will be implemented later)
+	if (!HasAuthority())
+	{
+		return ActualDamage;
+	}
+
+	// ============================================
+	// APPLY BONE DAMAGE MULTIPLIER (Point Damage only)
+	// ============================================
+	float BoneMultiplier = 1.0f;
+	FName HitBoneName = NAME_None;
+	FVector HitLocation = FVector::ZeroVector;
+	FVector HitDirection = FVector::ZeroVector;
+
+	if (DamageEvent.IsOfType(FPointDamageEvent::ClassID))
+	{
+		FPointDamageEvent const* PointDamageEvent = (FPointDamageEvent*)&DamageEvent;
+		HitBoneName = PointDamageEvent->HitInfo.BoneName;
+		HitLocation = PointDamageEvent->HitInfo.ImpactPoint;
+		HitDirection = PointDamageEvent->ShotDirection;
+
+		// Get bone multiplier from map
+		BoneMultiplier = GetBoneDamageMultiplier(HitBoneName);
+
+		// Apply multiplier to damage
+		ActualDamage *= BoneMultiplier;
+	}
+
+	// ============================================
+	// APPLY DAMAGE TO HEALTH
+	// ============================================
+	Health -= ActualDamage;
+	Health = FMath::Max(Health, 0.0f);  // Clamp to 0 minimum
+
+	// ============================================
+	// CLIENT RPC: UPDATE UI (OWNING CLIENT ONLY)
+	// ============================================
+	// Update health bar on owning client's HUD
+	Client_UpdateDamageUI(Health);
+
+	// ============================================
+	// MULTICAST RPC: HIT REACTION (ALL CLIENTS)
+	// ============================================
+	// Trigger hit reaction animation/effects on all clients
+	Multicast_HitReaction();
+
+	// ============================================
+	// DEBUG ON-SCREEN MESSAGE (temporary - remove in production)
+	// ============================================
+	FString InstigatorName = EventInstigator ? EventInstigator->GetName() : TEXT("nullptr");
+	FString CauserName = DamageCauser ? DamageCauser->GetName() : TEXT("nullptr");
+
+	// Base damage info
+	FString DamageInfo = FString::Printf(TEXT("[DAMAGE] %s took %.1f damage\nHealth: %.1f / %.1f\nInstigator: %s\nCauser: %s"),
+		*GetName(), ActualDamage, Health, MaxHealth, *InstigatorName, *CauserName);
+
+	// Check if this is point damage (from ballistic hit)
+	if (DamageEvent.IsOfType(FPointDamageEvent::ClassID))
+	{
+		DamageInfo += FString::Printf(TEXT("\nType: Point Damage\nBone: %s (x%.2f multiplier)\nHit Location: %.1f, %.1f, %.1f\nDirection: %.2f, %.2f, %.2f"),
+			*HitBoneName.ToString(),
+			BoneMultiplier,
+			HitLocation.X, HitLocation.Y, HitLocation.Z,
+			HitDirection.X, HitDirection.Y, HitDirection.Z);
+	}
+	else if (DamageEvent.IsOfType(FRadialDamageEvent::ClassID))
+	{
+		DamageInfo += TEXT("\nType: Radial Damage");
+	}
+	else
+	{
+		DamageInfo += TEXT("\nType: Generic Damage");
+	}
+
+	// Display on screen (5 second duration, red color)
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, DamageInfo);
+	}
+
+	// Also log to console for reference
+	UE_LOG(LogTemp, Warning, TEXT("%s"), *DamageInfo.Replace(TEXT("\n"), TEXT(" | ")));
+
+	// ============================================
+	// CHECK FOR DEATH
+	// ============================================
+	if (Health <= 0.0f && !bIsDeath)
+	{
+		bIsDeath = true;
+		ProcessDeath();
+	}
+
+	return ActualDamage;
+}
+
+void AFPSCharacter::Client_UpdateDamageUI_Implementation(float NewHealth)
+{
+	// This runs on OWNING CLIENT ONLY
+	// Update HUD via IPlayerHUDInterface
+
+	if (!CachedPlayerController)
+	{
+		CachedPlayerController = Cast<AFPSPlayerController>(GetController());
+	}
+
+	if (CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
+	{
+		// Update health bar
+		IPlayerHUDInterface::Execute_UpdateHealth(CachedPlayerController, NewHealth);
+
+		UE_LOG(LogTemp, Log, TEXT("[CLIENT UI] Updated health: %.1f/%.1f"),
+			NewHealth, MaxHealth);
+	}
+}
+
+void AFPSCharacter::Multicast_HitReaction_Implementation()
+{
+	// This runs on ALL CLIENTS
+	// Play random hit reaction animation montage
+
+	if (HitReactionMontages.Num() > 0)
+	{
+		// Select random montage from array
+		int32 RandomIndex = FMath::RandRange(0, HitReactionMontages.Num() - 1);
+		UAnimMontage* SelectedMontage = HitReactionMontages[RandomIndex];
+
+		if (SelectedMontage)
+		{
+			// Play montage on Body mesh (third-person)
+			if (GetMesh() && GetMesh()->GetAnimInstance())
+			{
+				GetMesh()->GetAnimInstance()->Montage_Play(SelectedMontage);
+			}
+
+			// Play montage on Arms mesh (first-person, owning client only)
+			if (Arms && Arms->GetAnimInstance())
+			{
+				Arms->GetAnimInstance()->Montage_Play(SelectedMontage);
+			}
+
+			UE_LOG(LogTemp, Log, TEXT("[HIT REACTION] Playing montage: %s"), *SelectedMontage->GetName());
+		}
+	}
+
+	// TODO: Additional hit effects
+	// - Spawn blood particles
+	// - Play hit sound
+	// - Apply camera shake (if local player)
+}
+
+void AFPSCharacter::ProcessDeath()
+{
+	// This runs on SERVER ONLY (called from TakeDamage)
+	// TODO: Implement death logic
+	// - Enable ragdoll physics on Body mesh
+	// - Disable collision capsule
+	// - Drop all inventory items
+	// - Notify GameMode for respawn timer
+	// - Multicast death effects (ragdoll, death camera)
+
+	UE_LOG(LogTemp, Error, TEXT("[DEATH] %s died! ProcessDeath() called."), *GetName());
+
+	// Notify owning client about death
+	Client_ProcessDeath();
+}
+
+void AFPSCharacter::Client_ProcessDeath_Implementation()
+{
+	// This runs on OWNING CLIENT ONLY
+	// Client-side death effects
+
+	// Set camera to black and white (desaturation effect)
+	if (Camera)
+	{
+		Camera->PostProcessSettings.bOverride_ColorSaturation = true;
+		Camera->PostProcessSettings.ColorSaturation = FVector4(0.0f, 0.0f, 0.0f, 1.0f);
+	}
+
+	// Hide HUD
+	if (!CachedPlayerController)
+	{
+		CachedPlayerController = Cast<AFPSPlayerController>(GetController());
+	}
+
+	if (CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
+	{
+		IPlayerHUDInterface::Execute_SetHUDVisibility(CachedPlayerController, false);
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("[CLIENT DEATH] Death effects applied: Desaturated camera + HUD hidden"));
 }
