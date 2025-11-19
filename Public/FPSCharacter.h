@@ -107,57 +107,20 @@ public:
 	virtual void UnPossessed() override;
 
 	// ============================================
-	// DAMAGE SYSTEM
+	// HEALTH COMPONENT (DAMAGE/DEATH SYSTEM)
 	// ============================================
 
 	/**
-	 * Current health value (replicated)
-	 * Server authority - only server modifies this value
-	 * Clients receive updates via replication
+	 * Health component (manages damage, health, death STATE)
+	 * Pure gameplay component with delegate-driven communication
 	 */
-	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Health")
-	float Health = 100.0f;
-
-	/**
-	 * Maximum health value
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Health")
-	float MaxHealth = 100.0f;
-
-	/**
-	 * Hit reaction animation montages
-	 * Array of montages to play when character takes damage
-	 * Random montage is selected from array on each hit
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Damage")
-	TArray<UAnimMontage*> HitReactionMontages;
-
-	/**
-	 * Bone damage multipliers for hit location damage calculation
-	 * Maps bone name to damage multiplier (e.g., "head" = 2.0 for headshot)
-	 *
-	 * Examples:
-	 * - head: 2.0 (200% damage - instant kill headshot)
-	 * - neck_01/02: 1.5 (150% damage - critical hit)
-	 * - spine_03/04/05: 0.4-0.45 (torso - normal damage)
-	 * - limbs: 0.15-0.6 (reduced damage)
-	 * - fingers: 0.1-0.2 (minimal damage)
-	 * - IK/helper bones: 0.0 (no damage)
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Damage")
-	TMap<FName, float> BoneDamageMultipliers;
-
-	/**
-	 * Get damage multiplier for specific bone
-	 * @param BoneName - Name of bone hit
-	 * @return Damage multiplier (1.0 if bone not found in map)
-	 */
-	UFUNCTION(BlueprintPure, Category = "Damage")
-	float GetBoneDamageMultiplier(FName BoneName) const;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Health")
+	class UHealthComponent* HealthComp;
 
 	/**
 	 * Take damage from external sources
 	 * Called automatically by UGameplayStatics::ApplyDamage() or ApplyPointDamage()
+	 * Delegates to HealthComponent for processing
 	 *
 	 * @param DamageAmount - Amount of damage to apply
 	 * @param DamageEvent - Data structure with additional damage info (type, impulse, etc.)
@@ -167,36 +130,92 @@ public:
 	 */
 	virtual float TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
 
+	// ============================================
+	// HEALTH COMPONENT DELEGATE CALLBACKS
+	// ============================================
+
 	/**
-	 * Client RPC to update UI on owning client
-	 * Called from TakeDamage on server, executes on owning client only
-	 *
-	 * @param NewHealth - New health value after damage
+	 * Called when HealthComponent broadcasts OnDamaged delegate
+	 * Triggers multicast RPC for hit reaction on all clients
 	 */
-	UFUNCTION(Client, Reliable)
-	void Client_UpdateDamageUI(float NewHealth);
+	UFUNCTION()
+	void OnHealthComponentDamaged();
+
+	/**
+	 * Called when HealthComponent broadcasts OnDeath delegate
+	 * Handles death logic (ragdoll, camera effects, respawn)
+	 */
+	UFUNCTION()
+	void OnHealthComponentDeath();
+
+	/**
+	 * Called when HealthComponent broadcasts OnHealthChanged delegate
+	 * Runs on SERVER (immediate) and CLIENTS (OnRep_Health)
+	 * Updates UI (health bars) via PlayerController
+	 */
+	UFUNCTION()
+	void OnHealthComponentHealthChanged(float NewHealth);
+
+	// ============================================
+	// HIT REACTION SYSTEM
+	// ============================================
+
+	/**
+	 * Hit reaction animation montages
+	 * Random montage is selected and played when character takes damage
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Damage")
+	TArray<UAnimMontage*> HitReactionMontages;
 
 	/**
 	 * Multicast RPC for hit reaction animation/effects
-	 * Called from TakeDamage on server, executes on ALL clients
+	 * Called from OnHealthComponentDamaged, executes on ALL clients
+	 * Plays animations + client-side screen effects
 	 */
 	UFUNCTION(NetMulticast, Reliable)
 	void Multicast_HitReaction();
 
 	/**
-	 * Process death logic (SERVER ONLY)
-	 * Called from TakeDamage when Health <= 0
-	 * Handles ragdoll, death animation, respawn timer, etc.
+	 * Helper function to play hit reaction animation montages
+	 * Called by Multicast_HitReaction on all clients
 	 */
-	void ProcessDeath();
+	void HitReaction();
+
+	// ============================================
+	// DEATH SYSTEM
+	// ============================================
 
 	/**
 	 * Client RPC for death processing on owning client
-	 * Called from ProcessDeath on server, executes on owning client only
-	 * Handles client-side death effects (death camera, UI updates, etc.)
+	 * Handles client-side death effects (death camera, UI updates)
 	 */
 	UFUNCTION(Client, Reliable)
 	void Client_ProcessDeath();
+
+	/**
+	 * Multicast RPC for death effects on all clients
+	 * Handles ragdoll activation on all clients
+	 */
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_ProcessDeath();
+
+	// ============================================
+	// RAGDOLL SYSTEM
+	// ============================================
+
+	/**
+	 * Enable ragdoll physics on character
+	 * Disables movement, collision capsule, and enables physics on body mesh
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Death")
+	void EnableRagdoll();
+
+	/**
+	 * Disable ragdoll physics on character
+	 * Re-enables movement, restores collision settings, and relinks animation layers
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Death")
+	void DisableRagdoll();
 
 	// Pitch control
 	UFUNCTION(BlueprintCallable, Category = "Animation")
@@ -218,9 +237,6 @@ public:
 
 	UFUNCTION()
 	void OnRep_ActiveItem(AActor* OldActiveItem);
-
-	UFUNCTION()
-	void OnRep_IsDeath();
 
 	UFUNCTION()
 	void OnRep_CurrentMovementMode();
@@ -247,9 +263,6 @@ public:
 	FVector2D CurrentMovementVector = FVector2D::ZeroVector;
 
 	// Look control
-	UPROPERTY(BlueprintReadWrite, ReplicatedUsing = OnRep_IsDeath, Category = "Look")
-	bool bIsDeath = false;
-
 	UPROPERTY(BlueprintReadWrite, Replicated, Category = "Look")
 	bool bIsAiming = false;
 
@@ -483,10 +496,6 @@ public:
 	// Character Movement Component (cached reference)
 	UPROPERTY()
 	class UCharacterMovementComponent* CMC;
-
-	// Player Controller (cached reference)
-	UPROPERTY()
-	class AFPSPlayerController* CachedPlayerController;
 
 	// Scene components for skeleton hierarchy
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")

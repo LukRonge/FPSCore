@@ -72,9 +72,13 @@ public:
 	// DAMAGE
 	// ============================================
 
-	// Base damage per projectile
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ammo|Damage", meta = (ClampMin = "0.0", ClampMax = "1000.0"))
-	float Damage = 1.0f;
+	// Base damage per projectile at reference kinetic energy (1500 J = 5.56mm NATO muzzle)
+	// Actual damage = Damage * (CurrentKE / ReferenceKE)
+	// - Distance reduces KE → reduces damage
+	// - Penetration reduces KE → reduces damage
+	// Recommended values: 5.56mm=35, 7.62x39mm=45, .50 BMG=80
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ammo|Damage", meta = (ClampMin = "0.0", ClampMax = "200.0"))
+	float Damage = 35.0f;
 
 	// Damage radius for explosive rounds (0 = no splash damage)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ammo|Damage", meta = (ClampMin = "0.0", ClampMax = "10000.0"))

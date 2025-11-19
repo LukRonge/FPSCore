@@ -27,6 +27,7 @@
 #include "GameFramework/HUD.h"
 #include "DrawDebugHelpers.h"
 #include "Components/InventoryComponent.h"
+#include "Components/HealthComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
@@ -45,8 +46,9 @@ AFPSCharacter::AFPSCharacter()
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationRoll = false;
 
-	// Configure Capsule Component
 	GetCapsuleComponent()->InitCapsuleSize(34.0f, 88.0f);
+	// Capsule should IGNORE projectiles - only skeletal mesh should detect bullet hits for bone damage
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Ignore);
 
 	CMC = GetCharacterMovement();
 	CMC->MaxWalkSpeedCrouched = 150.0f;  // Same as WalkSpeed
@@ -60,7 +62,6 @@ AFPSCharacter::AFPSCharacter()
 	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 	GetMesh()->SetComponentTickEnabled(true);
 
-	// Skeleton hierarchy for upper body aim
 	Spine_03 = CreateDefaultSubobject<USceneComponent>(TEXT("spine_03"));
 	Spine_03->SetupAttachment(GetMesh());
 	Spine_04 = CreateDefaultSubobject<USceneComponent>(TEXT("spine_04"));
@@ -91,198 +92,14 @@ AFPSCharacter::AFPSCharacter()
 	Legs->CastShadow = true;
 	Legs->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-	// Inventory component
 	InventoryComp = CreateDefaultSubobject<UInventoryComponent>(TEXT("InventoryComponent"));
+	HealthComp = CreateDefaultSubobject<UHealthComponent>(TEXT("HealthComponent"));
 
 	// ============================================
-	// BONE DAMAGE MULTIPLIERS INITIALIZATION
+	// BONE DAMAGE MULTIPLIERS MOVED TO UHealthComponent
 	// ============================================
-	// Initialize bone damage multipliers for hit location damage
-	// Format: BoneName -> DamageMultiplier
-	// head = 2.0 (headshot), torso = 0.4-0.45, limbs = 0.15-0.6
-
-	BoneDamageMultipliers.Add(FName("root"), 0.5f);
-	BoneDamageMultipliers.Add(FName("pelvis"), 0.4f);
-	BoneDamageMultipliers.Add(FName("spine_01"), 0.35f);
-	BoneDamageMultipliers.Add(FName("spine_02"), 0.375f);
-	BoneDamageMultipliers.Add(FName("spine_03"), 0.4f);
-	BoneDamageMultipliers.Add(FName("spine_04"), 0.425f);
-	BoneDamageMultipliers.Add(FName("spine_05"), 0.45f);
-	BoneDamageMultipliers.Add(FName("neck_01"), 1.5f);
-	BoneDamageMultipliers.Add(FName("neck_02"), 1.5f);
-	BoneDamageMultipliers.Add(FName("head"), 2.0f);
-
-	// Left arm
-	BoneDamageMultipliers.Add(FName("clavicle_l"), 0.3f);
-	BoneDamageMultipliers.Add(FName("upperarm_l"), 0.25f);
-	BoneDamageMultipliers.Add(FName("lowerarm_l"), 0.225f);
-	BoneDamageMultipliers.Add(FName("lowerarm_twist_02_l"), 0.225f);
-	BoneDamageMultipliers.Add(FName("lowerarm_twist_01_l"), 0.225f);
-	BoneDamageMultipliers.Add(FName("lowerarm_correctiveRoot_l"), 0.225f);
-	BoneDamageMultipliers.Add(FName("lowerarm_in_l"), 0.225f);
-	BoneDamageMultipliers.Add(FName("lowerarm_out_l"), 0.225f);
-	BoneDamageMultipliers.Add(FName("lowerarm_fwd_l"), 0.225f);
-	BoneDamageMultipliers.Add(FName("lowerarm_bck_l"), 0.225f);
-	BoneDamageMultipliers.Add(FName("hand_l"), 0.15f);
-	BoneDamageMultipliers.Add(FName("wrist_inner_l"), 0.15f);
-	BoneDamageMultipliers.Add(FName("wrist_outer_l"), 0.15f);
-
-	// Left fingers
-	BoneDamageMultipliers.Add(FName("index_metacarpal_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("index_01_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("index_02_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("index_03_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("middle_metacarpal_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("middle_01_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("middle_02_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("middle_03_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("thumb_01_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("thumb_02_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("thumb_03_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("pinky_metacarpal_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("pinky_01_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("pinky_02_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("pinky_03_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("ring_metacarpal_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("ring_01_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("ring_02_l"), 0.1f);
-	BoneDamageMultipliers.Add(FName("ring_03_l"), 0.1f);
-
-	// Left arm twist bones
-	BoneDamageMultipliers.Add(FName("upperarm_twist_01_l"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_twistCor_01_l"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_twist_02_l"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_tricep_l"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_bicep_l"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_twistCor_02_l"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_correctiveRoot_l"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_bck_l"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_fwd_l"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_in_l"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_out_l"), 0.5f);
-	BoneDamageMultipliers.Add(FName("clavicle_out_l"), 0.6f);
-	BoneDamageMultipliers.Add(FName("clavicle_scap_l"), 0.6f);
-	BoneDamageMultipliers.Add(FName("clavicle_pec_l"), 0.6f);
-
-	// Right arm
-	BoneDamageMultipliers.Add(FName("clavicle_r"), 0.6f);
-	BoneDamageMultipliers.Add(FName("upperarm_r"), 0.5f);
-	BoneDamageMultipliers.Add(FName("lowerarm_r"), 0.45f);
-	BoneDamageMultipliers.Add(FName("lowerarm_twist_02_r"), 0.45f);
-	BoneDamageMultipliers.Add(FName("lowerarm_twist_01_r"), 0.45f);
-	BoneDamageMultipliers.Add(FName("lowerarm_correctiveRoot_r"), 0.45f);
-	BoneDamageMultipliers.Add(FName("lowerarm_out_r"), 0.45f);
-	BoneDamageMultipliers.Add(FName("lowerarm_in_r"), 0.45f);
-	BoneDamageMultipliers.Add(FName("lowerarm_fwd_r"), 0.45f);
-	BoneDamageMultipliers.Add(FName("lowerarm_bck_r"), 0.45f);
-	BoneDamageMultipliers.Add(FName("hand_r"), 0.3f);
-	BoneDamageMultipliers.Add(FName("wrist_inner_r"), 0.3f);
-	BoneDamageMultipliers.Add(FName("wrist_outer_r"), 0.3f);
-
-	// Right fingers
-	BoneDamageMultipliers.Add(FName("pinky_metacarpal_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("pinky_01_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("pinky_02_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("pinky_03_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("ring_metacarpal_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("ring_01_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("ring_02_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("ring_03_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("middle_metacarpal_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("middle_01_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("middle_02_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("middle_03_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("index_metacarpal_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("index_01_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("index_02_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("index_03_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("thumb_01_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("thumb_02_r"), 0.2f);
-	BoneDamageMultipliers.Add(FName("thumb_03_r"), 0.2f);
-
-	// Right arm twist bones
-	BoneDamageMultipliers.Add(FName("upperarm_twist_01_r"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_twistCor_01_r"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_twist_02_r"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_tricep_r"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_bicep_r"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_twistCor_02_r"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_correctiveRoot_r"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_bck_r"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_in_r"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_fwd_r"), 0.5f);
-	BoneDamageMultipliers.Add(FName("upperarm_out_r"), 0.5f);
-	BoneDamageMultipliers.Add(FName("clavicle_out_r"), 0.6f);
-	BoneDamageMultipliers.Add(FName("clavicle_scap_r"), 0.6f);
-	BoneDamageMultipliers.Add(FName("clavicle_pec_r"), 0.6f);
-
-	// Torso correctives
-	BoneDamageMultipliers.Add(FName("spine_04_latissimus_l"), 0.85f);
-	BoneDamageMultipliers.Add(FName("spine_04_latissimus_r"), 0.85f);
-
-	// Right leg
-	BoneDamageMultipliers.Add(FName("thigh_r"), 0.6f);
-	BoneDamageMultipliers.Add(FName("calf_r"), 0.55f);
-	BoneDamageMultipliers.Add(FName("foot_r"), 0.3f);
-	BoneDamageMultipliers.Add(FName("ball_r"), 0.3f);
-	BoneDamageMultipliers.Add(FName("ankle_fwd_r"), 0.35f);
-	BoneDamageMultipliers.Add(FName("ankle_bck_r"), 0.35f);
-	BoneDamageMultipliers.Add(FName("calf_twist_02_r"), 0.55f);
-	BoneDamageMultipliers.Add(FName("calf_twistCor_02_r"), 0.55f);
-	BoneDamageMultipliers.Add(FName("calf_twist_01_r"), 0.55f);
-	BoneDamageMultipliers.Add(FName("calf_correctiveRoot_r"), 0.55f);
-	BoneDamageMultipliers.Add(FName("calf_kneeBack_r"), 0.55f);
-	BoneDamageMultipliers.Add(FName("calf_knee_r"), 0.55f);
-	BoneDamageMultipliers.Add(FName("thigh_twist_01_r"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_twistCor_01_r"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_twist_02_r"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_twistCor_02_r"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_correctiveRoot_r"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_fwd_r"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_bck_r"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_out_r"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_in_r"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_bck_lwr_r"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_fwd_lwr_r"), 0.6f);
-
-	// Left leg
-	BoneDamageMultipliers.Add(FName("thigh_l"), 0.6f);
-	BoneDamageMultipliers.Add(FName("calf_l"), 0.55f);
-	BoneDamageMultipliers.Add(FName("foot_l"), 0.3f);
-	BoneDamageMultipliers.Add(FName("ball_l"), 0.3f);
-	BoneDamageMultipliers.Add(FName("ankle_bck_l"), 0.35f);
-	BoneDamageMultipliers.Add(FName("ankle_fwd_l"), 0.35f);
-	BoneDamageMultipliers.Add(FName("calf_twist_02_l"), 0.55f);
-	BoneDamageMultipliers.Add(FName("calf_twistCor_02_l"), 0.55f);
-	BoneDamageMultipliers.Add(FName("calf_twist_01_l"), 0.55f);
-	BoneDamageMultipliers.Add(FName("calf_correctiveRoot_l"), 0.55f);
-	BoneDamageMultipliers.Add(FName("calf_kneeBack_l"), 0.55f);
-	BoneDamageMultipliers.Add(FName("calf_knee_l"), 0.55f);
-	BoneDamageMultipliers.Add(FName("thigh_twist_01_l"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_twistCor_01_l"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_twist_02_l"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_twistCor_02_l"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_correctiveRoot_l"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_bck_l"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_fwd_l"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_out_l"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_bck_lwr_l"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_in_l"), 0.6f);
-	BoneDamageMultipliers.Add(FName("thigh_fwd_lwr_l"), 0.6f);
-
-	// IK and helper bones (no damage)
-	BoneDamageMultipliers.Add(FName("weapon_l"), 0.0f);
-	BoneDamageMultipliers.Add(FName("weapon_r"), 0.0f);
-	BoneDamageMultipliers.Add(FName("ik_foot_root"), 0.0f);
-	BoneDamageMultipliers.Add(FName("ik_foot_l"), 0.0f);
-	BoneDamageMultipliers.Add(FName("ik_foot_r"), 0.0f);
-	BoneDamageMultipliers.Add(FName("ik_hand_root"), 0.0f);
-	BoneDamageMultipliers.Add(FName("ik_hand_gun"), 0.0f);
-	BoneDamageMultipliers.Add(FName("ik_hand_l"), 0.0f);
-	BoneDamageMultipliers.Add(FName("ik_hand_r"), 0.0f);
-	BoneDamageMultipliers.Add(FName("interaction"), 0.0f);
-	BoneDamageMultipliers.Add(FName("center_of_mass"), 0.0f);
-	BoneDamageMultipliers.Add(FName(""), 0.0f);  // Empty bone name fallback
+	// BoneDamageMultipliers initialization moved to UHealthComponent constructor
+	// See: Components/HealthComponent.cpp
 }
 
 void AFPSCharacter::PostInitializeComponents()
@@ -303,7 +120,6 @@ void AFPSCharacter::InitializeSpineComponents()
 	const FReferenceSkeleton& RefSkeleton = MeshComp->GetSkeletalMeshAsset()->GetRefSkeleton();
 	const TArray<FTransform>& RefBonePose = RefSkeleton.GetRefBonePose();
 
-	// Find bone indices
 	const int32 Spine03Index = RefSkeleton.FindBoneIndex(FName(TEXT("spine_03")));
 	const int32 Spine04Index = RefSkeleton.FindBoneIndex(FName(TEXT("spine_04")));
 	const int32 Spine05Index = RefSkeleton.FindBoneIndex(FName(TEXT("spine_05")));
@@ -315,7 +131,6 @@ void AFPSCharacter::InitializeSpineComponents()
 		return;
 	}
 
-	// Build component space transforms cache
 	TArray<FTransform> ComponentSpaceTransforms;
 	ComponentSpaceTransforms.SetNum(RefBonePose.Num());
 	ComponentSpaceTransforms[0] = RefBonePose[0];
@@ -381,24 +196,63 @@ void AFPSCharacter::BeginPlay()
 		ArmsOffset = DefaultArmsOffset;
 		// Note: Arms position is now set in Tick() via interpolation
 
-		// Initialize camera FOV
 		Camera->SetFieldOfView(DefaultFOV);
 
 		// Initialize default crosshair if no active item
-		if (!ActiveItem && CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
+		if (!ActiveItem && Controller && Controller->Implements<UPlayerHUDInterface>())
 		{
-			IPlayerHUDInterface::Execute_SetCrossHair(CachedPlayerController, DefaultCrossHair, nullptr);
+			IPlayerHUDInterface::Execute_SetCrossHair(Controller, DefaultCrossHair, nullptr);
 		}
 	}
 
-	// Bind inventory event callbacks (SERVER ONLY)
-	// Inventory events should only be processed on authority
-	// Clients receive updates via replication
+	// ============================================
+	// INVENTORY DELEGATES (SERVER ONLY)
+	// ============================================
+	// Inventory events only fire on server (inventory changes are server-authoritative)
+	// Clients receive updates via Items array replication
 	if (HasAuthority() && InventoryComp)
 	{
 		InventoryComp->OnItemAdded.AddDynamic(this, &AFPSCharacter::OnInventoryItemAdded);
 		InventoryComp->OnItemRemoved.AddDynamic(this, &AFPSCharacter::OnInventoryItemRemoved);
 		InventoryComp->OnInventoryCleared.AddDynamic(this, &AFPSCharacter::OnInventoryCleared);
+	}
+
+	// ============================================
+	// HEALTH DELEGATES (ALL MACHINES)
+	// ============================================
+	// Health delegates broadcast on BOTH server and clients:
+	// - SERVER: ApplyDamage() → immediate delegate broadcast
+	// - CLIENTS: OnRep_Health/OnRep_IsDeath → delegate broadcast when replicated
+	// Therefore, ALL machines must bind to receive these events
+	if (HealthComp)
+	{
+		// OnHealthChanged: Fires on SERVER (ApplyDamage) + CLIENTS (OnRep_Health)
+		// Used for UI updates on owning client
+		HealthComp->OnHealthChanged.AddDynamic(this, &AFPSCharacter::OnHealthComponentHealthChanged);
+
+		// OnDeath: Fires on SERVER (ApplyDamage) + CLIENTS (OnRep_IsDeath)
+		// Used for death camera/UI on owning client + ragdoll on all clients
+		HealthComp->OnDeath.AddDynamic(this, &AFPSCharacter::OnHealthComponentDeath);
+
+		// OnDamaged: Fires ONLY on SERVER (ApplyDamage)
+		// Triggers Multicast_HitReaction RPC, so only server needs binding
+		if (HasAuthority())
+		{
+			HealthComp->OnDamaged.AddDynamic(this, &AFPSCharacter::OnHealthComponentDamaged);
+			HealthComp->ResetHealthState();
+		}
+
+		// ============================================
+		// INITIALIZE UI WITH CURRENT HEALTH (ALL LOCALLY CONTROLLED)
+		// ============================================
+		// After binding delegates, manually initialize UI for locally controlled characters
+		// This ensures health bar shows initial value (100/100) on spawn
+		// - SERVER: ResetHealthState() already broadcasts, but this ensures UI sync
+		// - CLIENTS: No ResetHealthState() call, so this is critical for initial UI
+		if (IsLocallyControlled())
+		{
+			OnHealthComponentHealthChanged(HealthComp->Health);
+		}
 	}
 }
 
@@ -414,9 +268,8 @@ void AFPSCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	DOREPLIFETIME_CONDITION(AFPSCharacter, Pitch, COND_SkipOwner);
 	DOREPLIFETIME(AFPSCharacter, ActiveItem);
 	DOREPLIFETIME(AFPSCharacter, CurrentMovementMode);
-	DOREPLIFETIME(AFPSCharacter, bIsDeath);
 	DOREPLIFETIME(AFPSCharacter, bIsAiming);
-	DOREPLIFETIME(AFPSCharacter, Health);
+	// Note: Health and bIsDeath moved to HealthComp
 	// Note: InventoryComp has its own replication (Items array)
 }
 
@@ -434,18 +287,15 @@ void AFPSCharacter::Tick(float DeltaTime)
 	{
 		if (bSprintIntentActive)
 		{
-			// Check if moving forward (Y > 0.3)
 			float SprintMultiplier = GetSprintDirectionMultiplier(CurrentMovementVector);
 
 			if (SprintMultiplier > 0.0f && CurrentMovementMode != EFPSMovementMode::Sprint)
 			{
-				// Activate Sprint mode (moving forward with sprint intent)
 				UpdateMovementSpeed(EFPSMovementMode::Sprint);
 				Server_SetMovementMode(EFPSMovementMode::Sprint);
 			}
 			else if (SprintMultiplier <= 0.0f && CurrentMovementMode == EFPSMovementMode::Sprint)
 			{
-				// Deactivate Sprint mode (not moving forward, revert to Jog)
 				UpdateMovementSpeed(EFPSMovementMode::Jog);
 				Server_SetMovementMode(EFPSMovementMode::Jog);
 			}
@@ -457,13 +307,8 @@ void AFPSCharacter::Tick(float DeltaTime)
 	{
 		CheckInteractionTrace();
 
-		// Calculate interpolated arms offset (aiming interpolation)
 		InterpolatedArmsOffset = CalculateInterpolatedArmsOffset(DeltaTime);
-
-		// Update weapon leaning/sway based on movement
 		LeanVector = CalculateLeanVector(DeltaTime);
-
-		// Calculate breathing sway (idle breathing effect)
 		FVector BreathingVector = CalculateBreathing(DeltaTime);
 
 		// Combine aiming offset + weapon lean/sway + breathing
@@ -472,11 +317,10 @@ void AFPSCharacter::Tick(float DeltaTime)
 		// LeanVector.Z = Vertical up/down offset (cm)
 		// BreathingVector = Idle breathing offset (XYZ)
 		FVector FinalArmsOffset = InterpolatedArmsOffset;
-		FinalArmsOffset.X += LeanVector.X + BreathingVector.X; // Add forward/back sway + breathing
-		FinalArmsOffset.Y += LeanVector.Y + BreathingVector.Y; // Add lateral sway + breathing
-		FinalArmsOffset.Z += LeanVector.Z + BreathingVector.Z; // Add vertical bob + breathing
+		FinalArmsOffset.X += LeanVector.X + BreathingVector.X;
+		FinalArmsOffset.Y += LeanVector.Y + BreathingVector.Y;
+		FinalArmsOffset.Z += LeanVector.Z + BreathingVector.Z;
 
-		// Apply final position to Arms mesh (first-person hands)
 		Arms->SetRelativeLocation(FinalArmsOffset);
 
 		// ============================================
@@ -486,16 +330,12 @@ void AFPSCharacter::Tick(float DeltaTime)
 		// This creates realistic aim wobble and weapon sway during ADS
 		if (bIsAiming && Camera)
 		{
-			// Apply breathing rotation (Pitch/Yaw wobble)
 			BreathingRotation = CalculateBreathingRotation(BreathingVector);
 			Camera->SetRelativeRotation(BreathingRotation);
-
-			// Apply leaning position (weapon movement affects camera position)
 			Camera->SetRelativeLocation(BaseCameraLocation + LeanVector);
 		}
 		else
 		{
-			// Reset camera rotation and location when not aiming
 			if (Camera && (!BreathingRotation.IsZero() || Camera->GetRelativeLocation() != BaseCameraLocation))
 			{
 				BreathingRotation = FRotator::ZeroRotator;
@@ -507,7 +347,6 @@ void AFPSCharacter::Tick(float DeltaTime)
 		// ============================================
 		// UPDATE LEANING VISUAL FEEDBACK
 		// ============================================
-		// Update Material Parameter Collection and Crosshair based on leaning/breathing
 		UpdateLeaningVisualFeedback(BreathingVector);
 	}
 }
@@ -590,21 +429,14 @@ void AFPSCharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
 
-	// Cache player controller reference
-	CachedPlayerController = Cast<AFPSPlayerController>(NewController);
-
-	if (CachedPlayerController)
-	{
-		Client_OnPossessed();
-	}
+	Client_OnPossessed();
 }
 
 void AFPSCharacter::UnPossessed()
 {
 	Super::UnPossessed();
 
-	// Clear cached player controller
-	CachedPlayerController = nullptr;
+	UE_LOG(LogTemp, Log, TEXT("[FPSCharacter] UnPossessed: %s"), *GetName());
 }
 
 void AFPSCharacter::Client_OnPossessed_Implementation()
@@ -614,23 +446,17 @@ void AFPSCharacter::Client_OnPossessed_Implementation()
 		return;
 	}
 
-	// Cache player controller on client
-	if (!CachedPlayerController)
-	{
-		CachedPlayerController = Cast<AFPSPlayerController>(GetController());
-	}
-
 	// Setup hands location (LOCAL operation for locally controlled player)
 	// Arms mesh is OnlyOwnerSee, so this only affects local player
 	SetupArmsLocation(nullptr);
 
 	// NOTE: UpdateItemAnimLayer(nullptr) is already called in BeginPlay() on ALL machines
 	// No need to call it again here (would be redundant)
-
-	if (CachedPlayerController)
+	AFPSPlayerController* PlayerController = Cast<AFPSPlayerController>(GetController());
+	if (PlayerController)
 	{
-		CachedPlayerController->SetupInputMapping();
-		CachedPlayerController->SetViewTarget(this);
+		PlayerController->SetupInputMapping();
+		PlayerController->SetViewTarget(this);
 	}
 }
 
@@ -646,17 +472,13 @@ void AFPSCharacter::UpdatePitch(float Y)
 	NewLocalPitch = FMath::ClampAngle(NewLocalPitch, -45.0f, 45.0f);
 	LocalPitchAccumulator = NewLocalPitch;
 
-	// Update spine rotations with local pitch (immediate visual feedback)
 	UpdateSpineRotations();
 
 	// Calculate network pitch from actual camera direction (inverse calculation)
 	// This ensures ViewPointProvider returns the same direction as local camera
 	float CorrectedPitch = CalculateNetworkPitchFromCamera();
 
-	// Update replicated Pitch variable with corrected value
 	Pitch = CorrectedPitch;
-
-	// Send corrected pitch to server for weapon ballistics
 	if (!HasAuthority())
 	{
 		Server_UpdatePitch(Pitch);
@@ -692,7 +514,6 @@ void AFPSCharacter::Server_UpdatePitch_Implementation(float NewPitch)
 
 void AFPSCharacter::UpdateSpineRotations()
 {
-	// Distribute pitch across spine bones (40%, 50%, 60%, 20%)
 	Spine_03->SetRelativeRotation(FRotator(LocalPitchAccumulator * 0.4f, 90.0f, 0.0f));
 	Spine_04->SetRelativeRotation(FRotator(LocalPitchAccumulator * 0.5f, 0.0f, 0.0f));
 	Spine_05->SetRelativeRotation(FRotator(LocalPitchAccumulator * 0.6f, 0.0f, 0.0f));
@@ -701,23 +522,17 @@ void AFPSCharacter::UpdateSpineRotations()
 
 float AFPSCharacter::CalculateNetworkPitchFromCamera() const
 {
-	// Early exit if no camera
 	if (!Camera)
 	{
 		return 0.0f;
 	}
 
-	// Get camera forward vector in world space
 	const FVector CameraForward = Camera->GetForwardVector();
-
-	// Transform to actor local space (remove actor yaw rotation)
-	// This gives us forward vector relative to character facing direction
 	const FQuat ActorRotationQuat = GetActorQuat();
 	const FVector LocalForward = ActorRotationQuat.Inverse().RotateVector(CameraForward);
 
 	// Extract pitch from local forward vector
 	// Pitch = atan2(Z, sqrt(X^2 + Y^2))
-	// We use the horizontal magnitude (XY plane) vs vertical component (Z)
 	const float HorizontalLength = FMath::Sqrt(LocalForward.X * LocalForward.X + LocalForward.Y * LocalForward.Y);
 	const float PitchRadians = FMath::Atan2(LocalForward.Z, HorizontalLength);
 	const float PitchDegrees = FMath::RadiansToDegrees(PitchRadians);
@@ -738,20 +553,15 @@ FVector AFPSCharacter::CalculateInterpolatedArmsOffset(float DeltaTime)
 	// This function is only called for locally controlled players
 	// Handles smooth transition between hip fire and ADS
 
-	// Interpolate AimingAlpha based on bIsAiming state
-	// When bIsAiming = true, interpolate from 0.0 to 1.0
-	// When bIsAiming = false, interpolate from 1.0 to 0.0
 	float TargetAlpha = bIsAiming ? 1.0f : 0.0f;
 	AimingAlpha = FMath::FInterpTo(AimingAlpha, TargetAlpha, DeltaTime, AimingInterpSpeed);
 
-	// Lerp between ArmsOffset (hip fire) and AimArmsOffset (ADS)
 	FVector Result = FMath::Lerp(ArmsOffset, AimArmsOffset, AimingAlpha);
 
 	// ============================================
 	// CONTINUOUS INTERPOLATION (leaning and breathing scales)
 	// ============================================
 	// Smoothly interpolate leaning and breathing scales based on AimingAlpha
-	// This creates smooth transitions instead of instant jumps at 80% threshold
 	CurrentLeaningScale = FMath::Lerp(HipLeaningScale, AimLeaningScale, AimingAlpha);
 	CurrentBreathingScale = FMath::Lerp(HipBreathingScale, AimBreathingScale, AimingAlpha);
 
@@ -763,27 +573,22 @@ FVector AFPSCharacter::CalculateInterpolatedArmsOffset(float DeltaTime)
 	// Note: Crosshair is updated continuously in Tick() with LeanAlpha
 	if (AimingAlpha > 0.8f && bIsAiming && !bAimingCrosshairSet && ActiveItem && ActiveItem->Implements<USightInterface>())
 	{
-		// Set camera FOV for aiming
 		if (Camera)
 		{
 			float AimingFOV = ISightInterface::Execute_GetAimingFOV(ActiveItem);
 			Camera->SetFieldOfView(AimingFOV);
 		}
 
-		// Set look speed for aiming
 		CurrentLookSpeed = ISightInterface::Execute_GetAimLookSpeed(ActiveItem);
 
-		// Hide Arms if sight requires it (e.g., sniper scope with full-screen overlay)
 		if (ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(ActiveItem) && Arms->IsVisible())
 		{
 			Arms->SetVisibility(false, true);
 		}
 
-		// Set flag to prevent re-applying state
 		bAimingCrosshairSet = true;
 	}
 
-	// Return interpolated arms offset
 	return Result;
 }
 
@@ -865,14 +670,12 @@ void AFPSCharacter::UpdateItemAnimLayer(AActor* Item)
 
 void AFPSCharacter::LookYaw(const FInputActionValue& Value)
 {
-	if (bIsDeath)
+	if (HealthComp && HealthComp->bIsDeath)
 	{
 		return;
 	}
 
 	float YawValue = Value.Get<float>();
-
-	// Calculate sensitivity: Base sensitivity * LookSpeed scaling * CurrentLookSpeed (modified by aiming)
 	float BaseSensitivity = 0.5f;
 	float Sensitivity = BaseSensitivity * (LookSpeed / 100.0f) * CurrentLookSpeed;
 
@@ -881,14 +684,12 @@ void AFPSCharacter::LookYaw(const FInputActionValue& Value)
 
 void AFPSCharacter::LookPitch(const FInputActionValue& Value)
 {
-	if (bIsDeath)
+	if (HealthComp && HealthComp->bIsDeath)
 	{
 		return;
 	}
 
 	float PitchValue = Value.Get<float>();
-
-	// Calculate sensitivity: Base sensitivity * LookSpeed scaling * CurrentLookSpeed (modified by aiming)
 	float BaseSensitivity = 0.5f;
 	float Sensitivity = BaseSensitivity * (LookSpeed / 100.0f) * CurrentLookSpeed;
 
@@ -897,7 +698,7 @@ void AFPSCharacter::LookPitch(const FInputActionValue& Value)
 
 void AFPSCharacter::Move(const FInputActionValue& Value)
 {
-	if (bIsDeath)
+	if (HealthComp && HealthComp->bIsDeath)
 	{
 		return;
 	}
@@ -949,10 +750,8 @@ void AFPSCharacter::SprintPressed()
 
 void AFPSCharacter::SprintReleased()
 {
-	// Clear sprint intent and immediately revert to Jog
 	bSprintIntentActive = false;
 
-	// Only revert if currently in Sprint mode
 	if (CurrentMovementMode == EFPSMovementMode::Sprint)
 	{
 		UpdateMovementSpeed(EFPSMovementMode::Jog);
@@ -994,12 +793,12 @@ void AFPSCharacter::CrouchReleased()
 
 void AFPSCharacter::JumpPressed()
 {
-	Jump();  // Native UE5 jump (automatically replicated)
+	Jump();
 }
 
 void AFPSCharacter::JumpReleased()
 {
-	StopJumping();  // Native UE5 stop jump (automatically replicated)
+	StopJumping();
 }
 
 void AFPSCharacter::InteractPressed()
@@ -1015,13 +814,11 @@ void AFPSCharacter::InteractPressed()
 	// (set by CheckInteractionTrace only after full validation)
 	IInteractableInterface* Interactable = Cast<IInteractableInterface>(LastInteractableActor);
 
-	// Create interaction context
 	FInteractionContext Ctx;
 	Ctx.Controller = GetController();
 	Ctx.Pawn = this;
 	Ctx.Instigator = this;
 
-	// Get available verbs
 	TArray<FGameplayTag> Verbs;
 	Interactable->Execute_GetVerbs(LastInteractableActor, Verbs, Ctx);
 
@@ -1029,7 +826,6 @@ void AFPSCharacter::InteractPressed()
 	{
 		const FGameplayTag& FirstVerb = Verbs[0];
 
-		// Re-check CanInteract in case state changed between frames
 		if (Interactable->Execute_CanInteract(LastInteractableActor, FirstVerb, Ctx))
 		{
 			// INTERFACE-DRIVEN INTERACTION
@@ -1043,13 +839,11 @@ void AFPSCharacter::InteractPressed()
 
 void AFPSCharacter::DropPressed()
 {
-	// Only locally controlled players can drop items
 	if (!IsLocallyControlled())
 	{
 		return;
 	}
 
-	// Check if we have an active item to drop
 	if (!ActiveItem)
 	{
 		if (GEngine)
@@ -1060,13 +854,11 @@ void AFPSCharacter::DropPressed()
 		return;
 	}
 
-	// Call Server RPC to drop item
 	Server_DropItem(ActiveItem);
 }
 
 void AFPSCharacter::UseStarted()
 {
-	// Only locally controlled players can use items
 	if (!IsLocallyControlled())
 	{
 		return;
@@ -1078,43 +870,33 @@ void AFPSCharacter::UseStarted()
 		return;
 	}
 
-	// Check if we have an active item
 	if (!ActiveItem || !ActiveItem->Implements<UUsableInterface>())
 	{
 		return;
 	}
 
-	// Build use context with aim info
 	FUseContext Ctx;
-
-	// Call UseStart via interface (will trigger Server RPC internally)
 	IUsableInterface::Execute_UseStart(ActiveItem, Ctx);
 }
 
 void AFPSCharacter::UseStopped()
 {
-	// Only locally controlled players can use items
 	if (!IsLocallyControlled())
 	{
 		return;
 	}
 
-	// Check if we have an active item
 	if (!ActiveItem || !ActiveItem->Implements<UUsableInterface>())
 	{
 		return;
 	}
 
-	// Build use context
 	FUseContext Ctx;
-
-	// Call UseStop via interface (will trigger Server RPC internally)
 	IUsableInterface::Execute_UseStop(ActiveItem, Ctx);
 }
 
 void AFPSCharacter::AimingPressed()
 {
-	// Only locally controlled players can aim
 	if (!IsLocallyControlled())
 	{
 		return;
@@ -1126,13 +908,11 @@ void AFPSCharacter::AimingPressed()
 		return;
 	}
 
-	// Check if we have an active item
 	if (!ActiveItem)
 	{
 		return;
 	}
 
-	// Check if active item implements ISightInterface
 	if (!ActiveItem->Implements<USightInterface>())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::AimingPressed() - ActiveItem does not implement ISightInterface"));
@@ -1145,10 +925,8 @@ void AFPSCharacter::AimingPressed()
 	// Goal: Align sight's AimingPoint with camera center (0,0,0) in camera space
 	// Hierarchy: Camera -> Arms -> Weapon -> FPSSightComponent -> SightActor -> AimingPoint
 
-	// Get AimingPoint from weapon's sight (relative to SightActor)
 	FVector AimingPointLocal = ISightInterface::Execute_GetAimingPoint(ActiveItem);
 
-	// Get SightActor via interface (capability-based design)
 	AActor* SightActor = ISightInterface::Execute_GetSightActor(ActiveItem);
 	if (!SightActor)
 	{
@@ -1156,7 +934,6 @@ void AFPSCharacter::AimingPressed()
 		return;
 	}
 
-	// Get current Arms position (HandsOffset from weapon)
 	FVector CurrentArmsOffset = Arms->GetRelativeLocation();
 
 	// Transform AimingPoint: SightActor local space -> World space -> Camera local space
@@ -1167,11 +944,8 @@ void AFPSCharacter::AimingPressed()
 	// Formula: NewArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace
 	AimArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace;
 
-	// Set ADS leaning and breathing scales from sight
 	AimLeaningScale = ISightInterface::Execute_GetAimLeaningScale(ActiveItem);
 	AimBreathingScale = ISightInterface::Execute_GetAimBreathingScale(ActiveItem);
-
-	// Notify ActiveItem about aiming state change via IHoldableInterface
 	if (ActiveItem->Implements<UHoldableInterface>())
 	{
 		IHoldableInterface::Execute_SetAiming(ActiveItem, true);
@@ -1182,36 +956,27 @@ void AFPSCharacter::AimingPressed()
 
 void AFPSCharacter::AimingReleased()
 {
-	// Only locally controlled players can aim
 	if (!IsLocallyControlled())
 	{
 		return;
 	}
 
-	// Only process release if we were actually aiming
 	if (!bIsAiming)
 	{
 		return;
 	}
 
-	// Restore Arms (and attached weapon) visibility
 	Arms->SetVisibility(true, true);
-
-	// Restore default camera FOV
 	Camera->SetFieldOfView(DefaultFOV);
-
-	// Restore default look speed
 	CurrentLookSpeed = 1.0f;
 
-	// Notify ActiveItem about aiming state change via IHoldableInterface
 	if (ActiveItem && ActiveItem->Implements<UHoldableInterface>())
 	{
 		IHoldableInterface::Execute_SetAiming(ActiveItem, false);
 	}
 
-	// Reset aiming state flags
 	bIsAiming = false;
-	bAimingCrosshairSet = false; // Reset flag so next aim can apply state again
+	bAimingCrosshairSet = false;
 
 	// Note: HipLeaningScale and HipBreathingScale are already set from EquipItem()
 	// Current* values will be interpolated in CalculateInterpolatedArmsOffset()
@@ -1220,23 +985,19 @@ void AFPSCharacter::AimingReleased()
 
 bool AFPSCharacter::IsActivelyMoving() const
 {
-	// Check if CMC is valid
 	if (!CMC)
 	{
 		return false;
 	}
 
 	// ShouldMove calculation (from AnimBP logic)
-	// 1. Check if character has velocity (normalized by walk speed 150 cm/s)
 	float VelocitySize = GetVelocity().Size();
 	float NormalizedVelocity = VelocitySize / 150.0f;
-	bool bHasVelocity = NormalizedVelocity > 0.01f; // Velocity threshold (1.5 cm/s minimum)
+	bool bHasVelocity = NormalizedVelocity > 0.01f;
 
-	// 2. Check if character has input acceleration (player is pressing movement keys)
 	FVector CurrentAcceleration = CMC->GetCurrentAcceleration();
 	bool bHasAcceleration = !CurrentAcceleration.IsNearlyZero();
 
-	// Character is actively moving if BOTH velocity and acceleration are present
 	return bHasVelocity && bHasAcceleration;
 }
 
@@ -1249,10 +1010,8 @@ void AFPSCharacter::UpdateMovementSpeed(EFPSMovementMode NewMode)
 {
 	if (!CMC) return;
 
-	// Validate transitions
-	if (bIsDeath) return;
+	if (HealthComp && HealthComp->bIsDeath) return;
 
-	// Set new movement mode
 	CurrentMovementMode = NewMode;
 
 	switch (CurrentMovementMode)
@@ -1318,13 +1077,7 @@ void AFPSCharacter::OnRep_ActiveItem(AActor* OldActiveItem)
 
 
 
-void AFPSCharacter::OnRep_IsDeath()
-{
-	if (bIsDeath)
-	{
-		// Death logic - can be extended in Blueprint
-	}
-}
+// OnRep_IsDeath moved to UHealthComponent
 
 void AFPSCharacter::OnRep_CurrentMovementMode()
 {
@@ -1355,16 +1108,6 @@ void AFPSCharacter::CheckInteractionTrace()
 		return;
 	}
 
-	if (!CachedPlayerController)
-	{
-		CachedPlayerController = Cast<AFPSPlayerController>(GetController());
-		if (!CachedPlayerController)
-		{
-			return;
-		}
-	}
-
-	// Get camera location and direction
 	const FVector CameraLocation = Camera->GetComponentLocation();
 	const FVector CameraDirection = Camera->GetForwardVector();
 
@@ -1372,7 +1115,6 @@ void AFPSCharacter::CheckInteractionTrace()
 	const FVector TraceStart = CameraLocation + CameraDirection * 50.0f;
 	const FVector TraceEnd = CameraLocation + CameraDirection * InteractionDistance;
 
-	// Perform line trace
 	FHitResult Hit;
 	FCollisionQueryParams QueryParams;
 	QueryParams.AddIgnoredActor(this);
@@ -1385,7 +1127,6 @@ void AFPSCharacter::CheckInteractionTrace()
 		QueryParams
 	);
 
-	// Check if we hit an interactable object
 	if (bHit && Hit.GetActor() && Hit.GetActor()->Implements<UInteractableInterface>())
 	{
 		AActor* HitActor = Hit.GetActor();
@@ -1406,7 +1147,6 @@ void AFPSCharacter::CheckInteractionTrace()
 
 			bool bCanInteract = Interactable->Execute_CanInteract(HitActor, FirstVerb, Ctx);
 
-			// Debug: Show CanInteract result
 			if (GEngine)
 			{
 				GEngine->AddOnScreenDebugMessage(10, 0.0f, bCanInteract ? FColor::Green : FColor::Red,
@@ -1420,9 +1160,9 @@ void AFPSCharacter::CheckInteractionTrace()
 			{
 				FText InteractionText = Interactable->Execute_GetInteractionText(HitActor, FirstVerb, Ctx);
 
-				if (CachedPlayerController->Implements<UPlayerHUDInterface>())
+				if (Controller && Controller->Implements<UPlayerHUDInterface>())
 				{
-					IPlayerHUDInterface::Execute_UpdateItemInfo(CachedPlayerController, InteractionText.ToString());
+					IPlayerHUDInterface::Execute_UpdateItemInfo(Controller, InteractionText.ToString());
 				}
 
 				LastInteractableActor = HitActor;
@@ -1431,12 +1171,11 @@ void AFPSCharacter::CheckInteractionTrace()
 		}
 	}
 
-	// Clear HUD if no valid interactable found
 	if (LastInteractableActor != nullptr)
 	{
-		if (CachedPlayerController->Implements<UPlayerHUDInterface>())
+		if (Controller && Controller->Implements<UPlayerHUDInterface>())
 		{
-			IPlayerHUDInterface::Execute_UpdateItemInfo(CachedPlayerController, FString());
+			IPlayerHUDInterface::Execute_UpdateItemInfo(Controller, FString());
 		}
 
 		LastInteractableActor = nullptr;
@@ -1544,7 +1283,6 @@ void AFPSCharacter::Pickup_Implementation(AActor* Item)
 		return;
 	}
 
-	// Validation passed - send RPC to server
 	Server_PickupItem(Item);
 }
 
@@ -1581,10 +1319,9 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 	{
 		SetupArmsLocation(nullptr);
 
-		// Set default crosshair if no active item after unequip
-		if (!ActiveItem && CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
+		if (!ActiveItem && Controller && Controller->Implements<UPlayerHUDInterface>())
 		{
-			IPlayerHUDInterface::Execute_SetCrossHair(CachedPlayerController, DefaultCrossHair, nullptr);
+			IPlayerHUDInterface::Execute_SetCrossHair(Controller, DefaultCrossHair, nullptr);
 		}
 
 		// Reset all scales to defaults when no active item (defensive cleanup)
@@ -1656,32 +1393,27 @@ void AFPSCharacter::EquipItem(AActor* Item)
 	if (IsLocallyControlled())
 	{
 		SetupArmsLocation(Item);
-
-		// Set hip-fire leaning and breathing scales from active item
 		HipLeaningScale = IHoldableInterface::Execute_GetLeaningScale(Item);
 		HipBreathingScale = IHoldableInterface::Execute_GetBreathingScale(Item);
 	}
 
 	// HUD update (owning client only)
-	if (IsLocallyControlled() && CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
+	if (IsLocallyControlled() && Controller && Controller->Implements<UPlayerHUDInterface>())
 	{
-		IPlayerHUDInterface::Execute_UpdateActiveWeapon(CachedPlayerController, ActiveItem);
+		IPlayerHUDInterface::Execute_UpdateActiveWeapon(Controller, ActiveItem);
 
-		// Set crosshair for equipped item
 		if (Item && Item->Implements<USightInterface>())
 		{
 			TSubclassOf<UUserWidget> HipCrosshair = ISightInterface::Execute_GetCrossHair(Item);
 			TSubclassOf<UUserWidget> AimCrosshair = ISightInterface::Execute_GetAimingCrosshair(Item);
-			IPlayerHUDInterface::Execute_SetCrossHair(CachedPlayerController, HipCrosshair, AimCrosshair);
+			IPlayerHUDInterface::Execute_SetCrossHair(Controller, HipCrosshair, AimCrosshair);
 		}
 		else if (!ActiveItem)
 		{
-			// No active item - use default crosshair
-			IPlayerHUDInterface::Execute_SetCrossHair(CachedPlayerController, DefaultCrossHair, nullptr);
+			IPlayerHUDInterface::Execute_SetCrossHair(Controller, DefaultCrossHair, nullptr);
 		}
 	}
 
-	// Notify item
 	if (Item->Implements<UHoldableInterface>())
 	{
 		IHoldableInterface::Execute_OnEquipped(Item, this);
@@ -1700,10 +1432,7 @@ void AFPSCharacter::OnInventoryItemAdded(AActor* Item)
 		return;
 	}
 
-	// Set owner (replicated)
 	Item->SetOwner(this);
-
-	// PHYSICAL PICKUP (all clients via Multicast)
 	Multicast_PickupItem(Item);
 
 	// Auto-equip if first item
@@ -2245,7 +1974,7 @@ void AFPSCharacter::UpdateLeaningVisualFeedback(const FVector& BreathingVector)
 	// CROSSHAIR UPDATE (based on character velocity + look input)
 	// ============================================
 	// Update crosshair dynamically based on aiming state and movement/look intensity
-	if (CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
+	if (Controller && Controller->Implements<UPlayerHUDInterface>())
 	{
 		// 1. Movement contribution (from character velocity)
 		// Normalize by max sprint speed (650 cm/s)
@@ -2269,7 +1998,7 @@ void AFPSCharacter::UpdateLeaningVisualFeedback(const FVector& BreathingVector)
 		float LeanAlpha = FMath::Clamp(MovementAlpha + LookAlpha, 0.0f, 1.0f);
 
 		// Update crosshair with aiming state and lean alpha
-		IPlayerHUDInterface::Execute_UpdateCrossHair(CachedPlayerController, bIsAiming, LeanAlpha);
+		IPlayerHUDInterface::Execute_UpdateCrossHair(Controller, bIsAiming, LeanAlpha);
 	}
 }
 
@@ -2303,198 +2032,156 @@ float AFPSCharacter::GetViewPitch_Implementation() const
 // DAMAGE SYSTEM IMPLEMENTATION
 // ============================================
 
-float AFPSCharacter::GetBoneDamageMultiplier(FName BoneName) const
-{
-	// Look up bone damage multiplier in map
-	const float* Multiplier = BoneDamageMultipliers.Find(BoneName);
-
-	// Return multiplier if found, otherwise return 1.0 (default - no modification)
-	return Multiplier ? *Multiplier : 1.0f;
-}
-
 float AFPSCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
 {
-	// CRITICAL: Call parent implementation first (AActor::TakeDamage)
-	// Parent handles damage broadcast delegates and other base functionality
-	float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
-
-	// Early exit if no damage
-	if (ActualDamage <= 0.0f)
+	// Delegate directly to HealthComponent for damage processing
+	// HealthComponent handles: bone multipliers, health state, delegate broadcasting
+	// FPSCharacter reacts to delegates for visual effects (hit reactions, ragdoll, UI)
+	if (HealthComp)
 	{
-		return 0.0f;
+		return HealthComp->ApplyDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
 	}
 
-	// SERVER AUTHORITY: Damage logic runs on server only
-	// Clients receive health updates via replication (will be implemented later)
-	if (!HasAuthority())
+	// Fallback: No HealthComp (shouldn't happen in normal gameplay)
+	return Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+}
+
+// ============================================
+// HEALTH COMPONENT DELEGATE CALLBACKS
+// ============================================
+
+void AFPSCharacter::OnHealthComponentDamaged()
+{
+	// Called on SERVER when HealthComponent broadcasts OnDamaged delegate
+	// Trigger multicast RPC for hit reaction on all clients
+
+	if (HasAuthority())
 	{
-		return ActualDamage;
+		Multicast_HitReaction();
 	}
+}
 
-	// ============================================
-	// APPLY BONE DAMAGE MULTIPLIER (Point Damage only)
-	// ============================================
-	float BoneMultiplier = 1.0f;
-	FName HitBoneName = NAME_None;
-	FVector HitLocation = FVector::ZeroVector;
-	FVector HitDirection = FVector::ZeroVector;
+void AFPSCharacter::OnHealthComponentDeath()
+{
+	// Called on SERVER (ApplyDamage) and CLIENTS (OnRep_IsDeath)
+	// Handle death visual effects
 
-	if (DamageEvent.IsOfType(FPointDamageEvent::ClassID))
+	if (HasAuthority())
 	{
-		FPointDamageEvent const* PointDamageEvent = (FPointDamageEvent*)&DamageEvent;
-		HitBoneName = PointDamageEvent->HitInfo.BoneName;
-		HitLocation = PointDamageEvent->HitInfo.ImpactPoint;
-		HitDirection = PointDamageEvent->ShotDirection;
+		// SERVER: Trigger multicast RPC for ragdoll on all clients
+		Multicast_ProcessDeath();
 
-		// Get bone multiplier from map
-		BoneMultiplier = GetBoneDamageMultiplier(HitBoneName);
+		// SERVER: Trigger client RPC for owning client camera/UI effects
+		Client_ProcessDeath();
 
-		// Apply multiplier to damage
-		ActualDamage *= BoneMultiplier;
-	}
-
-	// ============================================
-	// APPLY DAMAGE TO HEALTH
-	// ============================================
-	Health -= ActualDamage;
-	Health = FMath::Max(Health, 0.0f);  // Clamp to 0 minimum
-
-	// ============================================
-	// CLIENT RPC: UPDATE UI (OWNING CLIENT ONLY)
-	// ============================================
-	// Update health bar on owning client's HUD
-	Client_UpdateDamageUI(Health);
-
-	// ============================================
-	// MULTICAST RPC: HIT REACTION (ALL CLIENTS)
-	// ============================================
-	// Trigger hit reaction animation/effects on all clients
-	Multicast_HitReaction();
-
-	// ============================================
-	// DEBUG ON-SCREEN MESSAGE (temporary - remove in production)
-	// ============================================
-	FString InstigatorName = EventInstigator ? EventInstigator->GetName() : TEXT("nullptr");
-	FString CauserName = DamageCauser ? DamageCauser->GetName() : TEXT("nullptr");
-
-	// Base damage info
-	FString DamageInfo = FString::Printf(TEXT("[DAMAGE] %s took %.1f damage\nHealth: %.1f / %.1f\nInstigator: %s\nCauser: %s"),
-		*GetName(), ActualDamage, Health, MaxHealth, *InstigatorName, *CauserName);
-
-	// Check if this is point damage (from ballistic hit)
-	if (DamageEvent.IsOfType(FPointDamageEvent::ClassID))
-	{
-		DamageInfo += FString::Printf(TEXT("\nType: Point Damage\nBone: %s (x%.2f multiplier)\nHit Location: %.1f, %.1f, %.1f\nDirection: %.2f, %.2f, %.2f"),
-			*HitBoneName.ToString(),
-			BoneMultiplier,
-			HitLocation.X, HitLocation.Y, HitLocation.Z,
-			HitDirection.X, HitDirection.Y, HitDirection.Z);
-	}
-	else if (DamageEvent.IsOfType(FRadialDamageEvent::ClassID))
-	{
-		DamageInfo += TEXT("\nType: Radial Damage");
+		UE_LOG(LogTemp, Warning, TEXT("[FPSCharacter] %s died (SERVER)"), *GetName());
 	}
 	else
 	{
-		DamageInfo += TEXT("\nType: Generic Damage");
+		// CLIENTS: Ragdoll already handled by OnRep → Multicast flow
+		// This callback serves as notification point for additional client-specific logic
+		UE_LOG(LogTemp, Log, TEXT("[FPSCharacter] %s died (CLIENT)"), *GetName());
 	}
-
-	// Display on screen (5 second duration, red color)
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, DamageInfo);
-	}
-
-	// Also log to console for reference
-	UE_LOG(LogTemp, Warning, TEXT("%s"), *DamageInfo.Replace(TEXT("\n"), TEXT(" | ")));
-
-	// ============================================
-	// CHECK FOR DEATH
-	// ============================================
-	if (Health <= 0.0f && !bIsDeath)
-	{
-		bIsDeath = true;
-		ProcessDeath();
-	}
-
-	return ActualDamage;
 }
 
-void AFPSCharacter::Client_UpdateDamageUI_Implementation(float NewHealth)
+void AFPSCharacter::OnHealthComponentHealthChanged(float NewHealth)
 {
-	// This runs on OWNING CLIENT ONLY
-	// Update HUD via IPlayerHUDInterface
+	// Runs on SERVER (immediate) and CLIENTS (OnRep_Health)
+	// Update UI on owning client only
 
-	if (!CachedPlayerController)
+	// DEBUG: Log all conditions
+	UE_LOG(LogTemp, Warning, TEXT("[HEALTH UI DEBUG] %s | IsLocallyControlled=%d | Controller=%s | Role=%s"),
+		*GetName(),
+		IsLocallyControlled(),
+		Controller ? *Controller->GetName() : TEXT("nullptr"),
+		*UEnum::GetValueAsString(GetLocalRole()));
+
+	if (Controller)
 	{
-		CachedPlayerController = Cast<AFPSPlayerController>(GetController());
+		UE_LOG(LogTemp, Warning, TEXT("[HEALTH UI DEBUG] Controller implements PlayerHUDInterface: %d"),
+			Controller->Implements<UPlayerHUDInterface>());
 	}
 
-	if (CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
+	if (IsLocallyControlled() && Controller && Controller->Implements<UPlayerHUDInterface>())
 	{
-		// Update health bar
-		IPlayerHUDInterface::Execute_UpdateHealth(CachedPlayerController, NewHealth);
+		IPlayerHUDInterface::Execute_UpdateHealth(Controller, NewHealth);
 
-		UE_LOG(LogTemp, Log, TEXT("[CLIENT UI] Updated health: %.1f/%.1f"),
-			NewHealth, MaxHealth);
+		// MaxHealth accessible directly from HealthComp
+		float MaxHealth = HealthComp ? HealthComp->MaxHealth : 100.0f;
+		UE_LOG(LogTemp, Log, TEXT("[FPSCharacter] Health updated: %.1f / %.1f"), NewHealth, MaxHealth);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[HEALTH UI DEBUG] Update SKIPPED for %s"), *GetName());
 	}
 }
+
+// ============================================
+// HIT REACTION SYSTEM (Multicast RPC)
+// ============================================
 
 void AFPSCharacter::Multicast_HitReaction_Implementation()
 {
-	// This runs on ALL CLIENTS
-	// Play random hit reaction animation montage
+	// Runs on ALL CLIENTS
+	// 1. Play hit reaction animations (all clients)
+	// 2. Add client-side screen effects (owning client only)
 
-	if (HitReactionMontages.Num() > 0)
+	// Play animations on all clients
+	HitReaction();
+
+	// ============================================
+	// CLIENT-SIDE SCREEN EFFECTS (Owning client only)
+	// ============================================
+	// Add visual damage feedback (screen blood, damage indicator, camera shake)
+	if (IsLocallyControlled() && Controller && Controller->Implements<UPlayerHUDInterface>())
 	{
-		// Select random montage from array
-		int32 RandomIndex = FMath::RandRange(0, HitReactionMontages.Num() - 1);
-		UAnimMontage* SelectedMontage = HitReactionMontages[RandomIndex];
+		IPlayerHUDInterface::Execute_AddDamageEffect(Controller);
+		UE_LOG(LogTemp, Log, TEXT("[HIT REACTION] Client damage effect added"));
+	}
+}
 
-		if (SelectedMontage)
-		{
-			// Play montage on Body mesh (third-person)
-			if (GetMesh() && GetMesh()->GetAnimInstance())
-			{
-				GetMesh()->GetAnimInstance()->Montage_Play(SelectedMontage);
-			}
+void AFPSCharacter::HitReaction()
+{
+	// Helper function to play hit reaction animation montages
+	// Called by Multicast_HitReaction on all clients
 
-			// Play montage on Arms mesh (first-person, owning client only)
-			if (Arms && Arms->GetAnimInstance())
-			{
-				Arms->GetAnimInstance()->Montage_Play(SelectedMontage);
-			}
-
-			UE_LOG(LogTemp, Log, TEXT("[HIT REACTION] Playing montage: %s"), *SelectedMontage->GetName());
-		}
+	if (HitReactionMontages.Num() == 0)
+	{
+		return;
 	}
 
-	// TODO: Additional hit effects
-	// - Spawn blood particles
-	// - Play hit sound
-	// - Apply camera shake (if local player)
+	// Select random montage from array
+	int32 RandomIndex = FMath::RandRange(0, HitReactionMontages.Num() - 1);
+	UAnimMontage* SelectedMontage = HitReactionMontages[RandomIndex];
+
+	if (!SelectedMontage)
+	{
+		return;
+	}
+
+	// Play montage on Body mesh (third-person, visible to others)
+	if (GetMesh() && GetMesh()->GetAnimInstance())
+	{
+		GetMesh()->GetAnimInstance()->Montage_Play(SelectedMontage);
+	}
+
+	// Play montage on Arms mesh (first-person, only owner sees)
+	if (Arms && Arms->GetAnimInstance())
+	{
+		Arms->GetAnimInstance()->Montage_Play(SelectedMontage);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[HIT REACTION] Playing montage: %s"), *SelectedMontage->GetName());
 }
 
-void AFPSCharacter::ProcessDeath()
-{
-	// This runs on SERVER ONLY (called from TakeDamage)
-	// TODO: Implement death logic
-	// - Enable ragdoll physics on Body mesh
-	// - Disable collision capsule
-	// - Drop all inventory items
-	// - Notify GameMode for respawn timer
-	// - Multicast death effects (ragdoll, death camera)
-
-	UE_LOG(LogTemp, Error, TEXT("[DEATH] %s died! ProcessDeath() called."), *GetName());
-
-	// Notify owning client about death
-	Client_ProcessDeath();
-}
+// ============================================
+// DEATH SYSTEM (Client + Multicast RPCs)
+// ============================================
 
 void AFPSCharacter::Client_ProcessDeath_Implementation()
 {
-	// This runs on OWNING CLIENT ONLY
-	// Client-side death effects
+	// Runs on OWNING CLIENT ONLY
+	// Client-side death effects (camera, UI)
 
 	// Set camera to black and white (desaturation effect)
 	if (Camera)
@@ -2504,15 +2191,84 @@ void AFPSCharacter::Client_ProcessDeath_Implementation()
 	}
 
 	// Hide HUD
-	if (!CachedPlayerController)
+	if (Controller && Controller->Implements<UPlayerHUDInterface>())
 	{
-		CachedPlayerController = Cast<AFPSPlayerController>(GetController());
+		IPlayerHUDInterface::Execute_SetHUDVisibility(Controller, false);
 	}
 
-	if (CachedPlayerController && CachedPlayerController->Implements<UPlayerHUDInterface>())
-	{
-		IPlayerHUDInterface::Execute_SetHUDVisibility(CachedPlayerController, false);
-	}
-
-	UE_LOG(LogTemp, Error, TEXT("[CLIENT DEATH] Death effects applied: Desaturated camera + HUD hidden"));
+	UE_LOG(LogTemp, Warning, TEXT("[CLIENT DEATH] Death effects applied: Desaturated camera + HUD hidden"));
 }
+
+void AFPSCharacter::Multicast_ProcessDeath_Implementation()
+{
+	// Runs on ALL CLIENTS
+	// Enable ragdoll physics on all clients
+
+	EnableRagdoll();
+}
+
+// ============================================
+// RAGDOLL SYSTEM
+// ============================================
+
+void AFPSCharacter::EnableRagdoll()
+{
+	// Disable character movement
+	if (CMC)
+	{
+		CMC->SetMovementMode(MOVE_None);
+	}
+
+	// Disable capsule collision
+	if (GetCapsuleComponent())
+	{
+		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+
+	// Enable physics on body mesh
+	if (GetMesh())
+	{
+		GetMesh()->SetCollisionObjectType(ECC_PhysicsBody);
+		GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		GetMesh()->SetAllBodiesBelowSimulatePhysics(FName("pelvis"), true, true);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[RAGDOLL] Ragdoll enabled for %s"), *GetName());
+}
+
+void AFPSCharacter::DisableRagdoll()
+{
+	// Re-enable character movement (Walk mode)
+	if (CMC)
+	{
+		CMC->SetMovementMode(MOVE_Walking);
+	}
+
+	// Restore body mesh collision settings
+	if (GetMesh())
+	{
+		GetMesh()->SetCollisionProfileName(FName("CharacterMesh"), true);
+		GetMesh()->SetCollisionObjectType(ECC_Pawn);
+		GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		GetMesh()->SetAllBodiesSimulatePhysics(false);
+	}
+
+	// Restore capsule collision settings
+	if (GetCapsuleComponent())
+	{
+		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		GetCapsuleComponent()->SetCollisionProfileName(FName("Pawn"), true);
+		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Ignore);
+	}
+
+	// Relink default animation layers
+	if (DefaultAnimLayer)
+	{
+		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
+		Legs->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
+		Arms->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[RAGDOLL] Ragdoll disabled for %s"), *GetName());
+}
+

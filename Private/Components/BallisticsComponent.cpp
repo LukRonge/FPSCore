@@ -124,8 +124,10 @@ bool UBallisticsComponent::ProcessHit(
 	// Initialize KE on first hit
 	if (HitIndex == 0)
 	{
-		KineticEnergy = (Mass / 1000.0f) * (Speed * Speed / 1000.0f);
-		UE_LOG(LogTemp, Warning, TEXT("[KE] INITIAL - Speed=%.1f m/s, Mass=%.2f g, KE=%.3f J"),
+		// KE = 0.5 * m * v² (physics formula)
+		// Mass in kg (g / 1000), Speed in m/s
+		KineticEnergy = 0.5f * (Mass / 1000.0f) * Speed * Speed;
+		UE_LOG(LogTemp, Warning, TEXT("[KE] INITIAL - Speed=%.1f m/s, Mass=%.2f g, KE=%.1f J"),
 			Speed, Mass, KineticEnergy);
 	}
 
@@ -153,7 +155,21 @@ bool UBallisticsComponent::ProcessHit(
 	}
 
 	// Apply damage
-	float FinalDamage = CurrentAmmoType->Damage * KineticEnergy;
+	// Normalize KE against reference value (5.56mm NATO at muzzle = ~1500 J)
+	// This allows Damage parameter to stay in reasonable range (20-100)
+	// while preserving distance/penetration decay effects
+	const float ReferenceKE = 1500.0f;
+	float KE_Multiplier = KineticEnergy / ReferenceKE;
+	float FinalDamage = CurrentAmmoType->Damage * KE_Multiplier;
+
+	// DEBUG: Check damage calculation
+	if (GEngine)
+	{
+		FString DebugMsg = FString::Printf(TEXT("[BALLISTICS] KE=%.1f J | BaseDamage=%.1f | Multiplier=%.3f | FinalDamage=%.1f"),
+			KineticEnergy, CurrentAmmoType->Damage, KE_Multiplier, FinalDamage);
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, DebugMsg);
+	}
+
 	if (FinalDamage > 0.0f)
 	{
 		AActor* Weapon = GetOwner();  // BaseWeapon
@@ -212,7 +228,8 @@ void UBallisticsComponent::ApplyDistanceDecay(
 	float DistanceMeters = Distance / 100.0f;
 	float DecayFactor = FMath::Exp(-DropFactor * DistanceMeters / 1000.0f);
 	Speed *= DecayFactor;
-	KineticEnergy = (Mass / 1000.0f) * (Speed * Speed / 1000.0f);
+	// Recalculate KE after speed decay
+	KineticEnergy = 0.5f * (Mass / 1000.0f) * Speed * Speed;
 }
 
 bool UBallisticsComponent::ApplyPenetrationLoss(
@@ -232,7 +249,8 @@ bool UBallisticsComponent::ApplyPenetrationLoss(
 		Penetration *= (KineticEnergy * 0.5f);
 		Mass *= 0.85f;
 		Speed *= DropFactor;
-		KineticEnergy = (Mass / 1000.0f) * (Speed * Speed / 1000.0f);
+		// Recalculate KE after penetration loss
+		KineticEnergy = 0.5f * (Mass / 1000.0f) * Speed * Speed;
 		return false;
 	}
 
@@ -245,7 +263,8 @@ bool UBallisticsComponent::ApplyPenetrationLoss(
 
 	Speed *= ThinMaterialVelocityRetention;
 	Penetration *= ThinMaterialPenetrationDecay;
-	KineticEnergy = (Mass / 1000.0f) * (Speed * Speed / 1000.0f);
+	// Recalculate KE after thin material penetration
+	KineticEnergy = 0.5f * (Mass / 1000.0f) * Speed * Speed;
 
 	float KELossPercent = ((KEBefore - KineticEnergy) / KEBefore) * 100.0f;
 
