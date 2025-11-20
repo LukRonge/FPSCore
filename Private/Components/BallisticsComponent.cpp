@@ -186,13 +186,32 @@ bool UBallisticsComponent::ProcessHit(
 		);
 	}
 
-	// Apply physics impulse
+	// Apply physics impulse (based on momentum and kinetic energy)
 	UPrimitiveComponent* HitComponent = Hit.GetComponent();
 
 	if (HitComponent && HitComponent->IsSimulatingPhysics(BoneName))
 	{
-		FVector Impulse = Direction * (Mass * Speed * 0.01f);
+		// Calculate impulse from momentum: p = m × v
+		// Mass in kg (grams / 1000), Speed in m/s, convert to cm/s for Unreal (*100)
+		float MassKg = Mass / 1000.0f;
+		float SpeedCmPerSec = Speed * 100.0f;
+		float Momentum = MassKg * SpeedCmPerSec;  // kg⋅cm/s
+
+		// Scale impulse by kinetic energy ratio (higher KE = stronger impact)
+		// ReferenceKE already declared above for damage calculation (1500 J)
+		float KE_ImpulseMultiplier = FMath::Sqrt(KineticEnergy / ReferenceKE);
+
+		// Final impulse magnitude (momentum scaled by KE)
+		float ImpulseMagnitude = Momentum * KE_ImpulseMultiplier;
+
+		// Apply impulse in shot direction
+		FVector Impulse = Direction * ImpulseMagnitude;
+
 		HitComponent->AddImpulseAtLocation(Impulse, ImpactPoint, BoneName);
+
+		// DEBUG: Log impulse application
+		UE_LOG(LogTemp, Verbose, TEXT("[IMPULSE] Mass=%.2fg, Speed=%.1fm/s, KE=%.1fJ, Momentum=%.1f, Multiplier=%.2f, Final=%.1f"),
+			Mass, Speed, KineticEnergy, Momentum, KE_ImpulseMultiplier, ImpulseMagnitude);
 	}
 
 	// Penetration loss

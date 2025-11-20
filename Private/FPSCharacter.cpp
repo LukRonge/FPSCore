@@ -2068,6 +2068,14 @@ void AFPSCharacter::OnHealthComponentDeath()
 
 	if (HasAuthority())
 	{
+		// SERVER: Drop active item on death
+		if (IsValid(ActiveItem) && InventoryComp)
+		{
+			FString ItemName = ActiveItem->GetName();
+			InventoryComp->RemoveItem(ActiveItem);
+			UE_LOG(LogTemp, Log, TEXT("[FPSCharacter] %s dropped active item %s on death"), *GetName(), *ItemName);
+		}
+
 		// SERVER: Trigger multicast RPC for ragdoll on all clients
 		Multicast_ProcessDeath();
 
