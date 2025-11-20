@@ -43,11 +43,11 @@ ABaseWeapon::ABaseWeapon()
 	TPSMagazineComponent->SetupAttachment(TPSMesh, FName("magazine"));
 
 	FPSSightComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("FPSSightComponent"));
-	FPSSightComponent->SetupAttachment(FPSMesh, FName("attachment_body"));
+	FPSSightComponent->SetupAttachment(FPSMesh, FName("attachment0"));
 	FPSSightComponent->SetIsReplicated(false);  // Component not replicated (child actor spawned locally)
 
 	TPSSightComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("TPSSightComponent"));
-	TPSSightComponent->SetupAttachment(TPSMesh, FName("attachment_body"));
+	TPSSightComponent->SetupAttachment(TPSMesh, FName("attachment0"));
 	TPSSightComponent->SetIsReplicated(false);  // Component not replicated (child actor spawned locally)
 }
 

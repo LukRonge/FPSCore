@@ -74,12 +74,12 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
 	UChildActorComponent* TPSMagazineComponent;
 
-	// FPS Sight component (attached to FPS mesh "attachment_body" bone)
+	// FPS Sight component (attached to FPS mesh "attachment0" bone)
 	// Visible only to owner, spawned from CurrentSightClass
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
 	UChildActorComponent* FPSSightComponent;
 
-	// TPS Sight component (attached to TPS mesh "attachment_body" bone)
+	// TPS Sight component (attached to TPS mesh "attachment0" bone)
 	// Visible to others, spawned from CurrentSightClass
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
 	UChildActorComponent* TPSSightComponent;
