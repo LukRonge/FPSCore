@@ -1973,7 +1973,7 @@ void AFPSCharacter::UpdateLeaningVisualFeedback(const FVector& BreathingVector)
 	}
 
 	// ============================================
-	// CROSSHAIR UPDATE (based on character velocity + look input)
+	// CROSSHAIR UPDATE (based on character velocity + look input + recoil)
 	// ============================================
 	// Update crosshair dynamically based on aiming state and movement/look intensity
 	if (Controller && Controller->Implements<UPlayerHUDInterface>())
@@ -1992,12 +1992,23 @@ void AFPSCharacter::UpdateLeaningVisualFeedback(const FVector& BreathingVector)
 		const float LookInfluence = 0.3f;     // Look contributes up to 30% of total alpha
 		float LookAlpha = FMath::Clamp(LeanState_RawMouseDelta / MaxMouseSpeed, 0.0f, 1.0f) * LookInfluence;
 
-		// 3. Combined alpha: additive (movement + look, clamped to 1.0)
-		// When idle: Velocity = 0, RawMouseDelta = 0 → LeanAlpha = 0
-		// When walking: Velocity = 150, RawMouseDelta = 0 → LeanAlpha = 0.23
-		// When sprinting: Velocity = 650, RawMouseDelta = 0 → LeanAlpha = 1.0
-		// When standing + fast look: Velocity = 0, RawMouseDelta = 400 → LeanAlpha = 0.3
-		float LeanAlpha = FMath::Clamp(MovementAlpha + LookAlpha, 0.0f, 1.0f);
+		// 3. Recoil contribution (from shot accumulation)
+		// ShotCount: 0 = no recoil, MaxAccumulation = sustained fire (full recoil penalty)
+		// Weight: 35% of total alpha (significant impact on sustained fire)
+		float RecoilAlpha = 0.0f;
+		if (RecoilComp)
+		{
+			float RecoilFactor = FMath::Min(static_cast<float>(RecoilComp->ShotCount) / RecoilComp->MaxAccumulation, 1.0f);
+			RecoilAlpha = RecoilFactor * 0.35f; // 35% weight
+		}
+
+		// 4. Combined alpha: additive (movement + look + recoil, clamped to 1.0)
+		// When idle, no shots: Velocity = 0, RawMouseDelta = 0, ShotCount = 0 → LeanAlpha = 0
+		// When walking: Velocity = 150, RawMouseDelta = 0, ShotCount = 0 → LeanAlpha = 0.23
+		// When sprinting: Velocity = 650, RawMouseDelta = 0, ShotCount = 0 → LeanAlpha = 1.0
+		// When standing + fast look: Velocity = 0, RawMouseDelta = 400, ShotCount = 0 → LeanAlpha = 0.3
+		// When standing + sustained fire: Velocity = 0, RawMouseDelta = 0, ShotCount = 8 → LeanAlpha = 0.35
+		float LeanAlpha = FMath::Clamp(MovementAlpha + LookAlpha + RecoilAlpha, 0.0f, 1.0f);
 
 		// Update crosshair with aiming state and lean alpha
 		IPlayerHUDInterface::Execute_UpdateCrossHair(Controller, bIsAiming, LeanAlpha);
@@ -2028,6 +2039,20 @@ void AFPSCharacter::GetShootingViewPoint_Implementation(FVector& OutLocation, FR
 float AFPSCharacter::GetViewPitch_Implementation() const
 {
 	return Pitch;
+}
+
+float AFPSCharacter::GetRecoilFactor_Implementation() const
+{
+	// Get recoil accumulation factor from RecoilComponent
+	// Used by weapons to increase spread during sustained fire
+	// RecoilComponent tracks ShotCount independently on server and client (LOCAL state)
+	if (RecoilComp)
+	{
+		// Calculate normalized recoil factor (0.0 = no shots, 1.0 = sustained fire)
+		return FMath::Min(static_cast<float>(RecoilComp->ShotCount) / RecoilComp->MaxAccumulation, 1.0f);
+	}
+
+	return 0.0f; // No recoil if RecoilComp is null
 }
 
 // ============================================

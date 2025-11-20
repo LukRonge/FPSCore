@@ -32,6 +32,7 @@ public:
 	// IViewPointProviderInterface implementation
 	virtual void GetShootingViewPoint_Implementation(FVector& OutLocation, FRotator& OutRotation) const override;
 	virtual float GetViewPitch_Implementation() const override;
+	virtual float GetRecoilFactor_Implementation() const override;
 
 	// IItemCollectorInterface implementation
 	virtual void Pickup_Implementation(AActor* Item) override;

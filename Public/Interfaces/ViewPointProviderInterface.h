@@ -48,4 +48,14 @@ public:
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "ViewPoint")
 	float GetViewPitch() const;
+
+	/**
+	 * Get recoil accumulation factor for spread calculation
+	 * Used by weapons to increase spread during sustained fire
+	 *
+	 * @return Recoil factor (0.0 = no recoil, 1.0 = maximum accumulation)
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "ViewPoint")
+	float GetRecoilFactor() const;
+	virtual float GetRecoilFactor_Implementation() const { return 0.0f; }
 };

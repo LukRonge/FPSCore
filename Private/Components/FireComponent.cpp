@@ -85,9 +85,12 @@ FVector UFireComponent::ApplySpread(FVector Direction) const
 	const float RandomSpreadMin = 0.0f;      // Random variation min (degrees)
 	const float RandomSpreadMax = 1.0f;      // Random variation max (degrees)
 	const float MovementSpreadMultiplier = 2.0f; // Movement penalty multiplier (3x spread at full sprint)
+	const float RecoilSpreadMultiplier = 1.5f;   // Recoil penalty multiplier (2.5x spread at sustained fire)
 
 	// Get normalized movement velocity (0.0 = standing, 1.0 = sprint speed)
 	float NormalizedVelocity = 0.0f;
+	bool bIsAiming = false;
+	float RecoilFactor = 0.0f;
 
 	// FireComponent owner is BaseWeapon, BaseWeapon owner is Character
 	AActor* WeaponActor = GetOwner(); // BaseWeapon
@@ -96,25 +99,33 @@ FVector UFireComponent::ApplySpread(FVector Direction) const
 		AActor* CharacterActor = WeaponActor->GetOwner(); // Character
 		if (CharacterActor)
 		{
+			// Get velocity
 			FVector Velocity = CharacterActor->GetVelocity();
 			float Speed = Velocity.Size();
 
 			// Normalize by max sprint speed (650 cm/s)
 			// Result: 0.0 = standing, 1.0 = sprinting, >1.0 clamped
 			NormalizedVelocity = FMath::Clamp(Speed / 650.0f, 0.0f, 1.0f);
+
+			// ✅ CAPABILITY-BASED: Use interface, not direct cast
+			// Get IsAiming state via IHoldableInterface on Weapon (local state is OK here for spread visual)
+			if (WeaponActor->Implements<UHoldableInterface>())
+			{
+				bIsAiming = IHoldableInterface::Execute_GetIsAiming(WeaponActor);
+			}
+
+			// ✅ CAPABILITY-BASED: Use IViewPointProviderInterface for recoil factor
+			// No direct cast to AFPSCharacter, no direct component access
+			// Character provides recoil factor via interface
+			if (CharacterActor->Implements<UViewPointProviderInterface>())
+			{
+				RecoilFactor = IViewPointProviderInterface::Execute_GetRecoilFactor(CharacterActor);
+			}
 		}
 	}
 
 	// Calculate base random spread (not affected by movement yet)
 	float RandomSpread = FMath::RandRange(RandomSpreadMin, RandomSpreadMax);
-
-	// Check if weapon is aiming (ADS disables movement penalty)
-	bool bIsAiming = false;
-	if (WeaponActor && WeaponActor->Implements<UHoldableInterface>())
-	{
-		// Get IsAiming state via IHoldableInterface
-		bIsAiming = IHoldableInterface::Execute_GetIsAiming(WeaponActor);
-	}
 
 	// Calculate movement penalty (1.0 at standing, 3.0 at full sprint)
 	// When aiming (ADS), movement penalty is disabled (always 1.0)
@@ -125,10 +136,17 @@ FVector UFireComponent::ApplySpread(FVector Direction) const
 		MovementPenalty = 1.0f + (NormalizedVelocity * MovementSpreadMultiplier);
 	}
 
-	// Apply movement penalty to combined spread, then apply SpreadScale multiplier
-	// ADS: TotalSpread = (BaseSpread + RandomSpread) * 1.0 * SpreadScale
-	// Hip: TotalSpread = (BaseSpread + RandomSpread) * MovementPenalty * SpreadScale
-	float TotalSpread = (BaseSpread + RandomSpread) * MovementPenalty * SpreadScale;
+	// Calculate recoil penalty (1.0 no shots, 2.5x at sustained fire)
+	// Recoil penalty applies regardless of ADS state (sustained fire reduces accuracy)
+	float RecoilPenalty = 1.0f + (RecoilFactor * RecoilSpreadMultiplier);
+
+	// Apply all penalties: movement (if hip-fire) + recoil + SpreadScale multiplier
+	// Example scenarios:
+	// - Standing, ADS, no shots: (0.5 + rand) * 1.0 * 1.0 * SpreadScale
+	// - Sprint, Hip, no shots:   (0.5 + rand) * 3.0 * 1.0 * SpreadScale
+	// - Standing, Hip, 8 shots:  (0.5 + rand) * 1.0 * 2.5 * SpreadScale
+	// - Sprint, Hip, 8 shots:    (0.5 + rand) * 3.0 * 2.5 * SpreadScale = 7.5x multiplier!
+	float TotalSpread = (BaseSpread + RandomSpread) * MovementPenalty * RecoilPenalty * SpreadScale;
 
 	// Convert total spread from degrees to radians
 	float SpreadRadians = FMath::DegreesToRadians(TotalSpread);
