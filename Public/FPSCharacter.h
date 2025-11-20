@@ -7,6 +7,7 @@
 #include "InputActionValue.h"
 #include "Interfaces/ViewPointProviderInterface.h"
 #include "Interfaces/ItemCollectorInterface.h"
+#include "Interfaces/RecoilHandlerInterface.h"
 #include "FPSCharacter.generated.h"
 
 class UInputAction;
@@ -21,7 +22,7 @@ enum class EFPSMovementMode : uint8
 };
 
 UCLASS()
-class FPSCORE_API AFPSCharacter : public ACharacter, public IViewPointProviderInterface, public IItemCollectorInterface
+class FPSCORE_API AFPSCharacter : public ACharacter, public IViewPointProviderInterface, public IItemCollectorInterface, public IRecoilHandlerInterface
 {
 	GENERATED_BODY()
 
@@ -35,6 +36,9 @@ public:
 	// IItemCollectorInterface implementation
 	virtual void Pickup_Implementation(AActor* Item) override;
 	virtual void Drop_Implementation(AActor* Item) override;
+
+	// IRecoilHandlerInterface implementation
+	virtual void ApplyRecoilKick_Implementation(float RecoilScale) override;
 
 protected:
 	virtual void PostInitializeComponents() override;
@@ -117,6 +121,18 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Health")
 	class UHealthComponent* HealthComp;
 
+	// ============================================
+	// RECOIL COMPONENT (WEAPON RECOIL SYSTEM)
+	// ============================================
+
+	/**
+	 * Recoil component (manages weapon recoil state, accumulation, recovery)
+	 * Pure visual feedback component (LOCAL, not replicated)
+	 * Handles camera kick for owning client, weapon animation for remote clients
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recoil")
+	class URecoilComponent* RecoilComp;
+
 	/**
 	 * Take damage from external sources
 	 * Called automatically by UGameplayStatics::ApplyDamage() or ApplyPointDamage()
@@ -198,6 +214,23 @@ public:
 	 */
 	UFUNCTION(NetMulticast, Reliable)
 	void Multicast_ProcessDeath();
+
+	// ============================================
+	// RECOIL SYSTEM
+	// ============================================
+
+	/**
+	 * Multicast RPC for recoil visual feedback on all clients
+	 * Called from ApplyRecoilKick_Implementation() on SERVER
+	 * Executes on ALL clients (owning + remote)
+	 *
+	 * Owning client: Camera kick (UpdatePitch + AddControllerYawInput)
+	 * Remote clients: Weapon animation (TPS mesh)
+	 *
+	 * @param RecoilScale - Recoil multiplier from FireComponent
+	 */
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_ApplyRecoil(float RecoilScale);
 
 	// ============================================
 	// RAGDOLL SYSTEM

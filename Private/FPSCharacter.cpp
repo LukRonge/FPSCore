@@ -28,6 +28,7 @@
 #include "DrawDebugHelpers.h"
 #include "Components/InventoryComponent.h"
 #include "Components/HealthComponent.h"
+#include "Components/RecoilComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
@@ -94,6 +95,7 @@ AFPSCharacter::AFPSCharacter()
 
 	InventoryComp = CreateDefaultSubobject<UInventoryComponent>(TEXT("InventoryComponent"));
 	HealthComp = CreateDefaultSubobject<UHealthComponent>(TEXT("HealthComponent"));
+	RecoilComp = CreateDefaultSubobject<URecoilComponent>(TEXT("RecoilComponent"));
 
 	// ============================================
 	// BONE DAMAGE MULTIPLIERS MOVED TO UHealthComponent
@@ -2213,6 +2215,61 @@ void AFPSCharacter::Multicast_ProcessDeath_Implementation()
 	// Enable ragdoll physics on all clients
 
 	EnableRagdoll();
+}
+
+// ============================================
+// RECOIL SYSTEM
+// ============================================
+
+void AFPSCharacter::ApplyRecoilKick_Implementation(float RecoilScale)
+{
+	// SERVER ONLY (called by FireComponent via IRecoilHandlerInterface)
+	if (!HasAuthority())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::ApplyRecoilKick() - Called on client! Should only run on server."));
+		return;
+	}
+
+	// Add to component state (for accumulation tracking on server)
+	if (RecoilComp)
+	{
+		RecoilComp->AddRecoil(RecoilScale);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("FPSCharacter::ApplyRecoilKick() - RecoilComp is null!"));
+		return;
+	}
+
+	// Broadcast to ALL clients (like Multicast_PlayMuzzleFlash)
+	Multicast_ApplyRecoil(RecoilScale);
+
+	UE_LOG(LogTemp, Verbose, TEXT("FPSCharacter::ApplyRecoilKick() - Recoil kick broadcasted: Scale=%.2f"), RecoilScale);
+}
+
+void AFPSCharacter::Multicast_ApplyRecoil_Implementation(float RecoilScale)
+{
+	// Runs on SERVER + ALL CLIENTS
+	if (!RecoilComp)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FPSCharacter::Multicast_ApplyRecoil() - RecoilComp is null!"));
+		return;
+	}
+
+	if (IsLocallyControlled())
+	{
+		// OWNING CLIENT: Camera kick
+		RecoilComp->ApplyRecoilToCamera(RecoilScale);
+
+		UE_LOG(LogTemp, Verbose, TEXT("FPSCharacter::Multicast_ApplyRecoil() - Camera recoil applied (owner): Scale=%.2f"), RecoilScale);
+	}
+	else
+	{
+		// REMOTE CLIENTS (including server): Weapon animation
+		RecoilComp->ApplyRecoilToWeapon(RecoilScale);
+
+		UE_LOG(LogTemp, Verbose, TEXT("FPSCharacter::Multicast_ApplyRecoil() - Weapon recoil applied (remote): Scale=%.2f"), RecoilScale);
+	}
 }
 
 // ============================================

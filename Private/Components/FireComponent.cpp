@@ -7,6 +7,7 @@
 #include "Interfaces/ViewPointProviderInterface.h"
 #include "Interfaces/AmmoConsumerInterface.h"
 #include "Interfaces/HoldableInterface.h"
+#include "Interfaces/RecoilHandlerInterface.h"
 
 UFireComponent::UFireComponent()
 {
@@ -238,10 +239,40 @@ void UFireComponent::Fire()
 
 void UFireComponent::ApplyRecoil()
 {
-	// TODO: Implement recoil application
-	// - Apply camera shake
-	// - Apply weapon mesh rotation/offset
-	// - Use RecoilScale property
+	// SERVER ONLY (called from Fire())
+	if (!GetOwner()->HasAuthority())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FireComponent::ApplyRecoil() - Called on client! Recoil applies on server only."));
+		return;
+	}
 
-	UE_LOG(LogTemp, Verbose, TEXT("FireComponent::ApplyRecoil() - Recoil: %.2f"), RecoilScale);
+	// Get weapon owner (Character/Pawn)
+	AActor* WeaponActor = GetOwner();  // BaseWeapon
+	if (!WeaponActor)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FireComponent::ApplyRecoil() - WeaponActor is null!"));
+		return;
+	}
+
+	AActor* WeaponOwner = WeaponActor->GetOwner();  // Character/Pawn
+	if (!WeaponOwner)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FireComponent::ApplyRecoil() - Weapon has no owner!"));
+		return;
+	}
+
+	// ✅ Interface communication (NO cast to AFPSCharacter!)
+	// Follows same pattern as IBallisticsHandlerInterface
+	if (WeaponOwner->Implements<URecoilHandlerInterface>())
+	{
+		// Call interface method - server will broadcast to all clients
+		IRecoilHandlerInterface::Execute_ApplyRecoilKick(WeaponOwner, RecoilScale);
+
+		UE_LOG(LogTemp, Verbose, TEXT("FireComponent::ApplyRecoil() - Recoil applied via interface: Scale=%.2f"), RecoilScale);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FireComponent::ApplyRecoil() - Owner '%s' does not implement IRecoilHandlerInterface!"),
+			*WeaponOwner->GetName());
+	}
 }
