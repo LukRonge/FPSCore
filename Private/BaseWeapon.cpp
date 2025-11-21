@@ -3,11 +3,13 @@
 #include "BaseWeapon.h"
 #include "Components/BallisticsComponent.h"
 #include "Components/FireComponent.h"
+#include "Components/ReloadComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Core/FPSGameplayTags.h"
 #include "BaseMagazine.h"
 #include "BaseSight.h"
 #include "Interfaces/ItemCollectorInterface.h"
+#include "Interfaces/ItemWidgetProviderInterface.h"
 
 ABaseWeapon::ABaseWeapon()
 {
@@ -68,6 +70,12 @@ void ABaseWeapon::PostInitializeComponents()
 		CurrentSightClass = DefaultSightClass;
 		InitSightComponents(CurrentSightClass);
 	}
+
+	// Find ReloadComponent if it was added in Blueprint
+	if (!ReloadComponent)
+	{
+		ReloadComponent = FindComponentByClass<UReloadComponent>();
+	}
 }
 
 void ABaseWeapon::BeginPlay()
@@ -78,6 +86,12 @@ void ABaseWeapon::BeginPlay()
 	if (!FireComponent)
 	{
 		FireComponent = FindComponentByClass<UFireComponent>();
+	}
+
+	// Find ReloadComponent if it was added in Blueprint (already done in PostInitializeComponents, but check again)
+	if (!ReloadComponent)
+	{
+		ReloadComponent = FindComponentByClass<UReloadComponent>();
 	}
 
 	// SERVER-ONLY initialization
@@ -113,6 +127,16 @@ void ABaseWeapon::BeginPlay()
 			{
 				UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::BeginPlay() - BallisticsComponent not found!"));
 			}
+		}
+
+		// Check ReloadComponent separately (can exist even if FireComponent/BallisticsComponent missing)
+		if (!ReloadComponent)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::BeginPlay() - ReloadComponent not found! Weapon will not be reloadable. Add ReloadComponent in Blueprint."));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Log, TEXT("BaseWeapon::BeginPlay() - ReloadComponent found and initialized"));
 		}
 	}
 }
@@ -743,4 +767,46 @@ void ABaseWeapon::SetAiming_Implementation(bool bAiming)
 bool ABaseWeapon::GetIsAiming_Implementation() const
 {
 	return IsAiming;
+}
+
+// ============================================
+// RELOADABLE INTERFACE
+// ============================================
+
+bool ABaseWeapon::CanReload_Implementation() const
+{
+	if (!ReloadComponent)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::CanReload - No ReloadComponent attached"));
+		return false;
+	}
+
+	return ReloadComponent->CanReload_Internal();
+}
+
+void ABaseWeapon::Reload_Implementation(const FUseContext& Ctx)
+{
+	if (!ReloadComponent)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::Reload - No ReloadComponent attached"));
+		return;
+	}
+
+	ReloadComponent->Server_StartReload(Ctx);
+}
+
+bool ABaseWeapon::IsReloading_Implementation() const
+{
+	if (!ReloadComponent) return false;
+
+	return ReloadComponent->bIsReloading;
+}
+
+// ============================================
+// ITEM WIDGET PROVIDER INTERFACE
+// ============================================
+
+TSubclassOf<UUserWidget> ABaseWeapon::GetItemWidgetClass_Implementation() const
+{
+	return ItemWidgetClass;
 }

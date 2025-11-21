@@ -45,7 +45,15 @@ public:
 
 	// Update active weapon display (name, icon, ammo count)
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "PlayerHUD|Weapon")
-	void UpdateActiveWeapon(AActor* ActiveWeapon);
+	void UpdateActiveItem(AActor* ActiveItem);
+
+	// ============================================
+	// INVENTORY
+	// ============================================
+
+	// Update inventory display (all items in inventory)
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "PlayerHUD|Inventory")
+	void UpdateInventory(const TArray<AActor*>& Items);
 
 	// ============================================
 	// CROSSHAIR

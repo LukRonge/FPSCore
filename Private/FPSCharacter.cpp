@@ -15,6 +15,7 @@
 #include "Interfaces/UsableInterface.h"
 #include "Interfaces/SightInterface.h"
 #include "Interfaces/PlayerHUDInterface.h"
+#include "Interfaces/ReloadableInterface.h"
 #include "BaseWeapon.h"
 #include "Core/FPSGameplayTags.h"
 #include "EnhancedInputComponent.h"
@@ -423,6 +424,11 @@ void AFPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 			EnhancedInputComponent->BindAction(IA_Aim, ETriggerEvent::Started, this, &AFPSCharacter::AimingPressed);
 			EnhancedInputComponent->BindAction(IA_Aim, ETriggerEvent::Completed, this, &AFPSCharacter::AimingReleased);
 			EnhancedInputComponent->BindAction(IA_Aim, ETriggerEvent::Canceled, this, &AFPSCharacter::AimingReleased);
+		}
+
+		if (IA_Reload)
+		{
+			EnhancedInputComponent->BindAction(IA_Reload, ETriggerEvent::Triggered, this, &AFPSCharacter::ReloadPressed);
 		}
 	}
 }
@@ -985,6 +991,82 @@ void AFPSCharacter::AimingReleased()
 	// Crosshair is updated continuously in Tick() with LeanAlpha
 }
 
+void AFPSCharacter::ReloadPressed()
+{
+	UE_LOG(LogTemp, Warning, TEXT("⚠️ FPSCharacter::ReloadPressed - CALLED! IsLocallyControlled: %s"), IsLocallyControlled() ? TEXT("TRUE") : TEXT("FALSE"));
+
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	// Get active item (replicated property)
+	if (!ActiveItem)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::ReloadPressed - No active item"));
+		return;
+	}
+
+	AActor* Item = ActiveItem;
+
+	// Check if reloadable (interface check)
+	if (!Item->Implements<UReloadableInterface>())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::ReloadPressed - Active item does not implement IReloadableInterface"));
+		return;
+	}
+
+	// Check if can reload
+	if (!IReloadableInterface::Execute_CanReload(Item))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::ReloadPressed - CanReload check failed"));
+		return;
+	}
+
+	// Create use context
+	FUseContext Ctx;
+	Ctx.Controller = GetController();
+	Ctx.Pawn = this;
+
+	// Call reload (triggers Server RPC inside)
+	IReloadableInterface::Execute_Reload(Item, Ctx);
+
+	UE_LOG(LogTemp, Log, TEXT("FPSCharacter::ReloadPressed - Reload triggered"));
+}
+
+bool AFPSCharacter::CanReload() const
+{
+	// Get Arms AnimInstance
+	if (!Arms)
+	{
+		return false;
+	}
+
+	UAnimInstance* AnimInst = Arms->GetAnimInstance();
+	if (!AnimInst)
+	{
+		return false;
+	}
+
+	// Check montage slot (reload uses "UpperBody" slot)
+	if (AnimInst->IsSlotActive("UpperBody"))
+	{
+		return false;
+	}
+
+	// Check death state via HealthComponent
+	if (HealthComp && HealthComp->bIsDeath)
+	{
+		return false;
+	}
+
+	// Future features (not yet implemented):
+	// TODO: Add ladder climbing check when ladder system is implemented
+	// TODO: Add traversal action check (climbing over obstacles)
+
+	return true;
+}
+
 bool AFPSCharacter::IsActivelyMoving() const
 {
 	if (!CMC)
@@ -1402,7 +1484,7 @@ void AFPSCharacter::EquipItem(AActor* Item)
 	// HUD update (owning client only)
 	if (IsLocallyControlled() && Controller && Controller->Implements<UPlayerHUDInterface>())
 	{
-		IPlayerHUDInterface::Execute_UpdateActiveWeapon(Controller, ActiveItem);
+		IPlayerHUDInterface::Execute_UpdateActiveItem(Controller, ActiveItem);
 
 		if (Item && Item->Implements<USightInterface>())
 		{

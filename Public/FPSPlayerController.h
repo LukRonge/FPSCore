@@ -42,7 +42,8 @@ public:
 	virtual void UpdateHealth_Implementation(float Health) override;
 	virtual float GetHealth_Implementation() override;
 	virtual void AddDamageEffect_Implementation() override;
-	virtual void UpdateActiveWeapon_Implementation(AActor* ActiveWeapon) override;
+	virtual void UpdateActiveItem_Implementation(AActor* ActiveItem) override;
+	virtual void UpdateInventory_Implementation(const TArray<AActor*>& Items) override;
 	virtual void UpdateCrossHair_Implementation(bool IsAim, float LeanAlpha) override;
 	virtual void SetCrossHair_Implementation(TSubclassOf<UUserWidget> CrossHairWidgetClass, TSubclassOf<UUserWidget> AimCrossHairWidgetClass) override;
 	virtual void SetHUDVisibility_Implementation(bool Visibility) override;

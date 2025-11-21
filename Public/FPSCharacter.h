@@ -69,6 +69,7 @@ protected:
 	void UseStopped();
 	void AimingPressed();
 	void AimingReleased();
+	void ReloadPressed();
 
 	// Movement speed control
 	void UpdateMovementSpeed(EFPSMovementMode NewMode);
@@ -110,6 +111,22 @@ public:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void UnPossessed() override;
+
+	/**
+	 * Check if character can perform reload action
+	 * Validates character state for reload (no active montages, not dead, etc.)
+	 * Called by ReloadComponent->CanReload_Internal()
+	 *
+	 * Validation checks:
+	 * - No active montage in "UpperBody" slot (reload uses this slot)
+	 * - Not dead (HealthComp->bIsDeath)
+	 * - Future: Not on ladder (when ladder system is implemented)
+	 * - Future: Not in traversal action (when traversal system is implemented)
+	 *
+	 * @return true if reload is possible from character state perspective
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Character|Actions")
+	bool CanReload() const;
 
 	// ============================================
 	// HEALTH COMPONENT (DAMAGE/DEATH SYSTEM)
@@ -605,6 +622,9 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	UInputAction* IA_Aim;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* IA_Reload;
 
 	// Movement speeds
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Movement")

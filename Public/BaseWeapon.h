@@ -25,15 +25,18 @@
 #include "Interfaces/UsableInterface.h"
 #include "Interfaces/AmmoConsumerInterface.h"
 #include "Interfaces/BallisticsHandlerInterface.h"
+#include "Interfaces/ReloadableInterface.h"
+#include "Interfaces/ItemWidgetProviderInterface.h"
 #include "BaseWeapon.generated.h"
 
 class ABaseMagazine;
 class UBallisticsComponent;
 class UFireComponent;
+class UReloadComponent;
 class ABaseSight;
 
 UCLASS()
-class FPSCORE_API ABaseWeapon : public AActor, public IInteractableInterface, public IPickupableInterface, public IHoldableInterface, public ISightInterface, public IUsableInterface, public IAmmoConsumerInterface, public IBallisticsHandlerInterface
+class FPSCORE_API ABaseWeapon : public AActor, public IInteractableInterface, public IPickupableInterface, public IHoldableInterface, public ISightInterface, public IUsableInterface, public IAmmoConsumerInterface, public IBallisticsHandlerInterface, public IReloadableInterface, public IItemWidgetProviderInterface
 {
 	GENERATED_BODY()
 
@@ -63,6 +66,11 @@ public:
 	// Set in Blueprint: USemiAutoFireComponent, UFullAutoFireComponent, or UBurstFireComponent
 	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Components")
 	UFireComponent* FireComponent;
+
+	// Reload component (reload logic and ammo transfer)
+	// Set in Blueprint: UBoxMagazineReloadComponent, UBoltActionReloadComponent, etc.
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Components")
+	UReloadComponent* ReloadComponent = nullptr;
 
 	// FPS Magazine component (attached to FPS mesh "magazine" socket)
 	// Visible only to owner, spawned from MagazineClass
@@ -134,9 +142,8 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Animation")
 	UAnimMontage* ShootMontage;
 
-	// Reload animation montage
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Animation")
-	UAnimMontage* ReloadMontage;
+	// NOTE: Reload montages moved to ReloadComponent (Body/Arms/Legs separation)
+	// Configure reload animations in ReloadComponent Blueprint defaults
 
 	// ============================================
 	// HANDS / IK
@@ -198,6 +205,12 @@ public:
 	// Hip-fire crosshair widget class (shown when not aiming)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|UI")
 	TSubclassOf<UUserWidget> CrossHair;
+
+	// Item widget class for HUD display (bottom-right corner)
+	// Widget shows weapon info: ammo count, magazine capacity
+	// Widget pulls data from weapon via IAmmoConsumerInterface
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|UI")
+	TSubclassOf<UUserWidget> ItemWidgetClass;
 
 protected:
 	/**
@@ -480,6 +493,38 @@ public:
 
 	// Check if current sight wants to hide FPS mesh when aiming
 	virtual bool ShouldHideFPSMeshWhenAiming_Implementation() const override;
+
+	// ============================================
+	// RELOADABLE INTERFACE
+	// ============================================
+
+	/**
+	 * Check if weapon can be reloaded right now
+	 * Delegates to ReloadComponent->CanReload_Internal()
+	 * @return true if reload is possible (magazine not full, not already reloading, etc.)
+	 */
+	virtual bool CanReload_Implementation() const override;
+
+	/**
+	 * Start reload sequence (triggers SERVER RPC)
+	 * Delegates to ReloadComponent->Server_StartReload()
+	 * @param Ctx - Use context with controller, pawn, aim data
+	 */
+	virtual void Reload_Implementation(const FUseContext& Ctx) override;
+
+	/**
+	 * Check if weapon is currently reloading
+	 * Delegates to ReloadComponent->bIsReloading
+	 * @return true if reload is in progress
+	 */
+	virtual bool IsReloading_Implementation() const override;
+
+	// ============================================
+	// ITEM WIDGET PROVIDER INTERFACE
+	// ============================================
+
+	// Get item widget class for HUD display
+	virtual TSubclassOf<UUserWidget> GetItemWidgetClass_Implementation() const override;
 
 	// ============================================
 	// UTILITY METHODS

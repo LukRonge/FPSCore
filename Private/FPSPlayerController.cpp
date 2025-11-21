@@ -195,13 +195,23 @@ void AFPSPlayerController::AddDamageEffect_Implementation()
 	}
 }
 
-void AFPSPlayerController::UpdateActiveWeapon_Implementation(AActor* ActiveWeapon)
+void AFPSPlayerController::UpdateActiveItem_Implementation(AActor* ActiveItem)
 {
 	// Delegate to HUD widget if it implements PlayerHUDInterface
 	AHUD* HUD = GetHUD();
 	if (HUD && HUD->Implements<UPlayerHUDInterface>())
 	{
-		IPlayerHUDInterface::Execute_UpdateActiveWeapon(HUD, ActiveWeapon);
+		IPlayerHUDInterface::Execute_UpdateActiveItem(HUD, ActiveItem);
+	}
+}
+
+void AFPSPlayerController::UpdateInventory_Implementation(const TArray<AActor*>& Items)
+{
+	// Delegate to HUD widget if it implements PlayerHUDInterface
+	AHUD* HUD = GetHUD();
+	if (HUD && HUD->Implements<UPlayerHUDInterface>())
+	{
+		IPlayerHUDInterface::Execute_UpdateInventory(HUD, Items);
 	}
 }
 
