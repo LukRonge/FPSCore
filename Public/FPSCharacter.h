@@ -8,6 +8,7 @@
 #include "Interfaces/ViewPointProviderInterface.h"
 #include "Interfaces/ItemCollectorInterface.h"
 #include "Interfaces/RecoilHandlerInterface.h"
+#include "Interfaces/CharacterMeshProviderInterface.h"
 #include "FPSCharacter.generated.h"
 
 class UInputAction;
@@ -22,7 +23,7 @@ enum class EFPSMovementMode : uint8
 };
 
 UCLASS()
-class FPSCORE_API AFPSCharacter : public ACharacter, public IViewPointProviderInterface, public IItemCollectorInterface, public IRecoilHandlerInterface
+class FPSCORE_API AFPSCharacter : public ACharacter, public IViewPointProviderInterface, public IItemCollectorInterface, public IRecoilHandlerInterface, public ICharacterMeshProviderInterface
 {
 	GENERATED_BODY()
 
@@ -40,6 +41,11 @@ public:
 
 	// IRecoilHandlerInterface implementation
 	virtual void ApplyRecoilKick_Implementation(float RecoilScale) override;
+
+	// ICharacterMeshProviderInterface implementation
+	virtual USkeletalMeshComponent* GetBodyMesh_Implementation() const override;
+	virtual USkeletalMeshComponent* GetArmsMesh_Implementation() const override;
+	virtual USkeletalMeshComponent* GetLegsMesh_Implementation() const override;
 
 protected:
 	virtual void PostInitializeComponents() override;

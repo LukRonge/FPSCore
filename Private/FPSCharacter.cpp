@@ -2444,3 +2444,26 @@ void AFPSCharacter::DisableRagdoll()
 	UE_LOG(LogTemp, Log, TEXT("[RAGDOLL] Ragdoll disabled for %s"), *GetName());
 }
 
+// ============================================
+// ICharacterMeshProviderInterface IMPLEMENTATION
+// ============================================
+
+USkeletalMeshComponent* AFPSCharacter::GetBodyMesh_Implementation() const
+{
+	// Return character's primary mesh (Body, visible to all players)
+	// This is the ACharacter::GetMesh() default mesh component
+	return GetMesh();
+}
+
+USkeletalMeshComponent* AFPSCharacter::GetArmsMesh_Implementation() const
+{
+	// Return first-person arms mesh (visible only to owner)
+	return Arms;
+}
+
+USkeletalMeshComponent* AFPSCharacter::GetLegsMesh_Implementation() const
+{
+	// Return first-person legs mesh (visible only to owner)
+	return Legs;
+}
+

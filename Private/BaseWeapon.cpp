@@ -10,6 +10,7 @@
 #include "BaseSight.h"
 #include "Interfaces/ItemCollectorInterface.h"
 #include "Interfaces/ItemWidgetProviderInterface.h"
+#include "Interfaces/CharacterMeshProviderInterface.h"
 
 ABaseWeapon::ABaseWeapon()
 {
@@ -465,16 +466,54 @@ void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
 	//     UGameplayStatics::PlaySoundAtLocation(GetWorld(), ShootSound, MuzzleLocation);
 	// }
 
-	// 3. Play shoot animation (TODO: Implement)
-	// if (ShootMontage && GetOwner())
-	// {
-	//     APawn* OwnerPawn = Cast<APawn>(GetOwner());
-	//     UAnimInstance* AnimInstance = OwnerPawn->GetMesh()->GetAnimInstance();
-	//     if (AnimInstance)
-	//     {
-	//         AnimInstance->Montage_Play(ShootMontage);
-	//     }
-	// }
+	// 3. Play shoot animation montage on character meshes
+	// ✅ MULTIPLAYER COMPLIANT: Multicast RPC runs on ALL clients
+	// ✅ Each machine plays montage locally (no AnimInstance in RPC params)
+	// ✅ CAPABILITY-BASED: Uses ICharacterMeshProviderInterface (no direct cast to AFPSCharacter)
+	// ✅ Follows same pattern as ReloadComponent::PlayReloadMontages()
+	if (ShootMontage)
+	{
+		// Get weapon owner (character/pawn)
+		AActor* WeaponOwner = GetOwner();
+		if (WeaponOwner && WeaponOwner->Implements<UCharacterMeshProviderInterface>())
+		{
+			// ✅ Get Body mesh via interface (no direct cast!)
+			USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(WeaponOwner);
+			if (BodyMesh)
+			{
+				UAnimInstance* BodyAnimInst = BodyMesh->GetAnimInstance();
+				if (BodyAnimInst)
+				{
+					BodyAnimInst->Montage_Play(ShootMontage);
+					UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Playing Shoot montage on Body"));
+				}
+			}
+
+			// ✅ Get Arms mesh via interface
+			USkeletalMeshComponent* ArmsMesh = ICharacterMeshProviderInterface::Execute_GetArmsMesh(WeaponOwner);
+			if (ArmsMesh)
+			{
+				UAnimInstance* ArmsAnimInst = ArmsMesh->GetAnimInstance();
+				if (ArmsAnimInst)
+				{
+					ArmsAnimInst->Montage_Play(ShootMontage);
+					UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Playing Shoot montage on Arms"));
+				}
+			}
+
+			// ✅ Get Legs mesh via interface
+			USkeletalMeshComponent* LegsMesh = ICharacterMeshProviderInterface::Execute_GetLegsMesh(WeaponOwner);
+			if (LegsMesh)
+			{
+				UAnimInstance* LegsAnimInst = LegsMesh->GetAnimInstance();
+				if (LegsAnimInst)
+				{
+					LegsAnimInst->Montage_Play(ShootMontage);
+					UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Playing Shoot montage on Legs"));
+				}
+			}
+		}
+	}
 
 	// 4. Shell ejection (TODO: Implement)
 }
