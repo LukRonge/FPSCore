@@ -42,11 +42,12 @@ public:
 
 	/**
 	 * Character bone for magazine attachment during reload
-	 * Default: "weapon_r" (right hand socket)
+	 * Default: "weapon_l" (left hand socket)
 	 * Magazine attaches here when detached from weapon
+	 * M4A1 reload: Left hand grabs magazine from weapon and holds it
 	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Reload|Magazine")
-	FName MagazineOutSocketName = "weapon_r";
+	FName MagazineOutSocketName = "weapon_l";
 
 	/**
 	 * Weapon bone for magazine attachment when equipped
@@ -101,11 +102,15 @@ public:
 protected:
 	/**
 	 * Helper: Attach magazine actor to socket
-	 * Handles attachment and transform reset for magazine repositioning
+	 * Handles attachment with Identity transform (socket defines position)
 	 *
 	 * @param Magazine - Magazine actor to attach
 	 * @param Parent - Parent component to attach to (Arms/Body/FPSMesh/TPSMesh)
 	 * @param SocketName - Socket name on parent component
+	 *
+	 * NOTE: Magazine ALWAYS uses Identity relative transform.
+	 *       Socket itself defines correct position/rotation.
+	 *       No offset applied - magazine snaps exactly to socket.
 	 */
 	void AttachMagazineToSocket(AActor* Magazine, USceneComponent* Parent, FName SocketName);
 };

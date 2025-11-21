@@ -32,10 +32,10 @@ void UBoxMagazineReloadComponent::OnMagazineOut()
 		return;
 	}
 
-	// Attach FPS magazine to character Arms socket
+	// Attach FPS magazine to character Arms socket (Identity transform - socket defines position)
 	AttachMagazineToSocket(FPSMag, Character->Arms, MagazineOutSocketName);
 
-	// Attach TPS magazine to character Body socket
+	// Attach TPS magazine to character Body socket (Identity transform - socket defines position)
 	AttachMagazineToSocket(TPSMag, Character->GetMesh(), MagazineOutSocketName);
 
 	UE_LOG(LogTemp, Log, TEXT("BoxMagazineReloadComponent: Magazine detached from weapon, attached to hand"));
@@ -80,6 +80,7 @@ void UBoxMagazineReloadComponent::OnReloadComplete()
 		return;
 	}
 
+	// ✅ CORRECT: Get owner weapon via helper (still uses cast internally, but encapsulated)
 	ABaseWeapon* Weapon = GetOwnerWeapon();
 	if (!Weapon)
 	{
@@ -87,43 +88,52 @@ void UBoxMagazineReloadComponent::OnReloadComplete()
 		return;
 	}
 
-	// Get magazines
-	ABaseMagazine* FPSMag = Cast<ABaseMagazine>(Weapon->FPSMagazineComponent->GetChildActor());
-	ABaseMagazine* TPSMag = Cast<ABaseMagazine>(Weapon->TPSMagazineComponent->GetChildActor());
-
-	if (!FPSMag || !TPSMag)
+	// ✅ CORRECT: Use CurrentMagazine (single source of truth for gameplay)
+	ABaseMagazine* CurrentMag = Weapon->CurrentMagazine;
+	if (!CurrentMag)
 	{
-		UE_LOG(LogTemp, Error, TEXT("BoxMagazineReloadComponent: OnReloadComplete - Missing magazine actors"));
+		UE_LOG(LogTemp, Error, TEXT("BoxMagazineReloadComponent: OnReloadComplete - CurrentMagazine is null"));
 		return;
 	}
 
 	// Calculate ammo needed to fill magazine
-	int32 AmmoNeeded = FPSMag->MaxCapacity - FPSMag->CurrentAmmo;
+	int32 AmmoNeeded = CurrentMag->MaxCapacity - CurrentMag->CurrentAmmo;
+
+	UE_LOG(LogTemp, Log, TEXT("BoxMagazineReloadComponent: OnReloadComplete - CurrentAmmo: %d/%d, AmmoNeeded: %d"),
+		CurrentMag->CurrentAmmo, CurrentMag->MaxCapacity, AmmoNeeded);
 
 	if (AmmoNeeded <= 0)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("BoxMagazineReloadComponent: OnReloadComplete - Magazine already full"));
+		UE_LOG(LogTemp, Warning, TEXT("BoxMagazineReloadComponent: OnReloadComplete - Magazine already full (CurrentAmmo: %d, MaxCapacity: %d)"),
+			CurrentMag->CurrentAmmo, CurrentMag->MaxCapacity);
 		bIsReloading = false;
 		return;
 	}
 
-	// TODO: Check reserve ammo (future feature)
-	// int32 ReserveAvailable = GetReserveAmmo();
-	// AmmoNeeded = FMath::Min(AmmoNeeded, ReserveAvailable);
+	// TODO: Check reserve ammo via IAmmoProviderInterface (future feature)
+	// AActor* ReserveAmmoProvider = GetReserveAmmoProvider();
+	// if (ReserveAmmoProvider && ReserveAmmoProvider->Implements<UAmmoProviderInterface>())
+	// {
+	//     int32 Available = IAmmoProviderInterface::Execute_GetAvailableAmmo(ReserveAmmoProvider);
+	//     AmmoNeeded = FMath::Min(AmmoNeeded, Available);
+	// }
 
-	// Transfer ammo (Magazine->CurrentAmmo is REPLICATED)
-	// NOTE: FPS and TPS magazines are separate actors with separate CurrentAmmo
-	// Both must be updated to keep visual sync across all clients
-	int32 AddedFPS = FPSMag->AddAmmo(AmmoNeeded);
-	int32 AddedTPS = TPSMag->AddAmmo(AmmoNeeded);
+	// ✅ CORRECT: Add ammo to CurrentMagazine (single source of truth)
+	// CurrentMagazine->CurrentAmmo is REPLICATED - will sync to all clients
+	int32 AddedAmmo = CurrentMag->AddAmmo(AmmoNeeded);
 
-	// TODO: Subtract from reserve ammo (future feature)
-	// SubtractReserveAmmo(AddedFPS);
+	// ✅ CORRECT: Synchronize visual magazines (FPS/TPS) with gameplay magazine
+	// This ensures visual consistency across all clients
+	Weapon->SyncVisualMagazines();
+
+	// TODO: Subtract from reserve ammo via IAmmoProviderInterface (future feature)
+	// IAmmoProviderInterface::Execute_TakeAmmo(ReserveAmmoProvider, AddedAmmo);
 
 	// Clear reload state (replicates to clients)
 	bIsReloading = false;
 
-	UE_LOG(LogTemp, Log, TEXT("BoxMagazineReloadComponent: Reload complete - Added %d rounds to magazine"), AddedFPS);
+	UE_LOG(LogTemp, Log, TEXT("BoxMagazineReloadComponent: Reload complete - Added %d rounds (new total: %d/%d)"),
+		AddedAmmo, CurrentMag->CurrentAmmo, CurrentMag->MaxCapacity);
 }
 
 // ============================================
@@ -152,8 +162,11 @@ void UBoxMagazineReloadComponent::AttachMagazineToSocket(AActor* Magazine, UScen
 		SocketName
 	);
 
-	// Reset relative transform to Identity (aligns with socket transform)
+	// ✅ CORRECT: ALWAYS use Identity transform
+	// Socket itself defines the correct position and rotation
+	// Magazine has NO relative offset - it snaps exactly to socket transform
 	MagRoot->SetRelativeTransform(FTransform::Identity);
 
-	UE_LOG(LogTemp, Verbose, TEXT("BoxMagazineReloadComponent: Attached magazine to socket '%s'"), *SocketName.ToString());
+	UE_LOG(LogTemp, Verbose, TEXT("BoxMagazineReloadComponent: Attached magazine to socket '%s' (Identity transform)"),
+		*SocketName.ToString());
 }

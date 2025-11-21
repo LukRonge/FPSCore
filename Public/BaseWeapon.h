@@ -260,9 +260,8 @@ public:
 	// STATE
 	// ============================================
 
-	// Is weapon currently reloading (runtime state, NOT replicated)
-	UPROPERTY(BlueprintReadWrite, Category = "Weapon|State")
-	bool IsReload = false;
+	// NOTE: Reload state moved to ReloadComponent->bIsReloading (REPLICATED)
+	// Use IReloadableInterface::IsReloading() to check reload state
 
 	// ============================================
 	// MAGAZINE SYSTEM
@@ -542,6 +541,22 @@ public:
 	// Get TPS mesh component (root, visible to others)
 	UFUNCTION(BlueprintPure, Category = "Weapon|Mesh")
 	USkeletalMeshComponent* GetTPSMesh() const { return TPSMesh; }
+
+	/**
+	 * Synchronize visual magazines (FPS/TPS) with CurrentMagazine (authoritative gameplay state)
+	 *
+	 * ARCHITECTURE:
+	 * - CurrentMagazine = Single source of truth (REPLICATED, SERVER authoritative)
+	 * - FPS/TPS magazines = Visual representations only
+	 * - This method syncs visual magazines when CurrentMagazine->CurrentAmmo changes
+	 *
+	 * Called from:
+	 * - BoxMagazineReloadComponent::OnReloadComplete() after reload
+	 * - BaseWeapon::OnRep_CurrentMagazine() when magazine replicates (future)
+	 * - Any gameplay code that modifies CurrentMagazine ammo count
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Weapon|Ammo")
+	void SyncVisualMagazines();
 
 private:
 	// ============================================

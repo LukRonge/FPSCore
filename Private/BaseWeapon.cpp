@@ -317,7 +317,12 @@ void ABaseWeapon::OnUnequipped_Implementation()
 	// Visual state cleanup is handled by FPSCharacter::DetachItemMeshes()
 
 	IsAiming = false;
-	IsReload = false;
+
+	// Cancel reload if in progress
+	if (ReloadComponent && ReloadComponent->bIsReloading)
+	{
+		ReloadComponent->Server_CancelReload();
+	}
 
 	// TODO: Weapon-specific unequip behavior (SERVER ONLY):
 	// - Stop active timers (fire rate, reload, etc.)
@@ -550,8 +555,8 @@ int32 ABaseWeapon::ConsumeAmmo_Implementation(int32 Requested, const FUseContext
 		return 0;
 	}
 
-	// Check if reloading
-	if (IsReload)
+	// Check if reloading (use ReloadComponent->bIsReloading instead of obsolete IsReload)
+	if (ReloadComponent && ReloadComponent->bIsReloading)
 	{
 		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::ConsumeAmmo() - Weapon is reloading"));
 		return 0;
@@ -809,4 +814,43 @@ bool ABaseWeapon::IsReloading_Implementation() const
 TSubclassOf<UUserWidget> ABaseWeapon::GetItemWidgetClass_Implementation() const
 {
 	return ItemWidgetClass;
+}
+
+// ============================================
+// UTILITY METHODS
+// ============================================
+
+void ABaseWeapon::SyncVisualMagazines()
+{
+	// ✅ CORRECT: Synchronize visual magazines with CurrentMagazine (single source of truth)
+	//
+	// ARCHITECTURE:
+	// CurrentMagazine (TPSMagazineComponent->GetChildActor()) = Authoritative gameplay state (REPLICATED)
+	// FPSMagazineComponent->GetChildActor() = Visual representation for Arms (FirstPerson)
+	// TPSMagazineComponent->GetChildActor() = Visual representation for Body (ThirdPerson)
+	//
+	// CurrentMagazine->CurrentAmmo is REPLICATED, but FPS/TPS visual magazines are separate actors
+	// We must manually sync their CurrentAmmo for visual consistency
+
+	if (!CurrentMagazine)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::SyncVisualMagazines() - CurrentMagazine is null"));
+		return;
+	}
+
+	// Sync FPS magazine (visual only, for Arms mesh)
+	if (ABaseMagazine* FPSMag = Cast<ABaseMagazine>(FPSMagazineComponent->GetChildActor()))
+	{
+		FPSMag->CurrentAmmo = CurrentMagazine->CurrentAmmo;
+		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::SyncVisualMagazines() - Synced FPS magazine: %d/%d"),
+			FPSMag->CurrentAmmo, FPSMag->MaxCapacity);
+	}
+
+	// Sync TPS magazine (visual only, for Body mesh)
+	if (ABaseMagazine* TPSMag = Cast<ABaseMagazine>(TPSMagazineComponent->GetChildActor()))
+	{
+		TPSMag->CurrentAmmo = CurrentMagazine->CurrentAmmo;
+		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::SyncVisualMagazines() - Synced TPS magazine: %d/%d"),
+			TPSMag->CurrentAmmo, TPSMag->MaxCapacity);
+	}
 }

@@ -31,19 +31,18 @@ void UReloadComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 
 bool UReloadComponent::CanReload_Internal() const
 {
-	// Get owner weapon
-	ABaseWeapon* Weapon = GetOwnerWeapon();
-	if (!Weapon)
+	// ✅ CORRECT: Use GetOwner() - no direct cast
+	AActor* OwnerActor = GetOwner();
+	if (!OwnerActor)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("❌ CanReload_Internal - No owner weapon"));
+		UE_LOG(LogTemp, Warning, TEXT("❌ CanReload_Internal - No owner actor"));
 		return false;
 	}
 
-	// Get owner character
-	AFPSCharacter* Character = GetOwnerCharacter();
-	if (!Character)
+	// ✅ CORRECT: Check if owner implements IAmmoConsumerInterface (interface check, no cast)
+	if (!OwnerActor->Implements<UAmmoConsumerInterface>())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("❌ CanReload_Internal - No owner character"));
+		UE_LOG(LogTemp, Warning, TEXT("❌ CanReload_Internal - Owner does not implement IAmmoConsumerInterface"));
 		return false;
 	}
 
@@ -54,32 +53,21 @@ bool UReloadComponent::CanReload_Internal() const
 		return false;
 	}
 
-	// Check character state (CanReload)
-	if (!Character->CanReload())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("❌ CanReload_Internal - Character->CanReload() returned false"));
-		return false;
-	}
-
-	// Get magazine from CurrentMagazine (the authoritative magazine used for ammo consumption)
-	ABaseMagazine* Magazine = Weapon->CurrentMagazine;
-	if (!Magazine)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("❌ CanReload_Internal - No magazine (CurrentMagazine is nullptr)"));
-		return false;
-	}
+	// ✅ CORRECT: Get ammo info via IAmmoConsumerInterface (no direct Magazine access)
+	int32 CurrentAmmo = IAmmoConsumerInterface::Execute_GetClip(OwnerActor);
+	int32 MaxAmmo = IAmmoConsumerInterface::Execute_GetClipSize(OwnerActor);
 
 	// Check if magazine needs reload
-	if (Magazine->CurrentAmmo >= Magazine->MaxCapacity)
+	if (CurrentAmmo >= MaxAmmo)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("❌ CanReload_Internal - Magazine is full (CurrentAmmo: %d / MaxCapacity: %d)"), Magazine->CurrentAmmo, Magazine->MaxCapacity);
+		UE_LOG(LogTemp, Warning, TEXT("❌ CanReload_Internal - Magazine is full (CurrentAmmo: %d / MaxAmmo: %d)"), CurrentAmmo, MaxAmmo);
 		return false;
 	}
 
-	// TODO: Check reserve ammo availability (future feature)
-	// if (ReserveAmmo <= 0) return false;
+	// TODO: Check reserve ammo availability via IAmmoProviderInterface (future feature)
+	// if (GetTotalAmmo() <= 0) return false;
 
-	UE_LOG(LogTemp, Log, TEXT("✅ CanReload_Internal - All checks passed! Magazine: %d/%d"), Magazine->CurrentAmmo, Magazine->MaxCapacity);
+	UE_LOG(LogTemp, Log, TEXT("✅ CanReload_Internal - All checks passed! Magazine: %d/%d"), CurrentAmmo, MaxAmmo);
 	return true;
 }
 
