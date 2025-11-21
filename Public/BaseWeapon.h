@@ -139,6 +139,9 @@ public:
 	TSubclassOf<UAnimInstance> AnimLayer;
 
 	// Shooting animation montage
+	// IMPORTANT: Shoot montages use slot "DefaultGroup.Shoot"
+	// This allows shooting and reloading to coexist (Reload uses "DefaultGroup.UpperBody")
+	// Played on Body, Arms, and Legs meshes via Multicast_PlayMuzzleFlash()
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Animation")
 	UAnimMontage* ShootMontage;
 

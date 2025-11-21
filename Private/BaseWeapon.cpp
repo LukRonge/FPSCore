@@ -471,6 +471,8 @@ void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
 	// ✅ Each machine plays montage locally (no AnimInstance in RPC params)
 	// ✅ CAPABILITY-BASED: Uses ICharacterMeshProviderInterface (no direct cast to AFPSCharacter)
 	// ✅ Follows same pattern as ReloadComponent::PlayReloadMontages()
+	// ✅ SLOT: ShootMontage uses "DefaultGroup.Shoot" (different from Reload's "DefaultGroup.UpperBody")
+	//    This allows shooting and reloading to coexist without conflicts
 	if (ShootMontage)
 	{
 		// Get weapon owner (character/pawn)

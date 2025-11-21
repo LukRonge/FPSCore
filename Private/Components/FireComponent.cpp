@@ -8,6 +8,8 @@
 #include "Interfaces/AmmoConsumerInterface.h"
 #include "Interfaces/HoldableInterface.h"
 #include "Interfaces/RecoilHandlerInterface.h"
+#include "Interfaces/CharacterMeshProviderInterface.h"
+#include "Animation/AnimInstance.h"
 
 UFireComponent::UFireComponent()
 {
@@ -66,6 +68,24 @@ bool UFireComponent::CanFire() const
 	{
 		UE_LOG(LogTemp, Warning, TEXT("FireComponent::CanFire() - Owner does not implement IAmmoConsumerInterface!"));
 		return false;
+	}
+
+	// ✅ Check if "Shoot" animation slot is already active
+	// This prevents overlapping shoot montages and ensures clean animation playback
+	// ShootMontage uses slot "DefaultGroup.Shoot" (different from Reload's "DefaultGroup.UpperBody")
+	AActor* CharacterOwner = WeaponActor ? WeaponActor->GetOwner() : nullptr;
+	if (CharacterOwner && CharacterOwner->Implements<UCharacterMeshProviderInterface>())
+	{
+		USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(CharacterOwner);
+		if (BodyMesh)
+		{
+			UAnimInstance* AnimInst = BodyMesh->GetAnimInstance();
+			if (AnimInst && AnimInst->IsSlotActive("Shoot"))
+			{
+				UE_LOG(LogTemp, Verbose, TEXT("FireComponent::CanFire() - Shoot slot already active"));
+				return false;
+			}
+		}
 	}
 
 	return true;
