@@ -6,6 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "Core/AmmoCaliberTypes.h"
 #include "Components/PrimitiveComponent.h"
+#include "Interfaces/AmmoProviderInterface.h"
 #include "BaseMagazine.generated.h"
 
 /**
@@ -16,7 +17,7 @@
  * Visualization and behavior should be handled by ActorComponents
  */
 UCLASS()
-class FPSCORE_API ABaseMagazine : public AActor
+class FPSCORE_API ABaseMagazine : public AActor, public IAmmoProviderInterface
 {
 	GENERATED_BODY()
 
@@ -100,4 +101,20 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Magazine")
 	void InitFPSType();
+
+	// ============================================
+	// AMMO PROVIDER INTERFACE
+	// ============================================
+
+	// Get current ammo in magazine
+	virtual int32 GetCurrentAmmo_Implementation() const override { return CurrentAmmo; }
+
+	// Set current ammo in magazine
+	virtual void SetCurrentAmmo_Implementation(int32 NewAmmo) override { CurrentAmmo = FMath::Clamp(NewAmmo, 0, MaxCapacity); }
+
+	// Add ammo to magazine and return actual amount added
+	virtual int32 AddAmmoToProvider_Implementation(int32 Amount) override { return AddAmmo(Amount); }
+
+	// Get available ammo (same as current for magazine)
+	virtual int32 GetAvailableAmmo_Implementation() const override { return CurrentAmmo; }
 };

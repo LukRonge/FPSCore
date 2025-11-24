@@ -458,11 +458,21 @@ void AFPSCharacter::Client_OnPossessed_Implementation()
 
 	// NOTE: UpdateItemAnimLayer(nullptr) is already called in BeginPlay() on ALL machines
 	// No need to call it again here (would be redundant)
-	AFPSPlayerController* PlayerController = Cast<AFPSPlayerController>(GetController());
-	if (PlayerController)
+
+	// Setup input mapping and view target on owning client
+	// Cast to AFPSPlayerController is acceptable here - this is framework-level code
+	// where FPSCharacter is specifically designed to work with FPSPlayerController
+	// SetupInputMapping() is controller-specific initialization that cannot be abstracted
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (PC)
 	{
-		PlayerController->SetupInputMapping();
-		PlayerController->SetViewTarget(this);
+		PC->SetViewTarget(this);
+
+		// Setup input mapping (FPSPlayerController specific)
+		if (AFPSPlayerController* FPSPC = Cast<AFPSPlayerController>(PC))
+		{
+			FPSPC->SetupInputMapping();
+		}
 	}
 }
 

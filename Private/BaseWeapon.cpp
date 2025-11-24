@@ -11,6 +11,7 @@
 #include "Interfaces/ItemCollectorInterface.h"
 #include "Interfaces/ItemWidgetProviderInterface.h"
 #include "Interfaces/CharacterMeshProviderInterface.h"
+#include "Interfaces/AmmoProviderInterface.h"
 
 ABaseWeapon::ABaseWeapon()
 {
@@ -88,6 +89,8 @@ void ABaseWeapon::BeginPlay()
 
 	if (HasAuthority() && TPSMagazineComponent->GetChildActor())
 	{
+		// Use direct cast here - CurrentMagazine is authoritative replicated reference
+		// This is internal initialization, not external access pattern
 		CurrentMagazine = Cast<ABaseMagazine>(TPSMagazineComponent->GetChildActor());
 
 		if (FireComponent && BallisticsComponent)
@@ -307,7 +310,9 @@ void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
 	{
 		USkeletalMeshComponent* MuzzleMesh = nullptr;
 
-		APawn* OwnerPawn = Cast<APawn>(GetOwner());
+		// Check if owner is locally controlled pawn to select FPS or TPS mesh
+		AActor* OwnerActor = GetOwner();
+		APawn* OwnerPawn = OwnerActor ? Cast<APawn>(OwnerActor) : nullptr;
 		if (OwnerPawn && OwnerPawn->IsLocallyControlled())
 		{
 			MuzzleMesh = FPSMesh;
@@ -638,13 +643,19 @@ void ABaseWeapon::SyncVisualMagazines()
 {
 	if (!CurrentMagazine) return;
 
-	if (ABaseMagazine* FPSMag = Cast<ABaseMagazine>(FPSMagazineComponent->GetChildActor()))
+	int32 AuthoritativeAmmo = CurrentMagazine->CurrentAmmo;
+
+	// Sync FPS magazine via interface
+	AActor* FPSMagActor = FPSMagazineComponent ? FPSMagazineComponent->GetChildActor() : nullptr;
+	if (FPSMagActor && FPSMagActor->Implements<UAmmoProviderInterface>())
 	{
-		FPSMag->CurrentAmmo = CurrentMagazine->CurrentAmmo;
+		IAmmoProviderInterface::Execute_SetCurrentAmmo(FPSMagActor, AuthoritativeAmmo);
 	}
 
-	if (ABaseMagazine* TPSMag = Cast<ABaseMagazine>(TPSMagazineComponent->GetChildActor()))
+	// Sync TPS magazine via interface
+	AActor* TPSMagActor = TPSMagazineComponent ? TPSMagazineComponent->GetChildActor() : nullptr;
+	if (TPSMagActor && TPSMagActor->Implements<UAmmoProviderInterface>())
 	{
-		TPSMag->CurrentAmmo = CurrentMagazine->CurrentAmmo;
+		IAmmoProviderInterface::Execute_SetCurrentAmmo(TPSMagActor, AuthoritativeAmmo);
 	}
 }

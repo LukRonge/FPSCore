@@ -40,4 +40,19 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "AmmoProvider")
 	int32 GetAvailableAmmo() const;
 	virtual int32 GetAvailableAmmo_Implementation() const { return 0; }
+
+	// Get current ammo in provider (for magazine sync operations)
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "AmmoProvider")
+	int32 GetCurrentAmmo() const;
+	virtual int32 GetCurrentAmmo_Implementation() const { return 0; }
+
+	// Set current ammo in provider (for magazine sync operations)
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "AmmoProvider")
+	void SetCurrentAmmo(int32 NewAmmo);
+	virtual void SetCurrentAmmo_Implementation(int32 NewAmmo) { }
+
+	// Add ammo to provider and return actual amount added
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "AmmoProvider")
+	int32 AddAmmoToProvider(int32 Amount);
+	virtual int32 AddAmmoToProvider_Implementation(int32 Amount) { return 0; }
 };

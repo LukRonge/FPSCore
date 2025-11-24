@@ -5,7 +5,7 @@
 #include "Interfaces/HoldableInterface.h"
 #include "Interfaces/CharacterMeshProviderInterface.h"
 #include "Interfaces/AmmoConsumerInterface.h"
-#include "BaseMagazine.h"
+#include "Interfaces/AmmoProviderInterface.h"
 #include "Components/SkeletalMeshComponent.h"
 
 void UBoxMagazineReloadComponent::OnMagazineOut()
@@ -82,14 +82,17 @@ void UBoxMagazineReloadComponent::OnReloadComplete()
 	if (OwnerItem->Implements<UReloadableInterface>())
 	{
 		AActor* TPSMagActor = IReloadableInterface::Execute_GetTPSMagazineActor(OwnerItem);
-		if (ABaseMagazine* CurrentMag = Cast<ABaseMagazine>(TPSMagActor))
+		if (TPSMagActor && TPSMagActor->Implements<UAmmoProviderInterface>())
 		{
-			CurrentMag->AddAmmo(AmmoNeeded);
+			// Add ammo via interface
+			IAmmoProviderInterface::Execute_AddAmmoToProvider(TPSMagActor, AmmoNeeded);
 
+			// Sync FPS magazine with TPS magazine ammo count
+			int32 NewAmmoCount = IAmmoProviderInterface::Execute_GetCurrentAmmo(TPSMagActor);
 			AActor* FPSMagActor = IReloadableInterface::Execute_GetFPSMagazineActor(OwnerItem);
-			if (ABaseMagazine* FPSMag = Cast<ABaseMagazine>(FPSMagActor))
+			if (FPSMagActor && FPSMagActor->Implements<UAmmoProviderInterface>())
 			{
-				FPSMag->CurrentAmmo = CurrentMag->CurrentAmmo;
+				IAmmoProviderInterface::Execute_SetCurrentAmmo(FPSMagActor, NewAmmoCount);
 			}
 		}
 	}

@@ -212,6 +212,8 @@ void UFireComponent::Fire()
 	{
 		FUseContext Ctx;
 		Ctx.Controller = WeaponOwner->GetInstigatorController();
+		// Cast to APawn is required by FUseContext structure (Pawn field is APawn*)
+		// This is a framework requirement, not an architectural violation
 		Ctx.Pawn = Cast<APawn>(WeaponOwner);
 
 		int32 Consumed = IAmmoConsumerInterface::Execute_ConsumeAmmo(WeaponActor, 1, Ctx);
