@@ -33,46 +33,35 @@ void UFireComponent::BeginPlay()
 
 void UFireComponent::TriggerPulled()
 {
-	// Base implementation - override in subclasses
-	UE_LOG(LogTemp, Warning, TEXT("FireComponent::TriggerPulled() - Called on abstract base class! Override in subclass."));
 }
 
 void UFireComponent::TriggerReleased()
 {
-	// Base implementation - override in subclasses
 	bTriggerHeld = false;
 }
 
 bool UFireComponent::CanFire() const
 {
-	// Check ballistics component is valid
 	if (!BallisticsComponent)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FireComponent::CanFire() - BallisticsComponent is null!"));
 		return false;
 	}
 
-	// ✅ Check ammo via IAmmoConsumerInterface
-	AActor* WeaponActor = GetOwner(); // BaseWeapon
+	AActor* WeaponActor = GetOwner();
 	if (WeaponActor && WeaponActor->Implements<UAmmoConsumerInterface>())
 	{
 		int32 CurrentAmmo = IAmmoConsumerInterface::Execute_GetClip(WeaponActor);
 
 		if (CurrentAmmo <= 0)
 		{
-			UE_LOG(LogTemp, Verbose, TEXT("FireComponent::CanFire() - No ammo (Clip: %d)"), CurrentAmmo);
 			return false;
 		}
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FireComponent::CanFire() - Owner does not implement IAmmoConsumerInterface!"));
 		return false;
 	}
 
-	// ✅ Check if "Shoot" animation slot is already active
-	// This prevents overlapping shoot montages and ensures clean animation playback
-	// ShootMontage uses slot "DefaultGroup.Shoot" (different from Reload's "DefaultGroup.UpperBody")
 	AActor* CharacterOwner = WeaponActor ? WeaponActor->GetOwner() : nullptr;
 	if (CharacterOwner && CharacterOwner->Implements<UCharacterMeshProviderInterface>())
 	{
@@ -82,7 +71,6 @@ bool UFireComponent::CanFire() const
 			UAnimInstance* AnimInst = BodyMesh->GetAnimInstance();
 			if (AnimInst && AnimInst->IsSlotActive("Shoot"))
 			{
-				UE_LOG(LogTemp, Verbose, TEXT("FireComponent::CanFire() - Shoot slot already active"));
 				return false;
 			}
 		}
@@ -184,60 +172,42 @@ FVector UFireComponent::ApplySpread(FVector Direction) const
 
 void UFireComponent::Fire()
 {
-	// SERVER ONLY
 	if (!GetOwner()->HasAuthority())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FireComponent::Fire() - Called on client! Fire logic runs on server only."));
 		return;
 	}
 
-	// Check can fire
 	if (!CanFire())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FireComponent::Fire() - CanFire() returned false!"));
 		return;
 	}
 
-	// Get weapon owner (character/pawn)
-	// GetOwner() returns BaseWeapon, then we get the weapon's owner
 	AActor* WeaponActor = GetOwner();
 	if (!WeaponActor)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FireComponent::Fire() - WeaponActor is null!"));
 		return;
 	}
 
 	AActor* WeaponOwner = WeaponActor->GetOwner();
 	if (!WeaponOwner)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FireComponent::Fire() - Weapon has no owner!"));
 		return;
 	}
 
-	// Get view center point (camera/eyes location) and direction
 	FVector ViewLocation;
 	FRotator ViewRotation;
 
-	// ✅ Component-based view point retrieval
-	// Check if owner implements IViewPointProvider interface (e.g., AFPSCharacter)
 	if (WeaponOwner->Implements<UViewPointProviderInterface>())
 	{
-		// ✅ Use interface to get ACCURATE view point (includes custom replicated Pitch)
 		IViewPointProviderInterface::Execute_GetShootingViewPoint(WeaponOwner, ViewLocation, ViewRotation);
 	}
 	else
 	{
-		// ❌ Fallback: Use default GetActorEyesViewPoint() (may have incorrect Pitch)
 		WeaponOwner->GetActorEyesViewPoint(ViewLocation, ViewRotation);
-
-		UE_LOG(LogTemp, Warning, TEXT("FireComponent::Fire() - Owner '%s' does not implement IViewPointProvider!"),
-			*WeaponOwner->GetName());
 	}
 
-	// Convert rotation to direction vector
 	FVector ViewDirection = ViewRotation.Vector();
 
-	// 1. Consume ammo via IAmmoConsumerInterface
 	if (WeaponActor->Implements<UAmmoConsumerInterface>())
 	{
 		FUseContext Ctx;
@@ -248,27 +218,19 @@ void UFireComponent::Fire()
 
 		if (Consumed <= 0)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("FireComponent::Fire() - Failed to consume ammo!"));
 			return;
 		}
 	}
 	else
 	{
-		UE_LOG(LogTemp, Error, TEXT("FireComponent::Fire() - Owner does not implement IAmmoConsumerInterface!"));
 		return;
 	}
 
-	// 2. Apply spread to direction
 	FVector SpreadDirection = ApplySpread(ViewDirection);
 
-	// 3. Call BallisticsComponent to shoot
 	if (BallisticsComponent)
 	{
 		BallisticsComponent->Shoot(ViewLocation, SpreadDirection);
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("FireComponent::Fire() - BallisticsComponent is null!"));
 	}
 
 	// 4. Apply recoil
@@ -277,40 +239,25 @@ void UFireComponent::Fire()
 
 void UFireComponent::ApplyRecoil()
 {
-	// SERVER ONLY (called from Fire())
 	if (!GetOwner()->HasAuthority())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FireComponent::ApplyRecoil() - Called on client! Recoil applies on server only."));
 		return;
 	}
 
-	// Get weapon owner (Character/Pawn)
-	AActor* WeaponActor = GetOwner();  // BaseWeapon
+	AActor* WeaponActor = GetOwner();
 	if (!WeaponActor)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FireComponent::ApplyRecoil() - WeaponActor is null!"));
 		return;
 	}
 
-	AActor* WeaponOwner = WeaponActor->GetOwner();  // Character/Pawn
+	AActor* WeaponOwner = WeaponActor->GetOwner();
 	if (!WeaponOwner)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FireComponent::ApplyRecoil() - Weapon has no owner!"));
 		return;
 	}
 
-	// ✅ Interface communication (NO cast to AFPSCharacter!)
-	// Follows same pattern as IBallisticsHandlerInterface
 	if (WeaponOwner->Implements<URecoilHandlerInterface>())
 	{
-		// Call interface method - server will broadcast to all clients
 		IRecoilHandlerInterface::Execute_ApplyRecoilKick(WeaponOwner, RecoilScale);
-
-		UE_LOG(LogTemp, Verbose, TEXT("FireComponent::ApplyRecoil() - Recoil applied via interface: Scale=%.2f"), RecoilScale);
-	}
-	else
-	{
-		UE_LOG(LogTemp, Warning, TEXT("FireComponent::ApplyRecoil() - Owner '%s' does not implement IRecoilHandlerInterface!"),
-			*WeaponOwner->GetName());
 	}
 }

@@ -54,9 +54,14 @@ public:
 	// Called on Server + Clients (owner replicates automatically)
 	virtual void SetOwner(AActor* NewOwner) override;
 
+protected:
 	// ============================================
-	// COMPONENTS
+	// COMPONENTS (PROTECTED - use interfaces for external access)
 	// ============================================
+	// ENCAPSULATION: External code should access via interfaces:
+	// - IReloadableInterface::GetReloadComponent()
+	// - IReloadableInterface::GetFPSMagazineActor() / GetTPSMagazineActor()
+	// - IHoldableInterface::GetFPSMeshComponent() / GetTPSMeshComponent()
 
 	// Ballistics component (pure ballistic physics and projectile spawning)
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
@@ -69,16 +74,19 @@ public:
 
 	// Reload component (reload logic and ammo transfer)
 	// Set in Blueprint: UBoxMagazineReloadComponent, UBoltActionReloadComponent, etc.
+	// External access: IReloadableInterface::Execute_GetReloadComponent()
 	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Components")
 	UReloadComponent* ReloadComponent = nullptr;
 
 	// FPS Magazine component (attached to FPS mesh "magazine" socket)
 	// Visible only to owner, spawned from MagazineClass
+	// External access: IReloadableInterface::Execute_GetFPSMagazineActor()
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
 	UChildActorComponent* FPSMagazineComponent;
 
 	// TPS Magazine component (attached to TPS mesh "magazine" socket)
 	// Visible to others, spawned from MagazineClass
+	// External access: IReloadableInterface::Execute_GetTPSMagazineActor()
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
 	UChildActorComponent* TPSMagazineComponent;
 
@@ -91,6 +99,8 @@ public:
 	// Visible to others, spawned from CurrentSightClass
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
 	UChildActorComponent* TPSSightComponent;
+
+public:
 
 	// ============================================
 	// DUAL-MESH SYSTEM (FPS + TPS)
@@ -520,6 +530,24 @@ public:
 	 * @return true if reload is in progress
 	 */
 	virtual bool IsReloading_Implementation() const override;
+
+	/**
+	 * Get FPS magazine actor (visual representation for first-person)
+	 * @return FPS magazine actor or nullptr if not available
+	 */
+	virtual AActor* GetFPSMagazineActor_Implementation() const override;
+
+	/**
+	 * Get TPS magazine actor (visual representation for third-person)
+	 * @return TPS magazine actor or nullptr if not available
+	 */
+	virtual AActor* GetTPSMagazineActor_Implementation() const override;
+
+	/**
+	 * Get ReloadComponent from this weapon
+	 * @return ReloadComponent or nullptr if not available
+	 */
+	virtual UReloadComponent* GetReloadComponent_Implementation() const override;
 
 	// ============================================
 	// ITEM WIDGET PROVIDER INTERFACE

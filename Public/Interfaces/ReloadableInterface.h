@@ -39,4 +39,33 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Reloadable")
 	bool IsReloading() const;
 	virtual bool IsReloading_Implementation() const { return false; }
+
+	// ============================================
+	// MAGAZINE ACCESS (for AnimNotifies and ReloadComponent subclasses)
+	// ============================================
+
+	/**
+	 * Get FPS magazine actor (visual representation for first-person)
+	 * @return FPS magazine actor or nullptr if not available
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Reloadable|Magazine")
+	AActor* GetFPSMagazineActor() const;
+	virtual AActor* GetFPSMagazineActor_Implementation() const { return nullptr; }
+
+	/**
+	 * Get TPS magazine actor (visual representation for third-person)
+	 * @return TPS magazine actor or nullptr if not available
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Reloadable|Magazine")
+	AActor* GetTPSMagazineActor() const;
+	virtual AActor* GetTPSMagazineActor_Implementation() const { return nullptr; }
+
+	/**
+	 * Get ReloadComponent from this reloadable item
+	 * Used by AnimNotifies to trigger OnMagazineOut/OnMagazineIn callbacks
+	 * @return ReloadComponent or nullptr if not available
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Reloadable|Component")
+	class UReloadComponent* GetReloadComponent() const;
+	virtual class UReloadComponent* GetReloadComponent_Implementation() const { return nullptr; }
 };

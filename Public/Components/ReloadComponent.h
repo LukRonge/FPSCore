@@ -5,10 +5,10 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Core/InteractionContext.h"
+#include "Interfaces/AmmoConsumerInterface.h"
+#include "Interfaces/CharacterMeshProviderInterface.h"
 #include "ReloadComponent.generated.h"
 
-class ABaseWeapon;
-class AFPSCharacter;
 class UAnimMontage;
 
 /**
@@ -184,20 +184,20 @@ public:
 
 protected:
 	// ============================================
-	// HELPER FUNCTIONS
+	// HELPER FUNCTIONS (INTERFACE-BASED)
 	// ============================================
 
 	/**
-	 * Get owner weapon (this component is attached to ABaseWeapon)
-	 * @return Owner weapon or nullptr if not attached to weapon
+	 * Get owner actor (item this component is attached to)
+	 * Uses GetOwner() - no casting, just returns the owner AActor*
+	 * @return Owner actor or nullptr if not attached
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Reload")
-	ABaseWeapon* GetOwnerWeapon() const;
+	AActor* GetOwnerItem() const { return GetOwner(); }
 
 	/**
-	 * Get character owner (weapon owner is AFPSCharacter)
-	 * @return Character owner or nullptr if weapon has no owner
+	 * Get character owner actor (weapon owner)
+	 * Uses GetOwner()->GetOwner() chain - no casting
+	 * @return Character actor or nullptr if weapon has no owner
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Reload")
-	AFPSCharacter* GetOwnerCharacter() const;
+	AActor* GetOwnerCharacterActor() const;
 };

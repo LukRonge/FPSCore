@@ -26,13 +26,11 @@ void UBallisticsComponent::Shoot(FVector Location, FVector Direction)
 {
 	if (!GetOwner()->HasAuthority())
 	{
-		UE_LOG(LogTemp, Error, TEXT("[BALLISTICS] Called on CLIENT! Projectiles spawn on server only."));
 		return;
 	}
 
 	if (!CurrentAmmoType)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[BALLISTICS] No CurrentAmmoType set! Call InitAmmoType() first."));
 		return;
 	}
 
@@ -68,10 +66,8 @@ void UBallisticsComponent::Shoot(FVector Location, FVector Direction)
 		TraceParams
 	);
 
-	// Process OVERLAP hits even if bHit=false (no BLOCK collision)
 	if (HitResults.Num() == 0)
 	{
-		UE_LOG(LogTemp, Verbose, TEXT("[BALLISTICS] No hits detected - trace distance: %.2f meters"), (End - Location).Size() / 100.0f);
 		return;
 	}
 
@@ -89,14 +85,11 @@ void UBallisticsComponent::Shoot(FVector Location, FVector Direction)
 
 		if (!bContinue)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[KE] Bullet STOPPED at hit %d/%d"), HitIndex, HitResults.Num());
 			break;
 		}
 
 		LastHitLocation = Hit.ImpactPoint;
 	}
-
-	UE_LOG(LogTemp, Warning, TEXT("[KE] Processed %d hits total"), HitResults.Num());
 }
 
 bool UBallisticsComponent::ProcessHit(
@@ -121,14 +114,9 @@ bool UBallisticsComponent::ProcessHit(
 		return true;
 	}
 
-	// Initialize KE on first hit
 	if (HitIndex == 0)
 	{
-		// KE = 0.5 * m * v² (physics formula)
-		// Mass in kg (g / 1000), Speed in m/s
 		KineticEnergy = 0.5f * (Mass / 1000.0f) * Speed * Speed;
-		UE_LOG(LogTemp, Warning, TEXT("[KE] INITIAL - Speed=%.1f m/s, Mass=%.2f g, KE=%.1f J"),
-			Speed, Mass, KineticEnergy);
 	}
 
 	// Distance decay
@@ -154,21 +142,9 @@ bool UBallisticsComponent::ProcessHit(
 		}
 	}
 
-	// Apply damage
-	// Normalize KE against reference value (5.56mm NATO at muzzle = ~1500 J)
-	// This allows Damage parameter to stay in reasonable range (20-100)
-	// while preserving distance/penetration decay effects
 	const float ReferenceKE = 1500.0f;
 	float KE_Multiplier = KineticEnergy / ReferenceKE;
 	float FinalDamage = CurrentAmmoType->Damage * KE_Multiplier;
-
-	// DEBUG: Check damage calculation
-	if (GEngine)
-	{
-		FString DebugMsg = FString::Printf(TEXT("[BALLISTICS] KE=%.1f J | BaseDamage=%.1f | Multiplier=%.3f | FinalDamage=%.1f"),
-			KineticEnergy, CurrentAmmoType->Damage, KE_Multiplier, FinalDamage);
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, DebugMsg);
-	}
 
 	if (FinalDamage > 0.0f)
 	{
@@ -186,35 +162,20 @@ bool UBallisticsComponent::ProcessHit(
 		);
 	}
 
-	// Apply physics impulse (based on momentum and kinetic energy)
 	UPrimitiveComponent* HitComponent = Hit.GetComponent();
 
 	if (HitComponent && HitComponent->IsSimulatingPhysics(BoneName))
 	{
-		// Calculate impulse from momentum: p = m × v
-		// Mass in kg (grams / 1000), Speed in m/s, convert to cm/s for Unreal (*100)
 		float MassKg = Mass / 1000.0f;
 		float SpeedCmPerSec = Speed * 100.0f;
-		float Momentum = MassKg * SpeedCmPerSec;  // kg⋅cm/s
-
-		// Scale impulse by kinetic energy ratio (higher KE = stronger impact)
-		// ReferenceKE already declared above for damage calculation (1500 J)
+		float Momentum = MassKg * SpeedCmPerSec;
 		float KE_ImpulseMultiplier = FMath::Sqrt(KineticEnergy / ReferenceKE);
-
-		// Final impulse magnitude (momentum scaled by KE)
 		float ImpulseMagnitude = Momentum * KE_ImpulseMultiplier;
-
-		// Apply impulse in shot direction
 		FVector Impulse = Direction * ImpulseMagnitude;
 
 		HitComponent->AddImpulseAtLocation(Impulse, ImpactPoint, BoneName);
-
-		// DEBUG: Log impulse application
-		UE_LOG(LogTemp, Verbose, TEXT("[IMPULSE] Mass=%.2fg, Speed=%.1fm/s, KE=%.1fJ, Momentum=%.1f, Multiplier=%.2f, Final=%.1f"),
-			Mass, Speed, KineticEnergy, Momentum, KE_ImpulseMultiplier, ImpulseMagnitude);
 	}
 
-	// Penetration loss
 	bool bCanContinue = ApplyPenetrationLoss(Speed, Mass, Penetration, DropFactor, KineticEnergy, PhysMaterial);
 	return bCanContinue;
 }
@@ -273,32 +234,20 @@ bool UBallisticsComponent::ApplyPenetrationLoss(
 		return false;
 	}
 
-	// THIN: Allow penetration with energy loss
-	float KEBefore = KineticEnergy;
-	float SpeedBefore = Speed;
-
 	const float ThinMaterialVelocityRetention = 0.65f;
 	const float ThinMaterialPenetrationDecay = 0.5f;
 
 	Speed *= ThinMaterialVelocityRetention;
 	Penetration *= ThinMaterialPenetrationDecay;
-	// Recalculate KE after thin material penetration
 	KineticEnergy = 0.5f * (Mass / 1000.0f) * Speed * Speed;
-
-	float KELossPercent = ((KEBefore - KineticEnergy) / KEBefore) * 100.0f;
-
-	UE_LOG(LogTemp, Warning, TEXT("[KE] THIN '%s' - BEFORE: Speed=%.1f m/s, KE=%.3f J | AFTER: Speed=%.1f m/s, KE=%.3f J | Loss: %.1f%% | Penetration=%.4f"),
-		*MaterialName.ToString(), SpeedBefore, KEBefore, Speed, KineticEnergy, KELossPercent, Penetration);
 
 	if (Penetration <= 0.05f)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[KE] STOPPED - Penetration exhausted (%.4f <= 0.05)"), Penetration);
 		return false;
 	}
 
 	if (KineticEnergy <= 0.3f)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[KE] STOPPED - Kinetic energy too low (%.3f J <= 0.3 J)"), KineticEnergy);
 		return false;
 	}
 
@@ -342,23 +291,8 @@ bool UBallisticsComponent::InitAmmoType(EAmmoCaliberType CaliberType)
 	if (const TSoftObjectPtr<UAmmoTypeDataAsset>* FoundAsset = CaliberDataMap.Find(CaliberType))
 	{
 		CurrentAmmoType = FoundAsset->LoadSynchronous();
-
-		if (CurrentAmmoType)
-		{
-			UE_LOG(LogTemp, Log, TEXT("BallisticsComponent::InitAmmoType() - Loaded caliber: %s"),
-				*CurrentAmmoType->AmmoName.ToString());
-			return true;
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("BallisticsComponent::InitAmmoType() - Failed to load asset for caliber type '%s'"),
-				*UEnum::GetValueAsString(CaliberType));
-			return false;
-		}
+		return CurrentAmmoType != nullptr;
 	}
-
-	UE_LOG(LogTemp, Warning, TEXT("BallisticsComponent::InitAmmoType() - Caliber type '%s' not found in CaliberDataMap!"),
-		*UEnum::GetValueAsString(CaliberType));
 
 	CurrentAmmoType = nullptr;
 	return false;
@@ -371,52 +305,9 @@ UAmmoTypeDataAsset* UBallisticsComponent::GetAmmoDataForCaliber(EAmmoCaliberType
 		return FoundAsset->LoadSynchronous();
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("BallisticsComponent::GetAmmoDataForCaliber() - Caliber type '%s' not found in CaliberDataMap!"),
-		*UEnum::GetValueAsString(CaliberType));
-
 	return nullptr;
 }
 
 void UBallisticsComponent::DebugPrintCaliberData() const
 {
-	UE_LOG(LogTemp, Warning, TEXT("========================================"));
-	UE_LOG(LogTemp, Warning, TEXT("BALLISTICS COMPONENT - CALIBER DATA"));
-	UE_LOG(LogTemp, Warning, TEXT("========================================"));
-
-	if (UAmmoTypeDataAsset* CaliberData = CaliberDataAsset.LoadSynchronous())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Ammo Name: %s"), *CaliberData->AmmoName.ToString());
-		UE_LOG(LogTemp, Warning, TEXT("Ammo ID: %s"), *CaliberData->AmmoID.ToString());
-		UE_LOG(LogTemp, Warning, TEXT("Caliber Type: %s"), *UEnum::GetValueAsString(CaliberData->CaliberType));
-		UE_LOG(LogTemp, Warning, TEXT(""));
-		UE_LOG(LogTemp, Warning, TEXT("BALLISTICS:"));
-		UE_LOG(LogTemp, Warning, TEXT("  Projectile Mass: %.2f g"), CaliberData->ProjectileMass);
-		UE_LOG(LogTemp, Warning, TEXT("  Muzzle Velocity: %.1f m/s"), CaliberData->MuzzleVelocity);
-		UE_LOG(LogTemp, Warning, TEXT("  Drag Coefficient: %.3f"), CaliberData->DragCoefficient);
-		UE_LOG(LogTemp, Warning, TEXT("  Penetration Power: %.2f"), CaliberData->PenetrationPower);
-		UE_LOG(LogTemp, Warning, TEXT("  Kinetic Energy: %.1f J"), CalculateKineticEnergy());
-		UE_LOG(LogTemp, Warning, TEXT(""));
-		UE_LOG(LogTemp, Warning, TEXT("DAMAGE:"));
-		UE_LOG(LogTemp, Warning, TEXT("  Base Damage: %.1f"), CaliberData->Damage);
-		UE_LOG(LogTemp, Warning, TEXT("  Damage Radius: %.1f cm"), CaliberData->DamageRadius);
-	}
-	else
-	{
-		UE_LOG(LogTemp, Warning, TEXT("No CaliberDataAsset assigned!"));
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("========================================"));
-
-	// Also print to screen for easier debugging
-	if (GEngine && CaliberDataAsset.LoadSynchronous())
-	{
-		UAmmoTypeDataAsset* CaliberData = CaliberDataAsset.LoadSynchronous();
-		FString DebugText = FString::Printf(TEXT("CALIBER: %s\nVelocity: %.0f m/s\nDamage: %.1f\nEnergy: %.1f J"),
-			*CaliberData->AmmoName.ToString(),
-			CaliberData->MuzzleVelocity,
-			CaliberData->Damage,
-			CalculateKineticEnergy());
-
-		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan, DebugText);
-	}
 }

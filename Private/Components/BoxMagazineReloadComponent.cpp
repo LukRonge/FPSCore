@@ -1,172 +1,114 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Components/BoxMagazineReloadComponent.h"
-#include "BaseWeapon.h"
-#include "FPSCharacter.h"
+#include "Interfaces/ReloadableInterface.h"
+#include "Interfaces/HoldableInterface.h"
+#include "Interfaces/CharacterMeshProviderInterface.h"
+#include "Interfaces/AmmoConsumerInterface.h"
 #include "BaseMagazine.h"
 #include "Components/SkeletalMeshComponent.h"
 
-// ============================================
-// VIRTUAL OVERRIDES
-// ============================================
-
 void UBoxMagazineReloadComponent::OnMagazineOut()
 {
-	// LOCAL operation - runs on all machines independently
-	ABaseWeapon* Weapon = GetOwnerWeapon();
-	AFPSCharacter* Character = GetOwnerCharacter();
+	AActor* OwnerItem = GetOwnerItem();
+	AActor* CharacterActor = GetOwnerCharacterActor();
 
-	if (!Weapon || !Character)
+	if (!OwnerItem || !CharacterActor) return;
+	if (!OwnerItem->Implements<UReloadableInterface>()) return;
+	if (!CharacterActor->Implements<UCharacterMeshProviderInterface>()) return;
+
+	AActor* FPSMag = IReloadableInterface::Execute_GetFPSMagazineActor(OwnerItem);
+	AActor* TPSMag = IReloadableInterface::Execute_GetTPSMagazineActor(OwnerItem);
+
+	if (!FPSMag || !TPSMag) return;
+
+	USkeletalMeshComponent* ArmsMesh = ICharacterMeshProviderInterface::Execute_GetArmsMesh(CharacterActor);
+	USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(CharacterActor);
+
+	if (ArmsMesh)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("BoxMagazineReloadComponent: OnMagazineOut - Missing weapon or character"));
-		return;
+		AttachMagazineToSocket(FPSMag, ArmsMesh, MagazineOutSocketName);
 	}
 
-	// Get magazines from weapon
-	AActor* FPSMag = Weapon->FPSMagazineComponent->GetChildActor();
-	AActor* TPSMag = Weapon->TPSMagazineComponent->GetChildActor();
-
-	if (!FPSMag || !TPSMag)
+	if (BodyMesh)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("BoxMagazineReloadComponent: OnMagazineOut - Missing magazine actors"));
-		return;
+		AttachMagazineToSocket(TPSMag, BodyMesh, MagazineOutSocketName);
 	}
-
-	// Attach FPS magazine to character Arms socket (Identity transform - socket defines position)
-	AttachMagazineToSocket(FPSMag, Character->Arms, MagazineOutSocketName);
-
-	// Attach TPS magazine to character Body socket (Identity transform - socket defines position)
-	AttachMagazineToSocket(TPSMag, Character->GetMesh(), MagazineOutSocketName);
-
-	UE_LOG(LogTemp, Log, TEXT("BoxMagazineReloadComponent: Magazine detached from weapon, attached to hand"));
 }
 
 void UBoxMagazineReloadComponent::OnMagazineIn()
 {
-	// LOCAL operation - runs on all machines independently
-	ABaseWeapon* Weapon = GetOwnerWeapon();
+	AActor* OwnerItem = GetOwnerItem();
+	if (!OwnerItem) return;
+	if (!OwnerItem->Implements<UReloadableInterface>() || !OwnerItem->Implements<UHoldableInterface>()) return;
 
-	if (!Weapon)
+	AActor* FPSMag = IReloadableInterface::Execute_GetFPSMagazineActor(OwnerItem);
+	AActor* TPSMag = IReloadableInterface::Execute_GetTPSMagazineActor(OwnerItem);
+
+	if (!FPSMag || !TPSMag) return;
+
+	UPrimitiveComponent* FPSMeshPrim = IHoldableInterface::Execute_GetFPSMeshComponent(OwnerItem);
+	UPrimitiveComponent* TPSMeshPrim = IHoldableInterface::Execute_GetTPSMeshComponent(OwnerItem);
+
+	if (FPSMeshPrim)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("BoxMagazineReloadComponent: OnMagazineIn - Missing weapon"));
-		return;
+		AttachMagazineToSocket(FPSMag, FPSMeshPrim, MagazineInSocketName);
 	}
 
-	// Get magazines from weapon
-	AActor* FPSMag = Weapon->FPSMagazineComponent->GetChildActor();
-	AActor* TPSMag = Weapon->TPSMagazineComponent->GetChildActor();
-
-	if (!FPSMag || !TPSMag)
+	if (TPSMeshPrim)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("BoxMagazineReloadComponent: OnMagazineIn - Missing magazine actors"));
-		return;
+		AttachMagazineToSocket(TPSMag, TPSMeshPrim, MagazineInSocketName);
 	}
-
-	// Re-attach FPS magazine to weapon FPSMesh socket
-	AttachMagazineToSocket(FPSMag, Weapon->FPSMesh, MagazineInSocketName);
-
-	// Re-attach TPS magazine to weapon TPSMesh socket
-	AttachMagazineToSocket(TPSMag, Weapon->TPSMesh, MagazineInSocketName);
-
-	UE_LOG(LogTemp, Log, TEXT("BoxMagazineReloadComponent: Magazine re-attached to weapon"));
 }
 
 void UBoxMagazineReloadComponent::OnReloadComplete()
 {
-	// SERVER ONLY - Gameplay state change
-	if (!GetOwner() || !GetOwner()->HasAuthority())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("BoxMagazineReloadComponent: OnReloadComplete called on client - should only run on server"));
-		return;
-	}
+	if (!GetOwner() || !GetOwner()->HasAuthority()) return;
 
-	// ✅ CORRECT: Get owner weapon via helper (still uses cast internally, but encapsulated)
-	ABaseWeapon* Weapon = GetOwnerWeapon();
-	if (!Weapon)
-	{
-		UE_LOG(LogTemp, Error, TEXT("BoxMagazineReloadComponent: OnReloadComplete - Missing weapon"));
-		return;
-	}
+	AActor* OwnerItem = GetOwnerItem();
+	if (!OwnerItem) return;
+	if (!OwnerItem->Implements<UAmmoConsumerInterface>()) return;
 
-	// ✅ CORRECT: Use CurrentMagazine (single source of truth for gameplay)
-	ABaseMagazine* CurrentMag = Weapon->CurrentMagazine;
-	if (!CurrentMag)
-	{
-		UE_LOG(LogTemp, Error, TEXT("BoxMagazineReloadComponent: OnReloadComplete - CurrentMagazine is null"));
-		return;
-	}
-
-	// Calculate ammo needed to fill magazine
-	int32 AmmoNeeded = CurrentMag->MaxCapacity - CurrentMag->CurrentAmmo;
-
-	UE_LOG(LogTemp, Log, TEXT("BoxMagazineReloadComponent: OnReloadComplete - CurrentAmmo: %d/%d, AmmoNeeded: %d"),
-		CurrentMag->CurrentAmmo, CurrentMag->MaxCapacity, AmmoNeeded);
+	int32 CurrentAmmo = IAmmoConsumerInterface::Execute_GetClip(OwnerItem);
+	int32 MaxCapacity = IAmmoConsumerInterface::Execute_GetClipSize(OwnerItem);
+	int32 AmmoNeeded = MaxCapacity - CurrentAmmo;
 
 	if (AmmoNeeded <= 0)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("BoxMagazineReloadComponent: OnReloadComplete - Magazine already full (CurrentAmmo: %d, MaxCapacity: %d)"),
-			CurrentMag->CurrentAmmo, CurrentMag->MaxCapacity);
 		bIsReloading = false;
 		return;
 	}
 
-	// TODO: Check reserve ammo via IAmmoProviderInterface (future feature)
-	// AActor* ReserveAmmoProvider = GetReserveAmmoProvider();
-	// if (ReserveAmmoProvider && ReserveAmmoProvider->Implements<UAmmoProviderInterface>())
-	// {
-	//     int32 Available = IAmmoProviderInterface::Execute_GetAvailableAmmo(ReserveAmmoProvider);
-	//     AmmoNeeded = FMath::Min(AmmoNeeded, Available);
-	// }
+	if (OwnerItem->Implements<UReloadableInterface>())
+	{
+		AActor* TPSMagActor = IReloadableInterface::Execute_GetTPSMagazineActor(OwnerItem);
+		if (ABaseMagazine* CurrentMag = Cast<ABaseMagazine>(TPSMagActor))
+		{
+			CurrentMag->AddAmmo(AmmoNeeded);
 
-	// ✅ CORRECT: Add ammo to CurrentMagazine (single source of truth)
-	// CurrentMagazine->CurrentAmmo is REPLICATED - will sync to all clients
-	int32 AddedAmmo = CurrentMag->AddAmmo(AmmoNeeded);
+			AActor* FPSMagActor = IReloadableInterface::Execute_GetFPSMagazineActor(OwnerItem);
+			if (ABaseMagazine* FPSMag = Cast<ABaseMagazine>(FPSMagActor))
+			{
+				FPSMag->CurrentAmmo = CurrentMag->CurrentAmmo;
+			}
+		}
+	}
 
-	// ✅ CORRECT: Synchronize visual magazines (FPS/TPS) with gameplay magazine
-	// This ensures visual consistency across all clients
-	Weapon->SyncVisualMagazines();
-
-	// TODO: Subtract from reserve ammo via IAmmoProviderInterface (future feature)
-	// IAmmoProviderInterface::Execute_TakeAmmo(ReserveAmmoProvider, AddedAmmo);
-
-	// Clear reload state (replicates to clients)
 	bIsReloading = false;
-
-	UE_LOG(LogTemp, Log, TEXT("BoxMagazineReloadComponent: Reload complete - Added %d rounds (new total: %d/%d)"),
-		AddedAmmo, CurrentMag->CurrentAmmo, CurrentMag->MaxCapacity);
 }
-
-// ============================================
-// HELPER FUNCTIONS
-// ============================================
 
 void UBoxMagazineReloadComponent::AttachMagazineToSocket(AActor* Magazine, USceneComponent* Parent, FName SocketName)
 {
-	if (!Magazine || !Parent)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("BoxMagazineReloadComponent: AttachMagazineToSocket - Invalid parameters"));
-		return;
-	}
+	if (!Magazine || !Parent) return;
 
 	USceneComponent* MagRoot = Magazine->GetRootComponent();
-	if (!MagRoot)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("BoxMagazineReloadComponent: AttachMagazineToSocket - Magazine has no root component"));
-		return;
-	}
+	if (!MagRoot) return;
 
-	// Attach to parent socket
 	MagRoot->AttachToComponent(
 		Parent,
 		FAttachmentTransformRules::SnapToTargetNotIncludingScale,
 		SocketName
 	);
 
-	// ✅ CORRECT: ALWAYS use Identity transform
-	// Socket itself defines the correct position and rotation
-	// Magazine has NO relative offset - it snaps exactly to socket transform
 	MagRoot->SetRelativeTransform(FTransform::Identity);
-
-	UE_LOG(LogTemp, Verbose, TEXT("BoxMagazineReloadComponent: Attached magazine to socket '%s' (Identity transform)"),
-		*SocketName.ToString());
 }

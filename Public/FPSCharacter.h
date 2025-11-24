@@ -38,6 +38,7 @@ public:
 	// IItemCollectorInterface implementation
 	virtual void Pickup_Implementation(AActor* Item) override;
 	virtual void Drop_Implementation(AActor* Item) override;
+	virtual AActor* GetActiveItem_Implementation() const override;
 
 	// IRecoilHandlerInterface implementation
 	virtual void ApplyRecoilKick_Implementation(float RecoilScale) override;
@@ -437,13 +438,18 @@ public:
 	// ============================================
 	// INVENTORY SYSTEM
 	// ============================================
+	// ARCHITECTURE NOTE:
+	// - ActiveItem is the SINGLE SOURCE OF TRUTH for currently equipped item (REPLICATED)
+	// - InventoryComp->Items is storage-only array (no active item tracking)
+	// - External code should use IItemCollectorInterface::Execute_GetActiveItem() for access
 
-	// Inventory component (manages item storage)
+	// Inventory component (manages item storage only, not active item)
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
 	class UInventoryComponent* InventoryComp;
 
-	// Currently equipped item (active in hands)
-	UPROPERTY(BlueprintReadWrite, ReplicatedUsing = OnRep_ActiveItem, Category = "Inventory")
+	// Currently equipped item (active in hands) - SINGLE SOURCE OF TRUTH
+	// External access: IItemCollectorInterface::Execute_GetActiveItem()
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_ActiveItem, Category = "Inventory")
 	AActor* ActiveItem = nullptr;
 
 	// Server RPC to pickup item from world
@@ -588,10 +594,19 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Material")
 	class UMaterialParameterCollection* MPC_Aim;
 
-	// Mesh components
+	// ============================================
+	// MESH COMPONENTS
+	// ============================================
+	// ENCAPSULATION: External code should access via ICharacterMeshProviderInterface:
+	// - ICharacterMeshProviderInterface::Execute_GetBodyMesh() for Body (GetMesh())
+	// - ICharacterMeshProviderInterface::Execute_GetArmsMesh() for Arms
+	// - ICharacterMeshProviderInterface::Execute_GetLegsMesh() for Legs
+
+	// First-person arms mesh (owner-only, attached to camera)
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh")
 	USkeletalMeshComponent* Arms;
 
+	// First-person legs mesh (owner-only, attached to body)
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh")
 	USkeletalMeshComponent* Legs;
 

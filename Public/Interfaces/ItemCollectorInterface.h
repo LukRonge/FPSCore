@@ -39,4 +39,12 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "ItemCollector")
 	void Drop(AActor* Item);
 	virtual void Drop_Implementation(AActor* Item) { }
+
+	/**
+	 * Get currently active/equipped item
+	 * @return Active item or nullptr if no item equipped
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "ItemCollector")
+	AActor* GetActiveItem() const;
+	virtual AActor* GetActiveItem_Implementation() const { return nullptr; }
 };

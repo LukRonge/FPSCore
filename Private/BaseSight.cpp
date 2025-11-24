@@ -63,7 +63,6 @@ void ABaseSight::SetOwner(AActor* NewOwner)
 
 void ABaseSight::ApplyVisibilityToMeshes()
 {
-	// If type is None, skip initialization
 	if (FirstPersonPrimitiveType == EFirstPersonPrimitiveType::None)
 	{
 		return;
@@ -72,17 +71,14 @@ void ABaseSight::ApplyVisibilityToMeshes()
 	bool bOnlyOwnerSee = false;
 	bool bOwnerNoSee = false;
 
-	// Determine visibility flags based on FPS type
 	switch (FirstPersonPrimitiveType)
 	{
 		case EFirstPersonPrimitiveType::FirstPerson:
-			// Only owner sees this (first-person view)
 			bOnlyOwnerSee = true;
 			bOwnerNoSee = false;
 			break;
 
 		case EFirstPersonPrimitiveType::WorldSpaceRepresentation:
-			// Everyone except owner sees this (third-person/world view)
 			bOnlyOwnerSee = false;
 			bOwnerNoSee = true;
 			break;
@@ -91,23 +87,13 @@ void ABaseSight::ApplyVisibilityToMeshes()
 			break;
 	}
 
-	// Get all primitive components (includes StaticMesh, SkeletalMesh, and all other primitives)
 	TArray<UPrimitiveComponent*> PrimitiveComponents;
 	GetComponents<UPrimitiveComponent>(PrimitiveComponents);
 
 	for (UPrimitiveComponent* PrimitiveComp : PrimitiveComponents)
 	{
-		// Set modern UE5 API
 		PrimitiveComp->SetFirstPersonPrimitiveType(FirstPersonPrimitiveType);
-
-		// Set classic visibility flags
 		PrimitiveComp->SetOnlyOwnerSee(bOnlyOwnerSee);
 		PrimitiveComp->SetOwnerNoSee(bOwnerNoSee);
-
-		UE_LOG(LogTemp, Log, TEXT("BaseSight::ApplyVisibilityToMeshes() - %s | Type: %s | OnlyOwnerSee: %s | OwnerNoSee: %s"),
-			*PrimitiveComp->GetName(),
-			*UEnum::GetValueAsString(FirstPersonPrimitiveType),
-			bOnlyOwnerSee ? TEXT("true") : TEXT("false"),
-			bOwnerNoSee ? TEXT("true") : TEXT("false"));
 	}
 }

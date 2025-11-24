@@ -117,64 +117,13 @@ float UHealthComponent::ApplyDamage(float DamageAmount, FDamageEvent const& Dama
 	Health -= ActualDamage;
 	Health = FMath::Max(Health, 0.0f);
 
-	// ============================================
-	// DEBUG ON-SCREEN MESSAGE
-	// ============================================
-	FString InstigatorName = EventInstigator ? EventInstigator->GetName() : TEXT("nullptr");
-	FString CauserName = DamageCauser ? DamageCauser->GetName() : TEXT("nullptr");
-
-	// Base damage info
-	FString DamageInfo = FString::Printf(TEXT("[DAMAGE] %s took %.1f damage\nHealth: %.1f / %.1f\nInstigator: %s\nCauser: %s"),
-		*Owner->GetName(), ActualDamage, Health, MaxHealth, *InstigatorName, *CauserName);
-
-	// Add damage type details
-	if (DamageEvent.IsOfType(FPointDamageEvent::ClassID))
-	{
-		DamageInfo += FString::Printf(TEXT("\nType: Point Damage\nBone: %s (x%.2f multiplier)\nHit Location: %.1f, %.1f, %.1f\nDirection: %.2f, %.2f, %.2f"),
-			*HitBoneName.ToString(),
-			BoneMultiplier,
-			HitLocation.X, HitLocation.Y, HitLocation.Z,
-			HitDirection.X, HitDirection.Y, HitDirection.Z);
-	}
-	else if (DamageEvent.IsOfType(FRadialDamageEvent::ClassID))
-	{
-		DamageInfo += TEXT("\nType: Radial Damage");
-	}
-	else
-	{
-		DamageInfo += TEXT("\nType: Generic Damage");
-	}
-
-	// Display on screen (5 second duration, red color)
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, DamageInfo);
-	}
-
-	// Also log to console for reference
-	UE_LOG(LogTemp, Warning, TEXT("%s"), *DamageInfo.Replace(TEXT("\n"), TEXT(" | ")));
-
-	// ============================================
-	// BROADCAST DELEGATES (Owner reacts)
-	// ============================================
-
-	// OnHealthChanged - for UI updates (SERVER only, CLIENTS via OnRep_Health)
 	OnHealthChanged.Broadcast(Health);
-
-	// OnDamaged - for hit reactions, visual effects (no params)
 	OnDamaged.Broadcast();
 
-	// ============================================
-	// CHECK FOR DEATH
-	// ============================================
 	if (Health <= 0.0f)
 	{
 		bIsDeath = true;
-
-		// OnDeath - for ragdoll, camera effects, respawn
 		OnDeath.Broadcast();
-
-		UE_LOG(LogTemp, Warning, TEXT("[HealthComponent] %s died!"), *Owner->GetName());
 	}
 
 	return ActualDamage;
@@ -191,54 +140,26 @@ float UHealthComponent::GetBoneDamageMultiplier(FName BoneName) const
 
 void UHealthComponent::ResetHealthState()
 {
-	// SERVER AUTHORITY: Only server can reset health state
 	AActor* Owner = GetOwner();
 	if (!Owner || !Owner->HasAuthority())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[HealthComponent] ResetHealthState() called on non-authority! Ignored."));
 		return;
 	}
 
-	// ============================================
-	// RESET GAMEPLAY STATE
-	// ============================================
 	Health = MaxHealth;
 	bIsDeath = false;
-
-	// ============================================
-	// BROADCAST DELEGATE (Owner reacts)
-	// ============================================
-	// Trigger OnHealthChanged on SERVER immediately
-	// Replication will trigger OnRep_Health on CLIENTS
 	OnHealthChanged.Broadcast(Health);
-
-	UE_LOG(LogTemp, Log, TEXT("[HealthComponent] %s health state reset (Health: %.1f / %.1f, IsDeath: false)"),
-		*Owner->GetName(), Health, MaxHealth);
 }
-
-// ============================================
-// REPLICATION CALLBACKS
-// ============================================
 
 void UHealthComponent::OnRep_Health()
 {
-	// Called on CLIENTS when Health replicates from server
-	// Broadcast OnHealthChanged delegate so owner can update UI
-
 	OnHealthChanged.Broadcast(Health);
-
-	UE_LOG(LogTemp, Log, TEXT("[HealthComponent] OnRep_Health: Broadcasting OnHealthChanged (%.1f)"), Health);
 }
 
 void UHealthComponent::OnRep_IsDeath()
 {
-	// Called on CLIENTS when bIsDeath replicates from server
-	// Broadcast OnDeath delegate so owner can handle visual effects (ragdoll, camera, etc.)
-
 	if (bIsDeath)
 	{
 		OnDeath.Broadcast();
-
-		UE_LOG(LogTemp, Log, TEXT("[HealthComponent] OnRep_IsDeath: Broadcasting OnDeath delegate"));
 	}
 }

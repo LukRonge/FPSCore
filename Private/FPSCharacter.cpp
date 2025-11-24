@@ -443,8 +443,6 @@ void AFPSCharacter::PossessedBy(AController* NewController)
 void AFPSCharacter::UnPossessed()
 {
 	Super::UnPossessed();
-
-	UE_LOG(LogTemp, Log, TEXT("[FPSCharacter] UnPossessed: %s"), *GetName());
 }
 
 void AFPSCharacter::Client_OnPossessed_Implementation()
@@ -644,35 +642,28 @@ void AFPSCharacter::UpdateItemAnimLayer(AActor* Item)
 				Arms->GetAnimInstance()->UnlinkAnimClassLayers(DefaultAnimLayer);
 			}
 
-			// Link item animation layer to all character meshes
 			GetMesh()->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
 			Legs->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
 			Arms->GetAnimInstance()->LinkAnimClassLayers(ItemAnimLayer);
-
-			UE_LOG(LogTemp, Log, TEXT("✓ Linked item anim layer: %s"), *ItemAnimLayer->GetName());
 		}
 		else
 		{
-			// Item has no custom anim layer - use default (inline)
 			if (DefaultAnimLayer)
 			{
 				GetMesh()->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
 				Legs->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
 				Arms->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
 			}
-			UE_LOG(LogTemp, Log, TEXT("✓ Item has no anim layer - using default"));
 		}
 	}
 	else
 	{
-		// Item is null or not holdable - switch to default layer (inline)
 		if (DefaultAnimLayer)
 		{
 			GetMesh()->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
 			Legs->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
 			Arms->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
 		}
-		UE_LOG(LogTemp, Log, TEXT("✓ Linked default anim layer"));
 	}
 }
 
@@ -852,15 +843,7 @@ void AFPSCharacter::DropPressed()
 		return;
 	}
 
-	if (!ActiveItem)
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Orange,
-				TEXT("⚠ No active item to drop"));
-		}
-		return;
-	}
+	if (!ActiveItem) return;
 
 	Server_DropItem(ActiveItem);
 }
@@ -921,11 +904,7 @@ void AFPSCharacter::AimingPressed()
 		return;
 	}
 
-	if (!ActiveItem->Implements<USightInterface>())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::AimingPressed() - ActiveItem does not implement ISightInterface"));
-		return;
-	}
+	if (!ActiveItem->Implements<USightInterface>()) return;
 
 	// ============================================
 	// CALCULATE ARMS OFFSET FOR AIMING
@@ -936,11 +915,7 @@ void AFPSCharacter::AimingPressed()
 	FVector AimingPointLocal = ISightInterface::Execute_GetAimingPoint(ActiveItem);
 
 	AActor* SightActor = ISightInterface::Execute_GetSightActor(ActiveItem);
-	if (!SightActor)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::AimingPressed() - ActiveItem has no sight actor"));
-		return;
-	}
+	if (!SightActor) return;
 
 	FVector CurrentArmsOffset = Arms->GetRelativeLocation();
 
@@ -993,45 +968,19 @@ void AFPSCharacter::AimingReleased()
 
 void AFPSCharacter::ReloadPressed()
 {
-	UE_LOG(LogTemp, Warning, TEXT("⚠️ FPSCharacter::ReloadPressed - CALLED! IsLocallyControlled: %s"), IsLocallyControlled() ? TEXT("TRUE") : TEXT("FALSE"));
-
-	if (!IsLocallyControlled())
-	{
-		return;
-	}
-
-	// Get active item (replicated property)
-	if (!ActiveItem)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::ReloadPressed - No active item"));
-		return;
-	}
+	if (!IsLocallyControlled()) return;
+	if (!ActiveItem) return;
 
 	AActor* Item = ActiveItem;
 
-	// Check if reloadable (interface check)
-	if (!Item->Implements<UReloadableInterface>())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::ReloadPressed - Active item does not implement IReloadableInterface"));
-		return;
-	}
+	if (!Item->Implements<UReloadableInterface>()) return;
+	if (!IReloadableInterface::Execute_CanReload(Item)) return;
 
-	// Check if can reload
-	if (!IReloadableInterface::Execute_CanReload(Item))
-	{
-		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::ReloadPressed - CanReload check failed"));
-		return;
-	}
-
-	// Create use context
 	FUseContext Ctx;
 	Ctx.Controller = GetController();
 	Ctx.Pawn = this;
 
-	// Call reload (triggers Server RPC inside)
 	IReloadableInterface::Execute_Reload(Item, Ctx);
-
-	UE_LOG(LogTemp, Log, TEXT("FPSCharacter::ReloadPressed - Reload triggered"));
 }
 
 bool AFPSCharacter::CanReload() const
@@ -1228,17 +1177,7 @@ void AFPSCharacter::CheckInteractionTrace()
 		if (Verbs.Num() > 0)
 		{
 			const FGameplayTag& FirstVerb = Verbs[0];
-
 			bool bCanInteract = Interactable->Execute_CanInteract(HitActor, FirstVerb, Ctx);
-
-			if (GEngine)
-			{
-				GEngine->AddOnScreenDebugMessage(10, 0.0f, bCanInteract ? FColor::Green : FColor::Red,
-					FString::Printf(TEXT("CanInteract: %s | Owner: %s | Result: %s"),
-						*HitActor->GetName(),
-						HitActor->GetOwner() ? *HitActor->GetOwner()->GetName() : TEXT("nullptr"),
-						bCanInteract ? TEXT("TRUE") : TEXT("FALSE")));
-			}
 
 			if (bCanInteract)
 			{
@@ -1297,30 +1236,9 @@ void AFPSCharacter::Server_DropItem_Implementation(AActor* Item)
 		return;
 	}
 
-	// Validate item is actually in our inventory
-	if (!InventoryComp->ContainsItem(Item))
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red,
-				FString::Printf(TEXT("❌ [SERVER] Cannot drop item %s - not in inventory"), *Item->GetName()));
-		}
-		return;
-	}
+	if (!InventoryComp->ContainsItem(Item)) return;
 
-	// INVERTED FLOW (compared to pickup):
-	// 1. Remove item from inventory
-	// 2. InventoryComponent fires OnItemRemoved delegate
-	// 3. OnInventoryItemRemoved callback executes
-	// 4. Callback calls IPickupableInterface::Execute_OnDropped
-	if (InventoryComp->RemoveItem(Item))
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
-				FString::Printf(TEXT("✓ [SERVER] Dropped item: %s"), *Item->GetName()));
-		}
-	}
+	InventoryComp->RemoveItem(Item);
 }
 
 
@@ -1331,41 +1249,15 @@ void AFPSCharacter::Server_DropItem_Implementation(AActor* Item)
 
 void AFPSCharacter::Pickup_Implementation(AActor* Item)
 {
-	// CLIENT-SIDE VALIDATION (optimization + immediate feedback)
-	// These checks run on client BEFORE sending RPC to server
-	// Server MUST still validate (anti-cheat, race conditions)
+	if (!Item) return;
+	if (!Item->Implements<UPickupableInterface>()) return;
 
-	if (!Item)
-	{
-		return;
-	}
-
-	// Check 1: Is item pickupable? (pure reflection - always safe)
-	if (!Item->Implements<UPickupableInterface>())
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red,
-				FString::Printf(TEXT("❌ Item %s is not pickupable!"), *Item->GetName()));
-		}
-		return;
-	}
-
-	// Check 2: Can item be picked? (uses replicated state - GetOwner, etc.)
 	FInteractionContext Ctx;
 	Ctx.Controller = GetController();
 	Ctx.Pawn = this;
 	Ctx.Instigator = this;
 
-	if (!IPickupableInterface::Execute_CanBePicked(Item, Ctx))
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
-				FString::Printf(TEXT("⚠ Cannot pick %s (already owned?)"), *Item->GetName()));
-		}
-		return;
-	}
+	if (!IPickupableInterface::Execute_CanBePicked(Item, Ctx)) return;
 
 	Server_PickupItem(Item);
 }
@@ -1375,26 +1267,15 @@ void AFPSCharacter::Drop_Implementation(AActor* Item)
 	// TODO: Implement drop logic
 }
 
+AActor* AFPSCharacter::GetActiveItem_Implementation() const
+{
+	return ActiveItem;
+}
 
 void AFPSCharacter::UnEquipItem(AActor* Item)
 {
-	// Logical unequip: Animation/hands/callbacks (NO mesh/physics changes)
-	// Physical operations handled by PerformDrop() via Multicast
-	//
-	// CRITICAL: Animation/hands MUST execute even if race condition detected
-	// (V2 fix: previous version caused animation layer leak)
-
-	if (!IsValid(Item))
-	{
-		UE_LOG(LogTemp, Error, TEXT("[UnEquipItem] Invalid item pointer!"));
-		return;
-	}
-
-	if (!Item->Implements<UHoldableInterface>())
-	{
-		UE_LOG(LogTemp, Error, TEXT("[UnEquipItem] Item %s not holdable!"), *Item->GetName());
-		return;
-	}
+	if (!IsValid(Item)) return;
+	if (!Item->Implements<UHoldableInterface>()) return;
 
 	// Reset animation layer (MUST run even if item detached - prevents leak)
 	UpdateItemAnimLayer(nullptr);
@@ -1422,32 +1303,15 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 
 void AFPSCharacter::EquipItem(AActor* Item)
 {
-	// Physical + Logical equip operations
-	// Called by: OnRep_ActiveItem (clients), OnInventoryItemAdded (server)
-	//
-	// CRITICAL: Handles race condition (OnRep before Multicast_PickupItem)
+	if (!IsValid(Item)) return;
+	if (!Item->Implements<UHoldableInterface>()) return;
 
-	if (!IsValid(Item))
-	{
-		UE_LOG(LogTemp, Error, TEXT("[EquipItem] Invalid item pointer!"));
-		return;
-	}
-
-	if (!Item->Implements<UHoldableInterface>())
-	{
-		UE_LOG(LogTemp, Error, TEXT("[EquipItem] Item %s not holdable!"), *Item->GetName());
-		return;
-	}
-
-	// Race condition protection: Ensure physical pickup completed first
 	if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
 	{
 		bool bItemInWorldState = TPSMesh->IsSimulatingPhysics() || !Item->IsHidden();
-
 		if (bItemInWorldState)
 		{
-			PerformPickup(Item); // OnRep arrived before Multicast - fix now
-			UE_LOG(LogTemp, Warning, TEXT("[EquipItem] RACE: Item %s not picked up, fixing"), *Item->GetName());
+			PerformPickup(Item);
 		}
 	}
 
@@ -1554,11 +1418,7 @@ void AFPSCharacter::PerformPickup(AActor* Item)
 	// Runs on ALL machines via Multicast RPC
 	// Logical operations (animation, hands) handled by EquipItem()
 
-	if (!IsValid(Item))
-	{
-		UE_LOG(LogTemp, Error, TEXT("[PerformPickup] Invalid item!"));
-		return;
-	}
+	if (!IsValid(Item)) return;
 
 	// Disable physics BEFORE attaching (prevents warning)
 	if (Item->Implements<UHoldableInterface>())
@@ -1626,11 +1486,6 @@ void AFPSCharacter::OnInventoryItemRemoved(AActor* Item)
 
 void AFPSCharacter::OnInventoryCleared()
 {
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red,
-			TEXT("❌ [SERVER] Inventory cleared"));
-	}
 }
 
 void AFPSCharacter::Multicast_DropItem_Implementation(AActor* Item)
@@ -1640,15 +1495,7 @@ void AFPSCharacter::Multicast_DropItem_Implementation(AActor* Item)
 
 void AFPSCharacter::PerformDrop(AActor* Item)
 {
-	// Physical drop: Mesh reattachment, detach, world placement, physics
-	// Runs on ALL machines via Multicast RPC
-	// Logical operations (animation, hands) handled by UnEquipItem()
-
-	if (!IsValid(Item))
-	{
-		UE_LOG(LogTemp, Error, TEXT("[PerformDrop] Invalid item!"));
-		return;
-	}
+	if (!IsValid(Item)) return;
 
 	FTransform DropTransform;
 	FVector DropImpulse;
@@ -2180,56 +2027,19 @@ void AFPSCharacter::OnHealthComponentDeath()
 		// SERVER: Drop active item on death
 		if (IsValid(ActiveItem) && InventoryComp)
 		{
-			FString ItemName = ActiveItem->GetName();
 			InventoryComp->RemoveItem(ActiveItem);
-			UE_LOG(LogTemp, Log, TEXT("[FPSCharacter] %s dropped active item %s on death"), *GetName(), *ItemName);
 		}
 
-		// SERVER: Trigger multicast RPC for ragdoll on all clients
 		Multicast_ProcessDeath();
-
-		// SERVER: Trigger client RPC for owning client camera/UI effects
 		Client_ProcessDeath();
-
-		UE_LOG(LogTemp, Warning, TEXT("[FPSCharacter] %s died (SERVER)"), *GetName());
-	}
-	else
-	{
-		// CLIENTS: Ragdoll already handled by OnRep → Multicast flow
-		// This callback serves as notification point for additional client-specific logic
-		UE_LOG(LogTemp, Log, TEXT("[FPSCharacter] %s died (CLIENT)"), *GetName());
 	}
 }
 
 void AFPSCharacter::OnHealthComponentHealthChanged(float NewHealth)
 {
-	// Runs on SERVER (immediate) and CLIENTS (OnRep_Health)
-	// Update UI on owning client only
-
-	// DEBUG: Log all conditions
-	UE_LOG(LogTemp, Warning, TEXT("[HEALTH UI DEBUG] %s | IsLocallyControlled=%d | Controller=%s | Role=%s"),
-		*GetName(),
-		IsLocallyControlled(),
-		Controller ? *Controller->GetName() : TEXT("nullptr"),
-		*UEnum::GetValueAsString(GetLocalRole()));
-
-	if (Controller)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[HEALTH UI DEBUG] Controller implements PlayerHUDInterface: %d"),
-			Controller->Implements<UPlayerHUDInterface>());
-	}
-
 	if (IsLocallyControlled() && Controller && Controller->Implements<UPlayerHUDInterface>())
 	{
 		IPlayerHUDInterface::Execute_UpdateHealth(Controller, NewHealth);
-
-		// MaxHealth accessible directly from HealthComp
-		float MaxHealth = HealthComp ? HealthComp->MaxHealth : 100.0f;
-		UE_LOG(LogTemp, Log, TEXT("[FPSCharacter] Health updated: %.1f / %.1f"), NewHealth, MaxHealth);
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("[HEALTH UI DEBUG] Update SKIPPED for %s"), *GetName());
 	}
 }
 
@@ -2239,35 +2049,21 @@ void AFPSCharacter::OnHealthComponentHealthChanged(float NewHealth)
 
 void AFPSCharacter::Multicast_HitReaction_Implementation()
 {
-	// Runs on ALL CLIENTS
-	// 1. Play hit reaction animations (all clients)
-	// 2. Add client-side screen effects (owning client only)
-
-	// Play animations on all clients
 	HitReaction();
 
-	// ============================================
-	// CLIENT-SIDE SCREEN EFFECTS (Owning client only)
-	// ============================================
-	// Add visual damage feedback (screen blood, damage indicator, camera shake)
 	if (IsLocallyControlled() && Controller && Controller->Implements<UPlayerHUDInterface>())
 	{
 		IPlayerHUDInterface::Execute_AddDamageEffect(Controller);
-		UE_LOG(LogTemp, Log, TEXT("[HIT REACTION] Client damage effect added"));
 	}
 }
 
 void AFPSCharacter::HitReaction()
 {
-	// Helper function to play hit reaction animation montages
-	// Called by Multicast_HitReaction on all clients
-
 	if (HitReactionMontages.Num() == 0)
 	{
 		return;
 	}
 
-	// Select random montage from array
 	int32 RandomIndex = FMath::RandRange(0, HitReactionMontages.Num() - 1);
 	UAnimMontage* SelectedMontage = HitReactionMontages[RandomIndex];
 
@@ -2276,19 +2072,15 @@ void AFPSCharacter::HitReaction()
 		return;
 	}
 
-	// Play montage on Body mesh (third-person, visible to others)
 	if (GetMesh() && GetMesh()->GetAnimInstance())
 	{
 		GetMesh()->GetAnimInstance()->Montage_Play(SelectedMontage);
 	}
 
-	// Play montage on Arms mesh (first-person, only owner sees)
 	if (Arms && Arms->GetAnimInstance())
 	{
 		Arms->GetAnimInstance()->Montage_Play(SelectedMontage);
 	}
-
-	UE_LOG(LogTemp, Log, TEXT("[HIT REACTION] Playing montage: %s"), *SelectedMontage->GetName());
 }
 
 // ============================================
@@ -2297,30 +2089,20 @@ void AFPSCharacter::HitReaction()
 
 void AFPSCharacter::Client_ProcessDeath_Implementation()
 {
-	// Runs on OWNING CLIENT ONLY
-	// Client-side death effects (camera, UI)
-
-	// Set camera to black and white (desaturation effect)
 	if (Camera)
 	{
 		Camera->PostProcessSettings.bOverride_ColorSaturation = true;
 		Camera->PostProcessSettings.ColorSaturation = FVector4(0.0f, 0.0f, 0.0f, 1.0f);
 	}
 
-	// Hide HUD
 	if (Controller && Controller->Implements<UPlayerHUDInterface>())
 	{
 		IPlayerHUDInterface::Execute_SetHUDVisibility(Controller, false);
 	}
-
-	UE_LOG(LogTemp, Warning, TEXT("[CLIENT DEATH] Death effects applied: Desaturated camera + HUD hidden"));
 }
 
 void AFPSCharacter::Multicast_ProcessDeath_Implementation()
 {
-	// Runs on ALL CLIENTS
-	// Enable ragdoll physics on all clients
-
 	EnableRagdoll();
 }
 
@@ -2330,52 +2112,37 @@ void AFPSCharacter::Multicast_ProcessDeath_Implementation()
 
 void AFPSCharacter::ApplyRecoilKick_Implementation(float RecoilScale)
 {
-	// SERVER ONLY (called by FireComponent via IRecoilHandlerInterface)
 	if (!HasAuthority())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FPSCharacter::ApplyRecoilKick() - Called on client! Should only run on server."));
 		return;
 	}
 
-	// Add to component state (for accumulation tracking on server)
 	if (RecoilComp)
 	{
 		RecoilComp->AddRecoil(RecoilScale);
 	}
 	else
 	{
-		UE_LOG(LogTemp, Error, TEXT("FPSCharacter::ApplyRecoilKick() - RecoilComp is null!"));
 		return;
 	}
 
-	// Broadcast to ALL clients (like Multicast_PlayMuzzleFlash)
 	Multicast_ApplyRecoil(RecoilScale);
-
-	UE_LOG(LogTemp, Verbose, TEXT("FPSCharacter::ApplyRecoilKick() - Recoil kick broadcasted: Scale=%.2f"), RecoilScale);
 }
 
 void AFPSCharacter::Multicast_ApplyRecoil_Implementation(float RecoilScale)
 {
-	// Runs on SERVER + ALL CLIENTS
 	if (!RecoilComp)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FPSCharacter::Multicast_ApplyRecoil() - RecoilComp is null!"));
 		return;
 	}
 
 	if (IsLocallyControlled())
 	{
-		// OWNING CLIENT: Camera kick
 		RecoilComp->ApplyRecoilToCamera(RecoilScale);
-
-		UE_LOG(LogTemp, Verbose, TEXT("FPSCharacter::Multicast_ApplyRecoil() - Camera recoil applied (owner): Scale=%.2f"), RecoilScale);
 	}
 	else
 	{
-		// REMOTE CLIENTS (including server): Weapon animation
 		RecoilComp->ApplyRecoilToWeapon(RecoilScale);
-
-		UE_LOG(LogTemp, Verbose, TEXT("FPSCharacter::Multicast_ApplyRecoil() - Weapon recoil applied (remote): Scale=%.2f"), RecoilScale);
 	}
 }
 
@@ -2385,38 +2152,31 @@ void AFPSCharacter::Multicast_ApplyRecoil_Implementation(float RecoilScale)
 
 void AFPSCharacter::EnableRagdoll()
 {
-	// Disable character movement
 	if (CMC)
 	{
 		CMC->SetMovementMode(MOVE_None);
 	}
 
-	// Disable capsule collision
 	if (GetCapsuleComponent())
 	{
 		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 
-	// Enable physics on body mesh
 	if (GetMesh())
 	{
 		GetMesh()->SetCollisionObjectType(ECC_PhysicsBody);
 		GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		GetMesh()->SetAllBodiesBelowSimulatePhysics(FName("pelvis"), true, true);
 	}
-
-	UE_LOG(LogTemp, Log, TEXT("[RAGDOLL] Ragdoll enabled for %s"), *GetName());
 }
 
 void AFPSCharacter::DisableRagdoll()
 {
-	// Re-enable character movement (Walk mode)
 	if (CMC)
 	{
 		CMC->SetMovementMode(MOVE_Walking);
 	}
 
-	// Restore body mesh collision settings
 	if (GetMesh())
 	{
 		GetMesh()->SetCollisionProfileName(FName("CharacterMesh"), true);
@@ -2425,7 +2185,6 @@ void AFPSCharacter::DisableRagdoll()
 		GetMesh()->SetAllBodiesSimulatePhysics(false);
 	}
 
-	// Restore capsule collision settings
 	if (GetCapsuleComponent())
 	{
 		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
@@ -2433,15 +2192,12 @@ void AFPSCharacter::DisableRagdoll()
 		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Ignore);
 	}
 
-	// Relink default animation layers
 	if (DefaultAnimLayer)
 	{
 		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
 		Legs->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
 		Arms->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
 	}
-
-	UE_LOG(LogTemp, Log, TEXT("[RAGDOLL] Ragdoll disabled for %s"), *GetName());
 }
 
 // ============================================

@@ -17,7 +17,6 @@ ABaseWeapon::ABaseWeapon()
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 
-	// Dual-mesh setup: FPS and TPS as siblings to prevent transform inheritance
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	RootComponent = SceneRoot;
 
@@ -34,9 +33,6 @@ ABaseWeapon::ABaseWeapon()
 	FPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	BallisticsComponent = CreateDefaultSubobject<UBallisticsComponent>(TEXT("BallisticsComponent"));
-
-	// Fire component - default to nullptr, will be created in Blueprint as specific subclass
-	// (USemiAutoFireComponent, UFullAutoFireComponent, or UBurstFireComponent)
 	FireComponent = nullptr;
 
 	FPSMagazineComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("FPSMagazineComponent"));
@@ -47,11 +43,11 @@ ABaseWeapon::ABaseWeapon()
 
 	FPSSightComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("FPSSightComponent"));
 	FPSSightComponent->SetupAttachment(FPSMesh, FName("attachment0"));
-	FPSSightComponent->SetIsReplicated(false);  // Component not replicated (child actor spawned locally)
+	FPSSightComponent->SetIsReplicated(false);
 
 	TPSSightComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("TPSSightComponent"));
 	TPSSightComponent->SetupAttachment(TPSMesh, FName("attachment0"));
-	TPSSightComponent->SetIsReplicated(false);  // Component not replicated (child actor spawned locally)
+	TPSSightComponent->SetIsReplicated(false);
 }
 
 void ABaseWeapon::PostInitializeComponents()
@@ -64,15 +60,12 @@ void ABaseWeapon::PostInitializeComponents()
 		TPSMagazineComponent->SetChildActorClass(MagazineClass);
 	}
 
-	// Initialize sight components from DefaultSightClass
-	// This runs on ALL machines (Server + Clients)
 	if (DefaultSightClass)
 	{
 		CurrentSightClass = DefaultSightClass;
 		InitSightComponents(CurrentSightClass);
 	}
 
-	// Find ReloadComponent if it was added in Blueprint
 	if (!ReloadComponent)
 	{
 		ReloadComponent = FindComponentByClass<UReloadComponent>();
@@ -83,61 +76,28 @@ void ABaseWeapon::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Find FireComponent if it was added in Blueprint
 	if (!FireComponent)
 	{
 		FireComponent = FindComponentByClass<UFireComponent>();
 	}
 
-	// Find ReloadComponent if it was added in Blueprint (already done in PostInitializeComponents, but check again)
 	if (!ReloadComponent)
 	{
 		ReloadComponent = FindComponentByClass<UReloadComponent>();
 	}
 
-	// SERVER-ONLY initialization
 	if (HasAuthority() && TPSMagazineComponent->GetChildActor())
 	{
 		CurrentMagazine = Cast<ABaseMagazine>(TPSMagazineComponent->GetChildActor());
 
 		if (FireComponent && BallisticsComponent)
 		{
-			// Set sibling component reference
 			FireComponent->BallisticsComponent = BallisticsComponent;
 
-			// Initialize ballistics with magazine's caliber type
 			if (CurrentMagazine)
 			{
-				bool bSuccess = BallisticsComponent->InitAmmoType(CurrentMagazine->AmmoType);
-				if (!bSuccess)
-				{
-					UE_LOG(LogTemp, Error, TEXT("BaseWeapon::BeginPlay() - Failed to initialize ammo type for caliber: %s"),
-						*UEnum::GetValueAsString(CurrentMagazine->AmmoType));
-				}
+				BallisticsComponent->InitAmmoType(CurrentMagazine->AmmoType);
 			}
-
-			UE_LOG(LogTemp, Log, TEXT("BaseWeapon::BeginPlay() - Components initialized (using interfaces)"));
-		}
-		else
-		{
-			if (!FireComponent)
-			{
-				UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::BeginPlay() - FireComponent not found! Add FireComponent in Blueprint."));
-			}
-			if (!BallisticsComponent)
-			{
-				UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::BeginPlay() - BallisticsComponent not found!"));
-			}
-		}
-
-		// Check ReloadComponent separately (can exist even if FireComponent/BallisticsComponent missing)
-		if (!ReloadComponent)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::BeginPlay() - ReloadComponent not found! Weapon will not be reloadable. Add ReloadComponent in Blueprint."));
-		}
-		else
-		{
-			UE_LOG(LogTemp, Log, TEXT("BaseWeapon::BeginPlay() - ReloadComponent found and initialized"));
 		}
 	}
 }
@@ -152,16 +112,12 @@ void ABaseWeapon::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifet
 
 void ABaseWeapon::OnRep_CurrentMagazine()
 {
-	// TODO: Trigger UI update events
-	// TODO: Play magazine change animations
-	// TODO: Update HUD ammo display
 }
 
 void ABaseWeapon::SetOwner(AActor* NewOwner)
 {
 	Super::SetOwner(NewOwner);
 
-	// Propagate owner to magazines
 	if (FPSMagazineComponent->GetChildActor())
 	{
 		FPSMagazineComponent->GetChildActor()->SetOwner(NewOwner);
@@ -172,7 +128,6 @@ void ABaseWeapon::SetOwner(AActor* NewOwner)
 		TPSMagazineComponent->GetChildActor()->SetOwner(NewOwner);
 	}
 
-	// Propagate owner to sights
 	if (FPSSightComponent && FPSSightComponent->GetChildActor())
 	{
 		FPSSightComponent->GetChildActor()->SetOwner(NewOwner);
@@ -186,52 +141,38 @@ void ABaseWeapon::SetOwner(AActor* NewOwner)
 
 void ABaseWeapon::UseStart_Implementation(const FUseContext& Ctx)
 {
-	// Called locally on owning client when IA_Use pressed
-	// Delegate to server via RPC
 	Server_Shoot(true);
 }
 
 void ABaseWeapon::UseTick_Implementation(const FUseContext& Ctx)
 {
-	// Optional: continuous use while held
-	// FireComponent handles fire rate internally, so this can be empty
 }
 
 void ABaseWeapon::UseStop_Implementation(const FUseContext& Ctx)
 {
-	// Called locally on owning client when IA_Use released
-	// Delegate to server via RPC
 	Server_Shoot(false);
 }
 
 void ABaseWeapon::Server_Shoot_Implementation(bool bPressed)
 {
-	// SERVER ONLY - runs on authority
-	if (!FireComponent)
-	{
-		return;
-	}
+	if (!FireComponent) return;
 
 	if (bPressed)
 	{
-		// Trigger pressed - start shooting
 		FireComponent->TriggerPulled();
 	}
 	else
 	{
-		// Trigger released - stop shooting
 		FireComponent->TriggerReleased();
 	}
 }
 
 bool ABaseWeapon::IsUsing_Implementation() const
 {
-	// Check if currently shooting
 	if (FireComponent)
 	{
 		return FireComponent->IsTriggerHeld();
 	}
-
 	return false;
 }
 
@@ -246,7 +187,6 @@ bool ABaseWeapon::CanInteract_Implementation(FGameplayTag Verb, const FInteracti
 	{
 		return GetOwner() == nullptr;
 	}
-
 	return false;
 }
 
@@ -256,7 +196,6 @@ void ABaseWeapon::Interact_Implementation(FGameplayTag Verb, const FInteractionC
 	{
 		if (GetOwner() == nullptr && Ctx.Pawn && Ctx.Pawn->Implements<UItemCollectorInterface>())
 		{
-			// NO CAST - Ctx.Pawn implements IItemCollectorInterface and handles pickup
 			IItemCollectorInterface::Execute_Pickup(Ctx.Pawn, this);
 		}
 	}
@@ -268,7 +207,6 @@ FText ABaseWeapon::GetInteractionText_Implementation(FGameplayTag Verb, const FI
 	{
 		return FText::Format(FText::FromString("Pickup {0}"), Name);
 	}
-
 	return FText::GetEmpty();
 }
 
@@ -279,57 +217,25 @@ bool ABaseWeapon::CanBePicked_Implementation(const FInteractionContext& Ctx) con
 
 void ABaseWeapon::OnPicked_Implementation(APawn* Picker, const FInteractionContext& Ctx)
 {
-	// Called when weapon is picked up and added to inventory (SERVER ONLY)
-	// Generic pickup logic (SetOwner, SetHidden, SetCollision) is handled by FPSCharacter::OnInventoryItemAdded
-	// This handles weapon-specific behavior
-
-	// Attach weapon to character mesh (for inventory storage)
-	// Weapon stays hidden but attached to character
-	
-
-	// TODO: Weapon-specific pickup behavior:
-	// - Play pickup sound (via Multicast RPC)
-	// - Spawn pickup VFX
-	// - Trigger pickup animation
-	// - Award achievement/stat tracking
 }
 
 void ABaseWeapon::OnDropped_Implementation(const FInteractionContext& Ctx)
 {
-	// Called when weapon is dropped from inventory (SERVER ONLY)
-	// Generic drop logic is handled by FPSCharacter, this handles weapon-specific behavior
-	
-	// Ensure weapon actor replicates movement when dropped
 	SetReplicateMovement(true);
 }
 
 void ABaseWeapon::OnEquipped_Implementation(APawn* OwnerPawn)
 {
-	// Generic equip logic is handled by FPSCharacter::SetupActiveItemLocal()
-
-	// TODO: Add weapon-specific equip behavior here:
-	// - Play equip sound (via Multicast RPC)
-	// - Play equip animation (via Multicast RPC)
-	// - Initialize weapon state (ammo, fire mode)
 }
 
 void ABaseWeapon::OnUnequipped_Implementation()
 {
-	// Visual state cleanup is handled by FPSCharacter::DetachItemMeshes()
-
 	IsAiming = false;
 
-	// Cancel reload if in progress
 	if (ReloadComponent && ReloadComponent->bIsReloading)
 	{
 		ReloadComponent->Server_CancelReload();
 	}
-
-	// TODO: Weapon-specific unequip behavior (SERVER ONLY):
-	// - Stop active timers (fire rate, reload, etc.)
-	// - Play holster sound (via Multicast RPC)
-	// - Play holster animation (via Multicast RPC)
-	// - Save weapon state (ammo count, fire mode)
 }
 
 bool ABaseWeapon::IsEquipped_Implementation() const
@@ -372,18 +278,12 @@ float ABaseWeapon::GetBreathingScale_Implementation() const
 	return BreathingScale;
 }
 
-// ============================================
-// BALLISTICS HANDLER INTERFACE IMPLEMENTATION
-// ============================================
-
 void ABaseWeapon::HandleShotFired_Implementation(
 	FVector_NetQuantize MuzzleLocation,
 	FVector_NetQuantizeNormal Direction)
 {
-	// SERVER ONLY
 	if (HasAuthority())
 	{
-		// Replicate to all clients via Multicast RPC
 		Multicast_PlayMuzzleFlash(MuzzleLocation, Direction);
 	}
 }
@@ -393,93 +293,51 @@ void ABaseWeapon::HandleImpactDetected_Implementation(
 	FVector_NetQuantize Location,
 	FVector_NetQuantizeNormal Normal)
 {
-	// SERVER ONLY
 	if (HasAuthority())
 	{
-		// Replicate to all clients via Multicast RPC
 		Multicast_SpawnImpactEffect(ImpactVFX, Location, Normal);
 	}
 }
-
-// ============================================
-// MUZZLE EFFECTS (Multiplayer)
-// ============================================
 
 void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
 	FVector_NetQuantize MuzzleLocation,
 	FVector_NetQuantizeNormal Direction)
 {
-	// Runs on SERVER and ALL CLIENTS
-
-	// 1. Spawn muzzle flash VFX attached to weapon barrel bone
 	if (MuzzleFlashNiagara)
 	{
-		// Determine which mesh to use based on ownership
 		USkeletalMeshComponent* MuzzleMesh = nullptr;
 
-		// Check if local player is owner
 		APawn* OwnerPawn = Cast<APawn>(GetOwner());
 		if (OwnerPawn && OwnerPawn->IsLocallyControlled())
 		{
-			MuzzleMesh = FPSMesh; // Owner sees FPS mesh
-			UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Using FPS mesh (owner)"));
+			MuzzleMesh = FPSMesh;
 		}
 		else
 		{
-			MuzzleMesh = TPSMesh; // Others see TPS mesh
-			UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Using TPS mesh (spectator)"));
+			MuzzleMesh = TPSMesh;
 		}
 
 		if (MuzzleMesh)
 		{
-			// ✅ ATTACH to "barrel" bone (not spawn at location!)
-			UNiagaraComponent* MuzzleFlashComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
+			UNiagaraFunctionLibrary::SpawnSystemAttached(
 				MuzzleFlashNiagara,
 				MuzzleMesh,
-				FName("barrel"),           // Attach to barrel bone
-				FVector::ZeroVector,       // No offset
-				FRotator::ZeroRotator,     // No rotation offset
-				EAttachLocation::SnapToTarget, // Snap to bone transform
-				true,                      // Auto destroy
-				true,                      // Auto activate
+				FName("barrel"),
+				FVector::ZeroVector,
+				FRotator::ZeroRotator,
+				EAttachLocation::SnapToTarget,
+				true,
+				true,
 				ENCPoolMethod::None
 			);
-
-			if (MuzzleFlashComponent)
-			{
-				UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Muzzle flash attached to barrel bone"));
-			}
-			else
-			{
-				UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Failed to spawn muzzle flash! Check MuzzleFlashNiagara asset."));
-			}
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - MuzzleMesh is null! Weapon not properly initialized."));
 		}
 	}
 
-	// 2. Play shoot sound (TODO: Add USoundCue property)
-	// if (ShootSound)
-	// {
-	//     UGameplayStatics::PlaySoundAtLocation(GetWorld(), ShootSound, MuzzleLocation);
-	// }
-
-	// 3. Play shoot animation montage on character meshes
-	// ✅ MULTIPLAYER COMPLIANT: Multicast RPC runs on ALL clients
-	// ✅ Each machine plays montage locally (no AnimInstance in RPC params)
-	// ✅ CAPABILITY-BASED: Uses ICharacterMeshProviderInterface (no direct cast to AFPSCharacter)
-	// ✅ Follows same pattern as ReloadComponent::PlayReloadMontages()
-	// ✅ SLOT: ShootMontage uses "DefaultGroup.Shoot" (different from Reload's "DefaultGroup.UpperBody")
-	//    This allows shooting and reloading to coexist without conflicts
 	if (ShootMontage)
 	{
-		// Get weapon owner (character/pawn)
 		AActor* WeaponOwner = GetOwner();
 		if (WeaponOwner && WeaponOwner->Implements<UCharacterMeshProviderInterface>())
 		{
-			// ✅ Get Body mesh via interface (no direct cast!)
 			USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(WeaponOwner);
 			if (BodyMesh)
 			{
@@ -487,11 +345,9 @@ void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
 				if (BodyAnimInst)
 				{
 					BodyAnimInst->Montage_Play(ShootMontage);
-					UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Playing Shoot montage on Body"));
 				}
 			}
 
-			// ✅ Get Arms mesh via interface
 			USkeletalMeshComponent* ArmsMesh = ICharacterMeshProviderInterface::Execute_GetArmsMesh(WeaponOwner);
 			if (ArmsMesh)
 			{
@@ -499,11 +355,9 @@ void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
 				if (ArmsAnimInst)
 				{
 					ArmsAnimInst->Montage_Play(ShootMontage);
-					UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Playing Shoot montage on Arms"));
 				}
 			}
 
-			// ✅ Get Legs mesh via interface
 			USkeletalMeshComponent* LegsMesh = ICharacterMeshProviderInterface::Execute_GetLegsMesh(WeaponOwner);
 			if (LegsMesh)
 			{
@@ -511,13 +365,10 @@ void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
 				if (LegsAnimInst)
 				{
 					LegsAnimInst->Montage_Play(ShootMontage);
-					UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_PlayMuzzleFlash() - Playing Shoot montage on Legs"));
 				}
 			}
 		}
 	}
-
-	// 4. Shell ejection (TODO: Implement)
 }
 
 void ABaseWeapon::Multicast_SpawnImpactEffect_Implementation(
@@ -525,15 +376,10 @@ void ABaseWeapon::Multicast_SpawnImpactEffect_Implementation(
 	FVector_NetQuantize Location,
 	FVector_NetQuantizeNormal Normal)
 {
-	// Runs on SERVER and ALL CLIENTS
-	// Load VFX asset (synchronous for simplicity)
 	UNiagaraSystem* VFX = ImpactVFX.LoadSynchronous();
 
 	if (VFX)
 	{
-		// Spawn Niagara system at impact point
-		// ✅ Create rotation from surface normal (Z-axis aligned with normal)
-		// This ensures effect spawns perpendicular to surface (correct for decals, dust, sparks)
 		FRotator ImpactRotation = FRotationMatrix::MakeFromZ(Normal).Rotator();
 
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
@@ -541,20 +387,13 @@ void ABaseWeapon::Multicast_SpawnImpactEffect_Implementation(
 			VFX,
 			Location,
 			ImpactRotation,
-			FVector(1.0f),  // Scale
-			true,           // Auto destroy
-			true,           // Auto activate
+			FVector(1.0f),
+			true,
+			true,
 			ENCPoolMethod::None
 		);
-
-		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::Multicast_SpawnImpactEffect() - Impact VFX spawned at %s, Normal: %s, Rotation: %s"),
-			*Location.ToString(), *Normal.ToString(), *ImpactRotation.ToString());
 	}
 }
-
-// ============================================
-// AMMO CONSUMER INTERFACE IMPLEMENTATION
-// ============================================
 
 FName ABaseWeapon::GetAmmoType_Implementation() const
 {
@@ -577,33 +416,15 @@ int32 ABaseWeapon::GetClipSize_Implementation() const
 
 int32 ABaseWeapon::GetTotalAmmo_Implementation() const
 {
-	// TODO: Implement reserve ammo system
 	return 0;
 }
 
 int32 ABaseWeapon::ConsumeAmmo_Implementation(int32 Requested, const FUseContext& Ctx)
 {
-	// SERVER ONLY
-	if (!HasAuthority())
-	{
-		UE_LOG(LogTemp, Error, TEXT("BaseWeapon::ConsumeAmmo() - Called on CLIENT! This should only run on server."));
-		return 0;
-	}
+	if (!HasAuthority()) return 0;
+	if (!CurrentMagazine || CurrentMagazine->CurrentAmmo <= 0) return 0;
+	if (ReloadComponent && ReloadComponent->bIsReloading) return 0;
 
-	if (!CurrentMagazine || CurrentMagazine->CurrentAmmo <= 0)
-	{
-		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::ConsumeAmmo() - No ammo available"));
-		return 0;
-	}
-
-	// Check if reloading (use ReloadComponent->bIsReloading instead of obsolete IsReload)
-	if (ReloadComponent && ReloadComponent->bIsReloading)
-	{
-		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::ConsumeAmmo() - Weapon is reloading"));
-		return 0;
-	}
-
-	// Consume requested amount (or all remaining if less available)
 	int32 AmmoToConsume = FMath::Min(Requested, CurrentMagazine->CurrentAmmo);
 
 	for (int32 i = 0; i < AmmoToConsume; i++)
@@ -611,43 +432,24 @@ int32 ABaseWeapon::ConsumeAmmo_Implementation(int32 Requested, const FUseContext
 		CurrentMagazine->RemoveAmmo();
 	}
 
-	UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::ConsumeAmmo() - Consumed %d rounds, remaining: %d"),
-		AmmoToConsume, CurrentMagazine->CurrentAmmo);
-
 	return AmmoToConsume;
 }
 
-// ============================================
-// SIGHT SYSTEM
-// ============================================
-
 void ABaseWeapon::InitSightComponents(TSubclassOf<ABaseSight> SightClass)
 {
-	// This function runs on ALL machines (Server + Clients)
-	// Called from PostInitializeComponents() or OnRep_CurrentSightClass()
-
-	if (!FPSSightComponent || !TPSSightComponent)
-	{
-		UE_LOG(LogTemp, Error, TEXT("BaseWeapon::InitSightComponents() - Sight components are nullptr!"));
-		return;
-	}
+	if (!FPSSightComponent || !TPSSightComponent) return;
 
 	if (SightClass)
 	{
-		// Set child actor class for both components
-		// ChildActorComponent will spawn the actor locally on this machine
-		// Cast TSubclassOf<ABaseSight> to TSubclassOf<AActor>
 		FPSSightComponent->SetChildActorClass(TSubclassOf<AActor>(SightClass));
 		TPSSightComponent->SetChildActorClass(TSubclassOf<AActor>(SightClass));
 
-		// Ensure spawned child actors don't replicate (visual-only)
-		// This is redundant since BaseSight has bReplicates=false, but explicit is better
 		FPSSightComponent->CreateChildActor();
 		if (ABaseSight* FPSSight = Cast<ABaseSight>(FPSSightComponent->GetChildActor()))
 		{
 			FPSSight->SetReplicates(false);
 			FPSSight->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::FirstPerson;
-			FPSSight->SetOwner(GetOwner());  // Propagate weapon owner to sight
+			FPSSight->SetOwner(GetOwner());
 		}
 
 		TPSSightComponent->CreateChildActor();
@@ -655,46 +457,25 @@ void ABaseWeapon::InitSightComponents(TSubclassOf<ABaseSight> SightClass)
 		{
 			TPSSight->SetReplicates(false);
 			TPSSight->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::WorldSpaceRepresentation;
-			TPSSight->SetOwner(GetOwner());  // Propagate weapon owner to sight
+			TPSSight->SetOwner(GetOwner());
 		}
-
-		UE_LOG(LogTemp, Log, TEXT("BaseWeapon::InitSightComponents() - Sight initialized: %s"),
-			*SightClass->GetName());
 	}
 	else
 	{
-		// Clear sight components (no sight attached)
 		FPSSightComponent->SetChildActorClass(nullptr);
 		TPSSightComponent->SetChildActorClass(nullptr);
-
-		UE_LOG(LogTemp, Log, TEXT("BaseWeapon::InitSightComponents() - Sight cleared"));
 	}
 }
 
 void ABaseWeapon::OnRep_CurrentSightClass()
 {
-	// Called on CLIENTS when CurrentSightClass replicates from server
-	// Re-initialize sight components with new class
-	// Server already called InitSightComponents() directly, so this only runs on clients
-
-	UE_LOG(LogTemp, Log, TEXT("BaseWeapon::OnRep_CurrentSightClass() - Sight class replicated: %s"),
-		CurrentSightClass ? *CurrentSightClass->GetName() : TEXT("nullptr"));
-
 	InitSightComponents(CurrentSightClass);
 }
-
-// ============================================
-// SIGHT INTERFACE
-// ============================================
 
 TSubclassOf<UUserWidget> ABaseWeapon::GetCrossHair_Implementation() const
 {
 	return CrossHair;
 }
-
-// ============================================
-// HELPER METHODS
-// ============================================
 
 AActor* ABaseWeapon::GetCurrentSightActor() const
 {
@@ -704,10 +485,6 @@ AActor* ABaseWeapon::GetCurrentSightActor() const
 	}
 	return nullptr;
 }
-
-// ============================================
-// SIGHT INTERFACE IMPLEMENTATION
-// ============================================
 
 TSubclassOf<UUserWidget> ABaseWeapon::GetAimingCrosshair_Implementation() const
 {
@@ -797,17 +574,13 @@ void ABaseWeapon::SetFPSMeshVisibility_Implementation(bool bVisible)
 {
 	if (FPSMesh)
 	{
-		// Propagate visibility to all child components (sights, magazines, attachments)
 		FPSMesh->SetVisibility(bVisible, true);
 	}
 }
 
 void ABaseWeapon::SetAiming_Implementation(bool bAiming)
 {
-	// Update aiming state (called by FPSCharacter when aiming starts/stops)
 	IsAiming = bAiming;
-
-	UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::SetAiming() - IsAiming set to: %s"), bAiming ? TEXT("TRUE") : TEXT("FALSE"));
 }
 
 bool ABaseWeapon::GetIsAiming_Implementation() const
@@ -815,83 +588,63 @@ bool ABaseWeapon::GetIsAiming_Implementation() const
 	return IsAiming;
 }
 
-// ============================================
-// RELOADABLE INTERFACE
-// ============================================
-
 bool ABaseWeapon::CanReload_Implementation() const
 {
-	if (!ReloadComponent)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::CanReload - No ReloadComponent attached"));
-		return false;
-	}
-
+	if (!ReloadComponent) return false;
 	return ReloadComponent->CanReload_Internal();
 }
 
 void ABaseWeapon::Reload_Implementation(const FUseContext& Ctx)
 {
-	if (!ReloadComponent)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::Reload - No ReloadComponent attached"));
-		return;
-	}
-
+	if (!ReloadComponent) return;
 	ReloadComponent->Server_StartReload(Ctx);
 }
 
 bool ABaseWeapon::IsReloading_Implementation() const
 {
 	if (!ReloadComponent) return false;
-
 	return ReloadComponent->bIsReloading;
 }
 
-// ============================================
-// ITEM WIDGET PROVIDER INTERFACE
-// ============================================
+AActor* ABaseWeapon::GetFPSMagazineActor_Implementation() const
+{
+	if (FPSMagazineComponent)
+	{
+		return FPSMagazineComponent->GetChildActor();
+	}
+	return nullptr;
+}
+
+AActor* ABaseWeapon::GetTPSMagazineActor_Implementation() const
+{
+	if (TPSMagazineComponent)
+	{
+		return TPSMagazineComponent->GetChildActor();
+	}
+	return nullptr;
+}
+
+UReloadComponent* ABaseWeapon::GetReloadComponent_Implementation() const
+{
+	return ReloadComponent;
+}
 
 TSubclassOf<UUserWidget> ABaseWeapon::GetItemWidgetClass_Implementation() const
 {
 	return ItemWidgetClass;
 }
 
-// ============================================
-// UTILITY METHODS
-// ============================================
-
 void ABaseWeapon::SyncVisualMagazines()
 {
-	// ✅ CORRECT: Synchronize visual magazines with CurrentMagazine (single source of truth)
-	//
-	// ARCHITECTURE:
-	// CurrentMagazine (TPSMagazineComponent->GetChildActor()) = Authoritative gameplay state (REPLICATED)
-	// FPSMagazineComponent->GetChildActor() = Visual representation for Arms (FirstPerson)
-	// TPSMagazineComponent->GetChildActor() = Visual representation for Body (ThirdPerson)
-	//
-	// CurrentMagazine->CurrentAmmo is REPLICATED, but FPS/TPS visual magazines are separate actors
-	// We must manually sync their CurrentAmmo for visual consistency
+	if (!CurrentMagazine) return;
 
-	if (!CurrentMagazine)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::SyncVisualMagazines() - CurrentMagazine is null"));
-		return;
-	}
-
-	// Sync FPS magazine (visual only, for Arms mesh)
 	if (ABaseMagazine* FPSMag = Cast<ABaseMagazine>(FPSMagazineComponent->GetChildActor()))
 	{
 		FPSMag->CurrentAmmo = CurrentMagazine->CurrentAmmo;
-		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::SyncVisualMagazines() - Synced FPS magazine: %d/%d"),
-			FPSMag->CurrentAmmo, FPSMag->MaxCapacity);
 	}
 
-	// Sync TPS magazine (visual only, for Body mesh)
 	if (ABaseMagazine* TPSMag = Cast<ABaseMagazine>(TPSMagazineComponent->GetChildActor()))
 	{
 		TPSMag->CurrentAmmo = CurrentMagazine->CurrentAmmo;
-		UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::SyncVisualMagazines() - Synced TPS magazine: %d/%d"),
-			TPSMag->CurrentAmmo, TPSMag->MaxCapacity);
 	}
 }
