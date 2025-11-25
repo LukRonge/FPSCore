@@ -13,8 +13,13 @@ UBallisticsComponent::UBallisticsComponent()
 	SetIsReplicatedByDefault(false);
 	CurrentAmmoType = nullptr;
 
+	// 5.56x45mm NATO - M4A1, M16, SCAR-L, HK416
 	TSoftObjectPtr<UAmmoTypeDataAsset> AmmoType_556NATO(FSoftObjectPath(TEXT("/Script/FPSCore.AmmoTypeDataAsset'/FPSCore/Blueprints/Weapons/AmmoTypes/AmmoType_5_56x45mm_NATO.AmmoType_5_56x45mm_NATO'")));
 	CaliberDataMap.Add(EAmmoCaliberType::NATO_556x45mm, AmmoType_556NATO);
+
+	// 9x19mm Parabellum - VP9, Glock, MP5, UZI
+	TSoftObjectPtr<UAmmoTypeDataAsset> AmmoType_9mm(FSoftObjectPath(TEXT("/Script/FPSCore.AmmoTypeDataAsset'/FPSCore/Blueprints/Weapons/AmmoTypes/AmmoType_9mm.AmmoType_9mm'")));
+	CaliberDataMap.Add(EAmmoCaliberType::Parabellum_9x19mm, AmmoType_9mm);
 }
 
 void UBallisticsComponent::BeginPlay()

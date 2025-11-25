@@ -30,6 +30,13 @@ protected:
 public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
+	/**
+	 * Override SetOwner to apply visibility settings when owner changes
+	 * Calls InitFPSType() to apply OnlyOwnerSee/OwnerNoSee flags based on FirstPersonPrimitiveType
+	 * Same pattern as BaseSight::SetOwner()
+	 */
+	virtual void SetOwner(AActor* NewOwner) override;
+
 	// ============================================
 	// MAGAZINE DATA
 	// ============================================
@@ -77,16 +84,6 @@ public:
 	void RemoveAmmo();
 
 	/**
-	 * Setup owner and visibility in one call (recommended API)
-	 * Sets owner, FirstPersonPrimitiveType, and applies visibility to all mesh components
-	 *
-	 * @param NewOwner - Character owner (for SetOnlyOwnerSee/SetOwnerNoSee)
-	 * @param Type - FirstPerson (owner only) or WorldSpaceRepresentation (others only)
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Magazine")
-	void SetupOwnerAndVisibility(APawn* NewOwner, EFirstPersonPrimitiveType Type);
-
-	/**
 	 * Initialize first-person primitive type visibility settings
 	 * Applies FirstPersonPrimitiveType to all mesh components using SetFirstPersonPrimitiveType()
 	 *
@@ -100,7 +97,7 @@ public:
 	 * NOT called from BeginPlay() - owner chain not yet established at that point
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Magazine")
-	void InitFPSType();
+	void ApplyVisibilityToMeshes();
 
 	// ============================================
 	// AMMO PROVIDER INTERFACE

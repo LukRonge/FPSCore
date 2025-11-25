@@ -1,0 +1,195 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#include "Weapons/HKVP9.h"
+#include "Core/AmmoCaliberTypes.h"
+#include "Components/SemiAutoFireComponent.h"
+#include "Components/BoxMagazineReloadComponent.h"
+#include "Components/BallisticsComponent.h"
+#include "BaseMagazine.h"
+#include "Animation/AnimInstance.h"
+#include "Net/UnrealNetwork.h"
+
+AHKVP9::AHKVP9()
+{
+	// ============================================
+	// WEAPON INFO
+	// ============================================
+	Name = FText::FromString("HK VP9");
+	Description = FText::FromString("9x19mm Parabellum striker-fired pistol with semi-auto fire mode.");
+
+	// ============================================
+	// CALIBER
+	// ============================================
+	AcceptedCaliberType = EAmmoCaliberType::Parabellum_9x19mm;
+
+	// ============================================
+	// COMPONENTS
+	// ============================================
+
+	// Semi-Auto Fire Component
+	SemiAutoFireComponent = CreateDefaultSubobject<USemiAutoFireComponent>(TEXT("SemiAutoFireComponent"));
+	SemiAutoFireComponent->FireRate = 450.0f;      // 450 RPM max (semi-auto limited by trigger speed)
+	SemiAutoFireComponent->SpreadScale = 0.8f;     // Slightly more accurate than rifles
+	SemiAutoFireComponent->RecoilScale = 0.7f;     // Lower recoil than rifles
+
+	// Box Magazine Reload Component
+	BoxMagazineReloadComponent = CreateDefaultSubobject<UBoxMagazineReloadComponent>(TEXT("BoxMagazineReloadComponent"));
+	BoxMagazineReloadComponent->MagazineOutSocketName = FName("weapon_l");
+	BoxMagazineReloadComponent->MagazineInSocketName = FName("magazine");
+
+	// ============================================
+	// AIMING DEFAULTS
+	// ============================================
+	AimFOV = 60.0f;          // Wider FOV than rifles (pistol sights)
+	AimLookSpeed = 0.7f;     // Faster look speed than rifles
+	LeaningScale = 0.8f;     // Slightly less lean (lighter weapon)
+	BreathingScale = 0.6f;   // Less sway (lighter weapon)
+
+	// ============================================
+	// VP9 STATE DEFAULTS
+	// ============================================
+	bSlideLockedBack = false;
+}
+
+// ============================================
+// REPLICATION
+// ============================================
+
+void AHKVP9::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AHKVP9, bSlideLockedBack);
+}
+
+void AHKVP9::OnRep_SlideLockedBack()
+{
+	PropagateStateToAnimInstances();
+}
+
+void AHKVP9::PropagateStateToAnimInstances()
+{
+	// Propagate state to FPS mesh AnimInstance
+	if (FPSMesh)
+	{
+		if (UAnimInstance* FPSAnimInstance = FPSMesh->GetAnimInstance())
+		{
+			// AnimInstance reads BlueprintReadOnly properties directly from owner actor
+			// Force AnimInstance to update by marking it dirty
+			FPSAnimInstance->NativeUpdateAnimation(0.0f);
+		}
+	}
+
+	// Propagate state to TPS mesh AnimInstance
+	if (TPSMesh)
+	{
+		if (UAnimInstance* TPSAnimInstance = TPSMesh->GetAnimInstance())
+		{
+			TPSAnimInstance->NativeUpdateAnimation(0.0f);
+		}
+	}
+}
+
+// ============================================
+// BASEWEAPON OVERRIDES
+// ============================================
+
+void AHKVP9::Multicast_PlayMuzzleFlash_Implementation(
+	FVector_NetQuantize MuzzleLocation,
+	FVector_NetQuantizeNormal Direction)
+{
+	// Call base implementation (muzzle VFX + character shoot anims)
+	Super::Multicast_PlayMuzzleFlash_Implementation(MuzzleLocation, Direction);
+
+	// VP9-specific: Play slide shoot montage on weapon meshes
+	// This runs on ALL clients (server + remote clients)
+	PlayWeaponMontage(SlideShootMontage);
+}
+
+void AHKVP9::HandleShotFired_Implementation(
+	FVector_NetQuantize MuzzleLocation,
+	FVector_NetQuantizeNormal Direction)
+{
+	// Call base implementation (triggers Multicast_PlayMuzzleFlash for character anims + muzzle VFX)
+	Super::HandleShotFired_Implementation(MuzzleLocation, Direction);
+
+	// VP9-specific: Check if magazine is empty after this shot → slide locks back (SERVER ONLY)
+	bool bStateChanged = false;
+	if (CurrentMagazine && CurrentMagazine->CurrentAmmo == 0)
+	{
+		bSlideLockedBack = true;
+		bStateChanged = true;
+	}
+
+	// Server: propagate state to AnimInstances immediately
+	// Clients receive state via OnRep which calls PropagateStateToAnimInstances
+	if (bStateChanged && HasAuthority())
+	{
+		PropagateStateToAnimInstances();
+	}
+}
+
+void AHKVP9::OnUnequipped_Implementation()
+{
+	// Call base implementation (cancels reload, resets aiming)
+	Super::OnUnequipped_Implementation();
+
+	// VP9-specific: Reset state (slide goes forward)
+	bSlideLockedBack = false;
+
+	// Server: propagate state to AnimInstances immediately
+	// Clients receive state via OnRep which calls PropagateStateToAnimInstances
+	if (HasAuthority())
+	{
+		PropagateStateToAnimInstances();
+	}
+}
+
+// ============================================
+// RELOADABLE INTERFACE OVERRIDE
+// ============================================
+
+void AHKVP9::OnWeaponReloadComplete_Implementation()
+{
+	// Call base implementation
+	Super::OnWeaponReloadComplete_Implementation();
+
+	// VP9-specific: Reset slide state (slide goes forward after reload)
+	bSlideLockedBack = false;
+
+	// Server: propagate state to AnimInstances immediately
+	// Clients receive state via OnRep which calls PropagateStateToAnimInstances
+	if (HasAuthority())
+	{
+		PropagateStateToAnimInstances();
+	}
+}
+
+// ============================================
+// HELPERS
+// ============================================
+
+void AHKVP9::PlayWeaponMontage(UAnimMontage* Montage)
+{
+	if (!Montage) return;
+
+	// Play on FPS mesh (visible to owner)
+	if (FPSMesh)
+	{
+		UAnimInstance* FPSAnimInstance = FPSMesh->GetAnimInstance();
+		if (FPSAnimInstance)
+		{
+			FPSAnimInstance->Montage_Play(Montage);
+		}
+	}
+
+	// Play on TPS mesh (visible to others)
+	if (TPSMesh)
+	{
+		UAnimInstance* TPSAnimInstance = TPSMesh->GetAnimInstance();
+		if (TPSAnimInstance)
+		{
+			TPSAnimInstance->Montage_Play(Montage);
+		}
+	}
+}

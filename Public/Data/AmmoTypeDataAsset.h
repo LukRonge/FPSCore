@@ -17,6 +17,18 @@
  * - Ballistics: mass, velocity, drop, penetration
  * - Damage: base damage, damage radius, falloff
  * - Impact VFX: different effects per physical material (concrete, metal, wood, etc.)
+ *
+ * AVAILABLE AMMO TYPES:
+ * - 5.56x45mm NATO: /Script/FPSCore.AmmoTypeDataAsset'/FPSCore/Blueprints/Weapons/AmmoTypes/AmmoType_5_56x45mm_NATO.AmmoType_5_56x45mm_NATO'
+ * - 9x19mm Parabellum: /Script/FPSCore.AmmoTypeDataAsset'/FPSCore/Blueprints/Weapons/AmmoTypes/AmmoType_9mm.AmmoType_9mm'
+ *
+ * RECOMMENDED VALUES FOR 9x19mm PARABELLUM:
+ * - CaliberType: Parabellum_9x19mm
+ * - ProjectileMass: 8.0g (124 grain FMJ)
+ * - MuzzleVelocity: 375 m/s
+ * - DragCoefficient: 0.165 (lower than rifle rounds)
+ * - PenetrationPower: 0.35 (less penetration than rifle rounds)
+ * - Damage: 25 (pistol caliber)
  */
 UCLASS(BlueprintType)
 class FPSCORE_API UAmmoTypeDataAsset : public UPrimaryDataAsset

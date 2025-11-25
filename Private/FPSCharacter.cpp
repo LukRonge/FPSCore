@@ -1297,6 +1297,7 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 		if (!ActiveItem && Controller && Controller->Implements<UPlayerHUDInterface>())
 		{
 			IPlayerHUDInterface::Execute_SetCrossHair(Controller, DefaultCrossHair, nullptr);
+			IPlayerHUDInterface::Execute_UpdateActiveItem(Controller, nullptr);
 		}
 
 		// Reset all scales to defaults when no active item (defensive cleanup)

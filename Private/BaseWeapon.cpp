@@ -25,6 +25,7 @@ ABaseWeapon::ABaseWeapon()
 	TPSMesh->SetupAttachment(SceneRoot);
 	TPSMesh->SetOwnerNoSee(true);
 	TPSMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	TPSMesh->SetSimulatePhysics(true);
 	TPSMesh->SetIsReplicated(true);
 	TPSMesh->bReplicatePhysicsToAutonomousProxy = true;
 
@@ -32,15 +33,18 @@ ABaseWeapon::ABaseWeapon()
 	FPSMesh->SetupAttachment(SceneRoot);
 	FPSMesh->SetOnlyOwnerSee(true);
 	FPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FPSMesh->PrimaryComponentTick.bCanEverTick = false;
 
 	BallisticsComponent = CreateDefaultSubobject<UBallisticsComponent>(TEXT("BallisticsComponent"));
 	FireComponent = nullptr;
 
 	FPSMagazineComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("FPSMagazineComponent"));
 	FPSMagazineComponent->SetupAttachment(FPSMesh, FName("magazine"));
+	FPSMagazineComponent->SetIsReplicated(false);
 
 	TPSMagazineComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("TPSMagazineComponent"));
 	TPSMagazineComponent->SetupAttachment(TPSMesh, FName("magazine"));
+	TPSMagazineComponent->SetIsReplicated(false);
 
 	FPSSightComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("FPSSightComponent"));
 	FPSSightComponent->SetupAttachment(FPSMesh, FName("attachment0"));
@@ -55,16 +59,26 @@ void ABaseWeapon::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 
-	if (MagazineClass)
-	{
-		FPSMagazineComponent->SetChildActorClass(MagazineClass);
-		TPSMagazineComponent->SetChildActorClass(MagazineClass);
-	}
+	// SERVER ONLY: Initialize magazine and sight components
+	// Remote clients receive these via OnRep_CurrentMagazineClass / OnRep_CurrentSightClass
+	// This prevents ChildActor destruction caused by bReplicates=true conflict
 
-	if (DefaultSightClass)
+	
+
+	if (HasAuthority())
 	{
-		CurrentSightClass = DefaultSightClass;
-		InitSightComponents(CurrentSightClass);
+		if (DefaultMagazineClass)
+		{
+			CurrentMagazineClass = DefaultMagazineClass;
+		}
+
+		if (DefaultSightClass)
+		{
+			CurrentSightClass = DefaultSightClass;
+		}
+
+		InitMagazineComponents(DefaultMagazineClass);
+		InitSightComponents(DefaultSightClass);
 	}
 
 	if (!ReloadComponent)
@@ -110,6 +124,7 @@ void ABaseWeapon::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifet
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ABaseWeapon, CurrentMagazine);
+	DOREPLIFETIME(ABaseWeapon, CurrentMagazineClass);
 	DOREPLIFETIME(ABaseWeapon, CurrentSightClass);
 }
 
@@ -129,6 +144,58 @@ void ABaseWeapon::SetOwner(AActor* NewOwner)
 	if (TPSMagazineComponent->GetChildActor())
 	{
 		TPSMagazineComponent->GetChildActor()->SetOwner(NewOwner);
+	}
+
+	if (FPSSightComponent && FPSSightComponent->GetChildActor())
+	{
+		FPSSightComponent->GetChildActor()->SetOwner(NewOwner);
+	}
+
+	if (TPSSightComponent && TPSSightComponent->GetChildActor())
+	{
+		TPSSightComponent->GetChildActor()->SetOwner(NewOwner);
+	}
+}
+
+void ABaseWeapon::OnRep_Owner()
+{
+	Super::OnRep_Owner();
+
+	AActor* NewOwner = GetOwner();
+
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon::OnRep_Owner] %s - NewOwner: %s, HasAuthority: %d"),
+		*GetName(),
+		NewOwner ? *NewOwner->GetName() : TEXT("nullptr"),
+		HasAuthority());
+
+	UE_LOG(LogTemp, Warning, TEXT("  FPSMagazineComponent: %s, TPSMagazineComponent: %s"),
+		FPSMagazineComponent ? TEXT("valid") : TEXT("nullptr"),
+		TPSMagazineComponent ? TEXT("valid") : TEXT("nullptr"));
+
+	if (FPSMagazineComponent)
+	{
+		AActor* FPSMag = FPSMagazineComponent->GetChildActor();
+		TSubclassOf<AActor> FPSMagClass = FPSMagazineComponent->GetChildActorClass();
+		UE_LOG(LogTemp, Warning, TEXT("  FPSMag: %s, Class: %s"),
+			FPSMag ? *FPSMag->GetName() : TEXT("nullptr"),
+			FPSMagClass ? *FPSMagClass->GetName() : TEXT("nullptr"));
+		if (FPSMag)
+		{
+			FPSMag->SetOwner(NewOwner);
+		}
+	}
+
+	if (TPSMagazineComponent)
+	{
+		AActor* TPSMag = TPSMagazineComponent->GetChildActor();
+		TSubclassOf<AActor> TPSMagClass = TPSMagazineComponent->GetChildActorClass();
+		UE_LOG(LogTemp, Warning, TEXT("  TPSMag: %s, Class: %s"),
+			TPSMag ? *TPSMag->GetName() : TEXT("nullptr"),
+			TPSMagClass ? *TPSMagClass->GetName() : TEXT("nullptr"));
+		if (TPSMag)
+		{
+			TPSMag->SetOwner(NewOwner);
+		}
 	}
 
 	if (FPSSightComponent && FPSSightComponent->GetChildActor())
@@ -449,19 +516,19 @@ void ABaseWeapon::InitSightComponents(TSubclassOf<ABaseSight> SightClass)
 		FPSSightComponent->SetChildActorClass(TSubclassOf<AActor>(SightClass));
 		TPSSightComponent->SetChildActorClass(TSubclassOf<AActor>(SightClass));
 
-		FPSSightComponent->CreateChildActor();
+		// FPS Sight: FirstPerson visibility (only owner sees)
 		if (ABaseSight* FPSSight = Cast<ABaseSight>(FPSSightComponent->GetChildActor()))
 		{
-			FPSSight->SetReplicates(false);
 			FPSSight->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::FirstPerson;
+			FPSSight->ApplyVisibilityToMeshes();
 			FPSSight->SetOwner(GetOwner());
 		}
 
-		TPSSightComponent->CreateChildActor();
+		// TPS Sight: WorldSpaceRepresentation visibility (others see, owner doesn't)
 		if (ABaseSight* TPSSight = Cast<ABaseSight>(TPSSightComponent->GetChildActor()))
 		{
-			TPSSight->SetReplicates(false);
 			TPSSight->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::WorldSpaceRepresentation;
+			TPSSight->ApplyVisibilityToMeshes();
 			TPSSight->SetOwner(GetOwner());
 		}
 	}
@@ -475,6 +542,43 @@ void ABaseWeapon::InitSightComponents(TSubclassOf<ABaseSight> SightClass)
 void ABaseWeapon::OnRep_CurrentSightClass()
 {
 	InitSightComponents(CurrentSightClass);
+}
+
+void ABaseWeapon::InitMagazineComponents(TSubclassOf<ABaseMagazine> MagazineClass)
+{
+	if (MagazineClass)
+	{
+		FPSMagazineComponent->SetChildActorClass(TSubclassOf<AActor>(MagazineClass));
+		TPSMagazineComponent->SetChildActorClass(TSubclassOf<AActor>(MagazineClass));
+
+		// FPS Magazine: FirstPerson visibility (only owner sees)
+		if (ABaseMagazine* FPSMag = Cast<ABaseMagazine>(FPSMagazineComponent->GetChildActor()))
+		{
+			//FPSMag->SetReplicates(false);
+			FPSMag->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::FirstPerson;
+			FPSMag->ApplyVisibilityToMeshes();
+			FPSMag->SetOwner(GetOwner());
+		}
+
+		// TPS Magazine: WorldSpaceRepresentation visibility (others see, owner doesn't)
+		if (ABaseMagazine* TPSMag = Cast<ABaseMagazine>(TPSMagazineComponent->GetChildActor()))
+		{
+			//TPSMag->SetReplicates(false);
+			TPSMag->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::WorldSpaceRepresentation;
+			TPSMag->ApplyVisibilityToMeshes();
+			TPSMag->SetOwner(GetOwner());
+		}
+	}
+	else
+	{
+		FPSMagazineComponent->SetChildActorClass(nullptr);
+		TPSMagazineComponent->SetChildActorClass(nullptr);
+	}
+}
+
+void ABaseWeapon::OnRep_CurrentMagazineClass()
+{
+	InitMagazineComponents(CurrentMagazineClass);
 }
 
 TSubclassOf<UUserWidget> ABaseWeapon::GetCrossHair_Implementation() const
@@ -632,6 +736,13 @@ AActor* ABaseWeapon::GetTPSMagazineActor_Implementation() const
 UReloadComponent* ABaseWeapon::GetReloadComponent_Implementation() const
 {
 	return ReloadComponent;
+}
+
+void ABaseWeapon::OnWeaponReloadComplete_Implementation()
+{
+	// Base implementation does nothing
+	// Override in child classes for weapon-specific behavior
+	// Example: M4A1 resets bBoltCarrierOpen = false
 }
 
 TSubclassOf<UUserWidget> ABaseWeapon::GetItemWidgetClass_Implementation() const

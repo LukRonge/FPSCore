@@ -54,6 +54,16 @@ public:
 	// Called on Server + Clients (owner replicates automatically)
 	virtual void SetOwner(AActor* NewOwner) override;
 
+	/**
+	 * Called on CLIENTS when Owner property is replicated from server
+	 * Propagates owner to child actors (magazines, sights) to fix visibility
+	 *
+	 * CRITICAL: Without this override, remote clients won't have correct
+	 * magazine/sight visibility because SetOwner() cascade only happens
+	 * on server when weapon is picked up
+	 */
+	virtual void OnRep_Owner() override;
+
 protected:
 	// ============================================
 	// COMPONENTS (PROTECTED - use interfaces for external access)
@@ -79,13 +89,13 @@ protected:
 	UReloadComponent* ReloadComponent = nullptr;
 
 	// FPS Magazine component (attached to FPS mesh "magazine" socket)
-	// Visible only to owner, spawned from MagazineClass
+	// Visible only to owner, spawned from CurrentMagazineClass
 	// External access: IReloadableInterface::Execute_GetFPSMagazineActor()
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
 	UChildActorComponent* FPSMagazineComponent;
 
 	// TPS Magazine component (attached to TPS mesh "magazine" socket)
-	// Visible to others, spawned from MagazineClass
+	// Visible to others, spawned from CurrentMagazineClass
 	// External access: IReloadableInterface::Execute_GetTPSMagazineActor()
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
 	UChildActorComponent* TPSMagazineComponent;
@@ -297,15 +307,37 @@ protected:
 
 public:
 
-	// Magazine class for auto-spawning in MagazineComponent
-	// Set this in Blueprint Class Defaults (e.g., BP_Magazine_AK47)
-	// Magazine component will automatically spawn this class in BeginPlay()
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Magazine")
-	TSubclassOf<ABaseMagazine> MagazineClass;
+	// Default magazine class (set in Blueprint Class Defaults)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Magazine")
+	TSubclassOf<ABaseMagazine> DefaultMagazineClass;
+
+	// Current attached magazine class (REPLICATED)
+	// Auto-initialized in PostInitializeComponents() from DefaultMagazineClass
+	// Can be changed at runtime for modular magazine swapping
+	UPROPERTY(BlueprintReadWrite, Category = "Weapon|Magazine", ReplicatedUsing = OnRep_CurrentMagazineClass)
+	TSubclassOf<ABaseMagazine> CurrentMagazineClass;
 
 	// Accepted caliber type (for magazine compatibility checks)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Magazine")
 	EAmmoCaliberType AcceptedCaliberType = EAmmoCaliberType::NATO_556x45mm;
+
+protected:
+	/**
+	 * Called on CLIENTS when CurrentMagazineClass is replicated from server
+	 * Re-initializes magazine components with new magazine class
+	 */
+	UFUNCTION()
+	void OnRep_CurrentMagazineClass();
+
+public:
+	/**
+	 * Initialize magazine components with specified magazine class
+	 * Spawns child actors for FPSMagazineComponent and TPSMagazineComponent
+	 * Runs on ALL machines (called from PostInitializeComponents or OnRep)
+	 * @param MagazineClass - Magazine class to spawn (nullptr to clear magazines)
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Weapon|Magazine")
+	void InitMagazineComponents(TSubclassOf<ABaseMagazine> MagazineClass);
 
 	// ============================================
 	// USABLE INTERFACE (Item usage - shoot, aim, etc.)
@@ -548,6 +580,15 @@ public:
 	 * @return ReloadComponent or nullptr if not available
 	 */
 	virtual UReloadComponent* GetReloadComponent_Implementation() const override;
+
+	/**
+	 * Called when reload completes successfully
+	 * Override in child classes for weapon-specific reload completion behavior
+	 * Example: M4A1 resets bBoltCarrierOpen = false
+	 *
+	 * Called from ReloadComponent::OnReloadComplete() via IReloadableInterface
+	 */
+	virtual void OnWeaponReloadComplete_Implementation() override;
 
 	// ============================================
 	// ITEM WIDGET PROVIDER INTERFACE

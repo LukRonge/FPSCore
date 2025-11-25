@@ -68,4 +68,13 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Reloadable|Component")
 	class UReloadComponent* GetReloadComponent() const;
 	virtual class UReloadComponent* GetReloadComponent_Implementation() const { return nullptr; }
+
+	/**
+	 * Called when reload completes successfully
+	 * Allows weapon-specific behavior after reload (e.g., M4A1 bolt carrier release)
+	 * Called from ReloadComponent::OnReloadComplete()
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Reloadable|Callback")
+	void OnWeaponReloadComplete();
+	virtual void OnWeaponReloadComplete_Implementation() { }
 };

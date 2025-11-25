@@ -6,29 +6,20 @@
 ABaseMagazine::ABaseMagazine()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 
 	bReplicates = true;
-	//SetReplicateMovement(true);
 }
 
 void ABaseMagazine::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// ============================================
-	// INITIAL SETUP
-	// ============================================
-	// Call InitFPSType() to set initial FirstPersonPrimitiveType and visibility flags
-	//
-	// IMPORTANT: Owner chain may not be correct yet:
-	// - If weapon is spawned in world (pickup): Weapon->GetOwner() = nullptr
-	// - If weapon is pre-equipped: Weapon->GetOwner() = Character ✅
-	//
-	// InitFPSType() will be called AGAIN from FPSCharacter::SetupActiveItemLocal()
-	// when weapon is equipped (runs on ALL machines via OnRep pattern)
-	// This ensures visibility is correct regardless of spawn scenario
-
-	InitFPSType();
+	// NOTE: Do NOT call ApplyVisibilityToMeshes() here!
+	// BeginPlay runs during CreateChildActor() BEFORE weapon sets FirstPersonPrimitiveType.
+	// Visibility is applied in:
+	// 1. InitMagazineComponents() - after setting FirstPersonPrimitiveType
+	// 2. SetOwner() - when owner changes (propagated from OnRep_Owner on remote clients)
 }
 
 void ABaseMagazine::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -36,6 +27,14 @@ void ABaseMagazine::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ABaseMagazine, CurrentAmmo);
+}
+
+void ABaseMagazine::SetOwner(AActor* NewOwner)
+{
+	Super::SetOwner(NewOwner);
+
+	// Apply visibility settings when owner changes (same pattern as BaseSight)
+	//ApplyVisibilityToMeshes();
 }
 
 // ============================================
@@ -55,15 +54,16 @@ void ABaseMagazine::RemoveAmmo()
 	CurrentAmmo = FMath::Max(0, CurrentAmmo - 1);
 }
 
-void ABaseMagazine::SetupOwnerAndVisibility(APawn* NewOwner, EFirstPersonPrimitiveType Type)
+void ABaseMagazine::ApplyVisibilityToMeshes()
 {
-	SetOwner(NewOwner);
-}
+	UE_LOG(LogTemp, Warning, TEXT("[BaseMagazine::ApplyVisibilityToMeshes] %s - Type: %d, Owner: %s"),
+		*GetName(),
+		(int32)FirstPersonPrimitiveType,
+		GetOwner() ? *GetOwner()->GetName() : TEXT("nullptr"));
 
-void ABaseMagazine::InitFPSType()
-{
 	if (FirstPersonPrimitiveType == EFirstPersonPrimitiveType::None)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("  Early return - Type is None"));
 		return;
 	}
 
@@ -86,29 +86,16 @@ void ABaseMagazine::InitFPSType()
 			break;
 	}
 
-	TArray<USkeletalMeshComponent*> SkeletalMeshComponents;
-	GetComponents<USkeletalMeshComponent>(SkeletalMeshComponents);
+	TArray<UPrimitiveComponent*> PrimitiveComponents;
+	GetComponents<UPrimitiveComponent>(PrimitiveComponents);
 
-	for (USkeletalMeshComponent* SkeletalMesh : SkeletalMeshComponents)
+	UE_LOG(LogTemp, Warning, TEXT("  Found %d primitive components, OnlyOwnerSee: %d, OwnerNoSee: %d"),
+		PrimitiveComponents.Num(), bOnlyOwnerSee, bOwnerNoSee);
+
+	for (UPrimitiveComponent* PrimitiveComp : PrimitiveComponents)
 	{
-		if (SkeletalMesh)
-		{
-			SkeletalMesh->SetFirstPersonPrimitiveType(FirstPersonPrimitiveType);
-			SkeletalMesh->SetOnlyOwnerSee(bOnlyOwnerSee);
-			SkeletalMesh->SetOwnerNoSee(bOwnerNoSee);
-		}
-	}
-
-	TArray<UStaticMeshComponent*> StaticMeshComponents;
-	GetComponents<UStaticMeshComponent>(StaticMeshComponents);
-
-	for (UStaticMeshComponent* StaticMesh : StaticMeshComponents)
-	{
-		if (StaticMesh)
-		{
-			StaticMesh->SetFirstPersonPrimitiveType(FirstPersonPrimitiveType);
-			StaticMesh->SetOnlyOwnerSee(bOnlyOwnerSee);
-			StaticMesh->SetOwnerNoSee(bOwnerNoSee);
-		}
+		PrimitiveComp->SetFirstPersonPrimitiveType(FirstPersonPrimitiveType);
+		PrimitiveComp->SetOnlyOwnerSee(bOnlyOwnerSee);
+		PrimitiveComp->SetOwnerNoSee(bOwnerNoSee);
 	}
 }

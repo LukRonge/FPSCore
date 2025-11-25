@@ -95,6 +95,9 @@ void UBoxMagazineReloadComponent::OnReloadComplete()
 				IAmmoProviderInterface::Execute_SetCurrentAmmo(FPSMagActor, NewAmmoCount);
 			}
 		}
+
+		// Notify weapon that reload completed (for weapon-specific behavior like M4A1 bolt release)
+		IReloadableInterface::Execute_OnWeaponReloadComplete(OwnerItem);
 	}
 
 	bIsReloading = false;
