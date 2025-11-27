@@ -4,6 +4,7 @@
 #include "Components/BallisticsComponent.h"
 #include "Components/FireComponent.h"
 #include "Components/ReloadComponent.h"
+#include "Components/MagazineChildActorComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Core/FPSGameplayTags.h"
 #include "BaseMagazine.h"
@@ -38,13 +39,15 @@ ABaseWeapon::ABaseWeapon()
 	BallisticsComponent = CreateDefaultSubobject<UBallisticsComponent>(TEXT("BallisticsComponent"));
 	FireComponent = nullptr;
 
-	FPSMagazineComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("FPSMagazineComponent"));
+	FPSMagazineComponent = CreateDefaultSubobject<UMagazineChildActorComponent>(TEXT("FPSMagazineComponent"));
 	FPSMagazineComponent->SetupAttachment(FPSMesh, FName("magazine"));
-	FPSMagazineComponent->SetIsReplicated(false);
+	FPSMagazineComponent->SetIsReplicated(false);  // Child actor spawned via OnRep_CurrentMagazineClass
+	// FirstPersonPrimitiveType = FirstPerson (set in Blueprint defaults)
 
-	TPSMagazineComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("TPSMagazineComponent"));
+	TPSMagazineComponent = CreateDefaultSubobject<UMagazineChildActorComponent>(TEXT("TPSMagazineComponent"));
 	TPSMagazineComponent->SetupAttachment(TPSMesh, FName("magazine"));
-	TPSMagazineComponent->SetIsReplicated(false);
+	TPSMagazineComponent->SetIsReplicated(false);  // Child actor spawned via OnRep_CurrentMagazineClass
+	// FirstPersonPrimitiveType = WorldSpaceRepresentation (set in Blueprint defaults)
 
 	FPSSightComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("FPSSightComponent"));
 	FPSSightComponent->SetupAttachment(FPSMesh, FName("attachment0"));
@@ -59,11 +62,27 @@ void ABaseWeapon::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 
+	// ============================================
+	// COMPONENT INITIALIZATION (ALL MACHINES)
+	// ============================================
+	// Find components that may be added via Blueprint
+	// This runs before BeginPlay, ensuring components are available
+
+	if (!FireComponent)
+	{
+		FireComponent = FindComponentByClass<UFireComponent>();
+	}
+
+	if (!ReloadComponent)
+	{
+		ReloadComponent = FindComponentByClass<UReloadComponent>();
+	}
+
+	// ============================================
 	// SERVER ONLY: Initialize magazine and sight components
+	// ============================================
 	// Remote clients receive these via OnRep_CurrentMagazineClass / OnRep_CurrentSightClass
 	// This prevents ChildActor destruction caused by bReplicates=true conflict
-
-	
 
 	if (HasAuthority())
 	{
@@ -80,37 +99,46 @@ void ABaseWeapon::PostInitializeComponents()
 		InitMagazineComponents(DefaultMagazineClass);
 		InitSightComponents(DefaultSightClass);
 	}
-
-	if (!ReloadComponent)
-	{
-		ReloadComponent = FindComponentByClass<UReloadComponent>();
-	}
 }
 
 void ABaseWeapon::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (!FireComponent)
+	// ============================================
+	// REMOTE CLIENT: Initialize magazine/sight child actors from replicated class
+	// ============================================
+	// On remote clients, CurrentMagazineClass/CurrentSightClass are replicated BEFORE BeginPlay.
+	// Child actors must be created here because ChildActorComponent::SetChildActorClass()
+	// requires the component to be fully registered (which happens after BeginPlay starts).
+	// OnRep callbacks may fire before component registration is complete.
+	if (!HasAuthority())
 	{
-		FireComponent = FindComponentByClass<UFireComponent>();
+		if (CurrentMagazineClass)
+		{
+			InitMagazineComponents(CurrentMagazineClass);
+		}
+		if (CurrentSightClass)
+		{
+			InitSightComponents(CurrentSightClass);
+		}
 	}
 
-	if (!ReloadComponent)
-	{
-		ReloadComponent = FindComponentByClass<UReloadComponent>();
-	}
-
-	if (HasAuthority() && TPSMagazineComponent->GetChildActor())
+	// ============================================
+	// SERVER ONLY: Initialize authoritative magazine reference
+	// ============================================
+	if (HasAuthority() && TPSMagazineComponent && TPSMagazineComponent->GetChildActor())
 	{
 		// Use direct cast here - CurrentMagazine is authoritative replicated reference
 		// This is internal initialization, not external access pattern
 		CurrentMagazine = Cast<ABaseMagazine>(TPSMagazineComponent->GetChildActor());
 
+		// Link FireComponent to BallisticsComponent
 		if (FireComponent && BallisticsComponent)
 		{
 			FireComponent->BallisticsComponent = BallisticsComponent;
 
+			// Initialize ballistics with magazine's ammo type
 			if (CurrentMagazine)
 			{
 				BallisticsComponent->InitAmmoType(CurrentMagazine->AmmoType);
@@ -130,22 +158,33 @@ void ABaseWeapon::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifet
 
 void ABaseWeapon::OnRep_CurrentMagazine()
 {
+	// CLIENT ONLY - called when CurrentMagazine reference is replicated from server
+	// Synchronize BallisticsComponent with new magazine's ammo type
+	if (BallisticsComponent && CurrentMagazine)
+	{
+		BallisticsComponent->InitAmmoType(CurrentMagazine->AmmoType);
+	}
+
+	// Sync visual magazines (FPS/TPS) with authoritative CurrentMagazine ammo count
+	SyncVisualMagazines();
 }
 
 void ABaseWeapon::SetOwner(AActor* NewOwner)
 {
 	Super::SetOwner(NewOwner);
 
-	if (FPSMagazineComponent->GetChildActor())
+	// Propagate owner to magazine components
+	if (FPSMagazineComponent)
 	{
-		FPSMagazineComponent->GetChildActor()->SetOwner(NewOwner);
+		FPSMagazineComponent->PropagateOwner(NewOwner);
 	}
 
-	if (TPSMagazineComponent->GetChildActor())
+	if (TPSMagazineComponent)
 	{
-		TPSMagazineComponent->GetChildActor()->SetOwner(NewOwner);
+		TPSMagazineComponent->PropagateOwner(NewOwner);
 	}
 
+	// Propagate owner to sight components
 	if (FPSSightComponent && FPSSightComponent->GetChildActor())
 	{
 		FPSSightComponent->GetChildActor()->SetOwner(NewOwner);
@@ -163,41 +202,18 @@ void ABaseWeapon::OnRep_Owner()
 
 	AActor* NewOwner = GetOwner();
 
-	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon::OnRep_Owner] %s - NewOwner: %s, HasAuthority: %d"),
-		*GetName(),
-		NewOwner ? *NewOwner->GetName() : TEXT("nullptr"),
-		HasAuthority());
-
-	UE_LOG(LogTemp, Warning, TEXT("  FPSMagazineComponent: %s, TPSMagazineComponent: %s"),
-		FPSMagazineComponent ? TEXT("valid") : TEXT("nullptr"),
-		TPSMagazineComponent ? TEXT("valid") : TEXT("nullptr"));
-
+	// Propagate owner to magazine components
 	if (FPSMagazineComponent)
 	{
-		AActor* FPSMag = FPSMagazineComponent->GetChildActor();
-		TSubclassOf<AActor> FPSMagClass = FPSMagazineComponent->GetChildActorClass();
-		UE_LOG(LogTemp, Warning, TEXT("  FPSMag: %s, Class: %s"),
-			FPSMag ? *FPSMag->GetName() : TEXT("nullptr"),
-			FPSMagClass ? *FPSMagClass->GetName() : TEXT("nullptr"));
-		if (FPSMag)
-		{
-			FPSMag->SetOwner(NewOwner);
-		}
+		FPSMagazineComponent->PropagateOwner(NewOwner);
 	}
 
 	if (TPSMagazineComponent)
 	{
-		AActor* TPSMag = TPSMagazineComponent->GetChildActor();
-		TSubclassOf<AActor> TPSMagClass = TPSMagazineComponent->GetChildActorClass();
-		UE_LOG(LogTemp, Warning, TEXT("  TPSMag: %s, Class: %s"),
-			TPSMag ? *TPSMag->GetName() : TEXT("nullptr"),
-			TPSMagClass ? *TPSMagClass->GetName() : TEXT("nullptr"));
-		if (TPSMag)
-		{
-			TPSMag->SetOwner(NewOwner);
-		}
+		TPSMagazineComponent->PropagateOwner(NewOwner);
 	}
 
+	// Propagate owner to sight components
 	if (FPSSightComponent && FPSSightComponent->GetChildActor())
 	{
 		FPSSightComponent->GetChildActor()->SetOwner(NewOwner);
@@ -354,7 +370,11 @@ void ABaseWeapon::HandleShotFired_Implementation(
 {
 	if (HasAuthority())
 	{
-		Multicast_PlayMuzzleFlash(MuzzleLocation, Direction);
+		// TPSMesh effects for OTHER players (Multicast runs on all clients)
+		Multicast_PlayMuzzleFlash();
+
+		// FPSMesh effects for OWNING CLIENT only (Client RPC runs on owner)
+		Client_PlayMuzzleFlash();
 	}
 }
 
@@ -369,42 +389,32 @@ void ABaseWeapon::HandleImpactDetected_Implementation(
 	}
 }
 
-void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
-	FVector_NetQuantize MuzzleLocation,
-	FVector_NetQuantizeNormal Direction)
+void ABaseWeapon::SpawnMuzzleFlashOnMesh(USkeletalMeshComponent* Mesh)
 {
-	if (MuzzleFlashNiagara)
+	if (!MuzzleFlashNiagara || !Mesh)
 	{
-		USkeletalMeshComponent* MuzzleMesh = nullptr;
-
-		// Check if owner is locally controlled pawn to select FPS or TPS mesh
-		AActor* OwnerActor = GetOwner();
-		APawn* OwnerPawn = OwnerActor ? Cast<APawn>(OwnerActor) : nullptr;
-		if (OwnerPawn && OwnerPawn->IsLocallyControlled())
-		{
-			MuzzleMesh = FPSMesh;
-		}
-		else
-		{
-			MuzzleMesh = TPSMesh;
-		}
-
-		if (MuzzleMesh)
-		{
-			UNiagaraFunctionLibrary::SpawnSystemAttached(
-				MuzzleFlashNiagara,
-				MuzzleMesh,
-				FName("barrel"),
-				FVector::ZeroVector,
-				FRotator::ZeroRotator,
-				EAttachLocation::SnapToTarget,
-				true,
-				true,
-				ENCPoolMethod::None
-			);
-		}
+		return;
 	}
 
+	UNiagaraFunctionLibrary::SpawnSystemAttached(
+		MuzzleFlashNiagara,
+		Mesh,
+		FName("barrel"),
+		FVector::ZeroVector,
+		FRotator::ZeroRotator,
+		EAttachLocation::SnapToTarget,
+		true,
+		true,
+		ENCPoolMethod::None
+	);
+}
+
+void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation()
+{
+	// TPSMesh muzzle flash (visible to others due to OwnerNoSee)
+	SpawnMuzzleFlashOnMesh(TPSMesh);
+
+	// Character shoot montage on Body + Legs mesh
 	if (ShootMontage)
 	{
 		AActor* WeaponOwner = GetOwner();
@@ -413,31 +423,46 @@ void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation(
 			USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(WeaponOwner);
 			if (BodyMesh)
 			{
-				UAnimInstance* BodyAnimInst = BodyMesh->GetAnimInstance();
-				if (BodyAnimInst)
+				if (UAnimInstance* AnimInst = BodyMesh->GetAnimInstance())
 				{
-					BodyAnimInst->Montage_Play(ShootMontage);
-				}
-			}
-
-			USkeletalMeshComponent* ArmsMesh = ICharacterMeshProviderInterface::Execute_GetArmsMesh(WeaponOwner);
-			if (ArmsMesh)
-			{
-				UAnimInstance* ArmsAnimInst = ArmsMesh->GetAnimInstance();
-				if (ArmsAnimInst)
-				{
-					ArmsAnimInst->Montage_Play(ShootMontage);
+					AnimInst->Montage_Play(ShootMontage);
 				}
 			}
 
 			USkeletalMeshComponent* LegsMesh = ICharacterMeshProviderInterface::Execute_GetLegsMesh(WeaponOwner);
 			if (LegsMesh)
 			{
-				UAnimInstance* LegsAnimInst = LegsMesh->GetAnimInstance();
-				if (LegsAnimInst)
+				if (UAnimInstance* AnimInst = LegsMesh->GetAnimInstance())
 				{
-					LegsAnimInst->Montage_Play(ShootMontage);
+					AnimInst->Montage_Play(ShootMontage);
 				}
+			}
+		}
+	}
+}
+
+void ABaseWeapon::Client_PlayMuzzleFlash_Implementation()
+{
+	// Safety check - Client RPC should only run on locally controlled client
+	AActor* WeaponOwner = GetOwner();
+	APawn* OwnerPawn = WeaponOwner ? Cast<APawn>(WeaponOwner) : nullptr;
+	if (!OwnerPawn || !OwnerPawn->IsLocallyControlled())
+	{
+		return;
+	}
+
+	// FPSMesh muzzle flash (visible to owner due to OnlyOwnerSee)
+	SpawnMuzzleFlashOnMesh(FPSMesh);
+
+	// Character shoot montage on Arms mesh (FPS view)
+	if (ShootMontage && WeaponOwner->Implements<UCharacterMeshProviderInterface>())
+	{
+		USkeletalMeshComponent* ArmsMesh = ICharacterMeshProviderInterface::Execute_GetArmsMesh(WeaponOwner);
+		if (ArmsMesh)
+		{
+			if (UAnimInstance* AnimInst = ArmsMesh->GetAnimInstance())
+			{
+				AnimInst->Montage_Play(ShootMontage);
 			}
 		}
 	}
@@ -497,12 +522,18 @@ int32 ABaseWeapon::ConsumeAmmo_Implementation(int32 Requested, const FUseContext
 	if (!CurrentMagazine || CurrentMagazine->CurrentAmmo <= 0) return 0;
 	if (ReloadComponent && ReloadComponent->bIsReloading) return 0;
 
+	// Validate requested amount
+	if (Requested <= 0) return 0;
+
 	int32 AmmoToConsume = FMath::Min(Requested, CurrentMagazine->CurrentAmmo);
 
-	for (int32 i = 0; i < AmmoToConsume; i++)
-	{
-		CurrentMagazine->RemoveAmmo();
-	}
+	// Single ammo update instead of loop - reduces network traffic
+	// CurrentMagazine->CurrentAmmo is REPLICATED, so this triggers one replication
+	CurrentMagazine->CurrentAmmo = FMath::Max(0, CurrentMagazine->CurrentAmmo - AmmoToConsume);
+
+	// Sync visual magazines with authoritative CurrentMagazine
+	// This ensures FPS magazine matches TPS magazine ammo count
+	SyncVisualMagazines();
 
 	return AmmoToConsume;
 }
@@ -546,28 +577,29 @@ void ABaseWeapon::OnRep_CurrentSightClass()
 
 void ABaseWeapon::InitMagazineComponents(TSubclassOf<ABaseMagazine> MagazineClass)
 {
+	UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::InitMagazineComponents() - %s, MagazineClass=%s, HasAuthority=%d"),
+		*GetName(),
+		MagazineClass ? *MagazineClass->GetName() : TEXT("nullptr"),
+		HasAuthority());
+
 	if (MagazineClass)
 	{
 		FPSMagazineComponent->SetChildActorClass(TSubclassOf<AActor>(MagazineClass));
 		TPSMagazineComponent->SetChildActorClass(TSubclassOf<AActor>(MagazineClass));
 
-		// FPS Magazine: FirstPerson visibility (only owner sees)
-		if (ABaseMagazine* FPSMag = Cast<ABaseMagazine>(FPSMagazineComponent->GetChildActor()))
-		{
-			//FPSMag->SetReplicates(false);
-			FPSMag->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::FirstPerson;
-			FPSMag->ApplyVisibilityToMeshes();
-			FPSMag->SetOwner(GetOwner());
-		}
+		UE_LOG(LogTemp, Warning, TEXT("  -> After SetChildActorClass: FPS ChildActor=%s, TPS ChildActor=%s"),
+			FPSMagazineComponent->GetChildActor() ? *FPSMagazineComponent->GetChildActor()->GetName() : TEXT("nullptr"),
+			TPSMagazineComponent->GetChildActor() ? *TPSMagazineComponent->GetChildActor()->GetName() : TEXT("nullptr"));
 
-		// TPS Magazine: WorldSpaceRepresentation visibility (others see, owner doesn't)
-		if (ABaseMagazine* TPSMag = Cast<ABaseMagazine>(TPSMagazineComponent->GetChildActor()))
-		{
-			//TPSMag->SetReplicates(false);
-			TPSMag->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::WorldSpaceRepresentation;
-			TPSMag->ApplyVisibilityToMeshes();
-			TPSMag->SetOwner(GetOwner());
-		}
+		// Initialize visibility AFTER SetChildActorClass creates the child actor
+		// FirstPersonPrimitiveType is set in Blueprint defaults on the component
+		FPSMagazineComponent->InitializeChildActorVisibility();
+		TPSMagazineComponent->InitializeChildActorVisibility();
+
+		// Propagate owner for correct visibility (owner may be nullptr for world weapons)
+		// When owner is nullptr, FPS magazine will be hidden, TPS magazine will be visible
+		FPSMagazineComponent->PropagateOwner(GetOwner());
+		TPSMagazineComponent->PropagateOwner(GetOwner());
 	}
 	else
 	{
@@ -578,6 +610,19 @@ void ABaseWeapon::InitMagazineComponents(TSubclassOf<ABaseMagazine> MagazineClas
 
 void ABaseWeapon::OnRep_CurrentMagazineClass()
 {
+	UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::OnRep_CurrentMagazineClass() - %s, CurrentMagazineClass=%s, HasBegunPlay=%d"),
+		*GetName(),
+		CurrentMagazineClass ? *CurrentMagazineClass->GetName() : TEXT("nullptr"),
+		HasActorBegunPlay());
+
+	// Skip if called before BeginPlay - BeginPlay will handle initialization
+	// OnRep can fire before component registration is complete, causing SetChildActorClass to fail
+	if (!HasActorBegunPlay())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("  -> Skipping: BeginPlay not called yet"));
+		return;
+	}
+
 	InitMagazineComponents(CurrentMagazineClass);
 }
 

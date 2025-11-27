@@ -33,8 +33,17 @@ void ABaseMagazine::SetOwner(AActor* NewOwner)
 {
 	Super::SetOwner(NewOwner);
 
-	// Apply visibility settings when owner changes (same pattern as BaseSight)
-	//ApplyVisibilityToMeshes();
+	// Apply visibility settings when owner changes
+	// This ensures OnlyOwnerSee/OwnerNoSee flags work correctly for FPS/TPS visibility
+	// Also handles SetVisibility(false) for FPS magazine when owner is nullptr
+	//
+	// IMPORTANT: Only apply if FirstPersonPrimitiveType is already set
+	// This prevents race condition where SetOwner() is called before
+	// MagazineChildActorComponent::InitializeChildActorVisibility() sets the type
+	if (FirstPersonPrimitiveType != EFirstPersonPrimitiveType::None)
+	{
+		ApplyVisibilityToMeshes();
+	}
 }
 
 // ============================================
@@ -56,30 +65,42 @@ void ABaseMagazine::RemoveAmmo()
 
 void ABaseMagazine::ApplyVisibilityToMeshes()
 {
-	UE_LOG(LogTemp, Warning, TEXT("[BaseMagazine::ApplyVisibilityToMeshes] %s - Type: %d, Owner: %s"),
+	// Debug logging
+	UE_LOG(LogTemp, Warning, TEXT("BaseMagazine::ApplyVisibilityToMeshes() - %s, FirstPersonPrimitiveType=%d, Owner=%s"),
 		*GetName(),
-		(int32)FirstPersonPrimitiveType,
+		static_cast<int32>(FirstPersonPrimitiveType),
 		GetOwner() ? *GetOwner()->GetName() : TEXT("nullptr"));
 
 	if (FirstPersonPrimitiveType == EFirstPersonPrimitiveType::None)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("  Early return - Type is None"));
+		UE_LOG(LogTemp, Warning, TEXT("  -> EARLY RETURN: FirstPersonPrimitiveType is None!"));
 		return;
 	}
 
+	// Determine visibility based on FirstPersonPrimitiveType and Owner state
 	bool bOnlyOwnerSee = false;
 	bool bOwnerNoSee = false;
+	bool bVisible = true;
+
+	// Check if we have a valid owner (weapon is equipped by someone)
+	const bool bHasOwner = (GetOwner() != nullptr);
 
 	switch (FirstPersonPrimitiveType)
 	{
 		case EFirstPersonPrimitiveType::FirstPerson:
+			// FPS magazine - visible ONLY to owner
+			// If no owner exists, this mesh should be HIDDEN (no one can see it)
 			bOnlyOwnerSee = true;
 			bOwnerNoSee = false;
+			bVisible = bHasOwner;  // Hidden when no owner
 			break;
 
 		case EFirstPersonPrimitiveType::WorldSpaceRepresentation:
+			// TPS magazine - visible to everyone EXCEPT owner
+			// If no owner exists, this mesh should be VISIBLE (everyone can see it)
 			bOnlyOwnerSee = false;
 			bOwnerNoSee = true;
+			bVisible = true;  // Always visible (OwnerNoSee handles owner case)
 			break;
 
 		default:
@@ -89,13 +110,14 @@ void ABaseMagazine::ApplyVisibilityToMeshes()
 	TArray<UPrimitiveComponent*> PrimitiveComponents;
 	GetComponents<UPrimitiveComponent>(PrimitiveComponents);
 
-	UE_LOG(LogTemp, Warning, TEXT("  Found %d primitive components, OnlyOwnerSee: %d, OwnerNoSee: %d"),
-		PrimitiveComponents.Num(), bOnlyOwnerSee, bOwnerNoSee);
+	UE_LOG(LogTemp, Warning, TEXT("  -> bHasOwner=%d, bVisible=%d, bOnlyOwnerSee=%d, bOwnerNoSee=%d, NumPrimitives=%d"),
+		bHasOwner, bVisible, bOnlyOwnerSee, bOwnerNoSee, PrimitiveComponents.Num());
 
 	for (UPrimitiveComponent* PrimitiveComp : PrimitiveComponents)
 	{
 		PrimitiveComp->SetFirstPersonPrimitiveType(FirstPersonPrimitiveType);
 		PrimitiveComp->SetOnlyOwnerSee(bOnlyOwnerSee);
 		PrimitiveComp->SetOwnerNoSee(bOwnerNoSee);
+		PrimitiveComp->SetVisibility(bVisible);
 	}
 }

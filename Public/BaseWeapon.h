@@ -34,6 +34,7 @@ class UBallisticsComponent;
 class UFireComponent;
 class UReloadComponent;
 class ABaseSight;
+class UMagazineChildActorComponent;
 
 UCLASS()
 class FPSCORE_API ABaseWeapon : public AActor, public IInteractableInterface, public IPickupableInterface, public IHoldableInterface, public ISightInterface, public IUsableInterface, public IAmmoConsumerInterface, public IBallisticsHandlerInterface, public IReloadableInterface, public IItemWidgetProviderInterface
@@ -90,15 +91,17 @@ protected:
 
 	// FPS Magazine component (attached to FPS mesh "magazine" socket)
 	// Visible only to owner, spawned from CurrentMagazineClass
+	// FirstPersonPrimitiveType = FirstPerson (set in Blueprint defaults)
 	// External access: IReloadableInterface::Execute_GetFPSMagazineActor()
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
-	UChildActorComponent* FPSMagazineComponent;
+	UMagazineChildActorComponent* FPSMagazineComponent;
 
 	// TPS Magazine component (attached to TPS mesh "magazine" socket)
 	// Visible to others, spawned from CurrentMagazineClass
+	// FirstPersonPrimitiveType = WorldSpaceRepresentation (set in Blueprint defaults)
 	// External access: IReloadableInterface::Execute_GetTPSMagazineActor()
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
-	UChildActorComponent* TPSMagazineComponent;
+	UMagazineChildActorComponent* TPSMagazineComponent;
 
 	// FPS Sight component (attached to FPS mesh "attachment0" bone)
 	// Visible only to owner, spawned from CurrentSightClass
@@ -383,18 +386,44 @@ public:
 	// ============================================
 	// MUZZLE EFFECTS (Multiplayer)
 	// ============================================
+	//
+	// ARCHITECTURE:
+	// - Multicast_PlayMuzzleFlash: TPSMesh effects (visible to OTHER players)
+	// - Client_PlayMuzzleFlash: FPSMesh effects (visible ONLY to owning client)
+	//
+	// Server calls BOTH RPCs:
+	// 1. Multicast → TPSMesh muzzle VFX + character TPS shoot anims (others see)
+	// 2. Client → FPSMesh muzzle VFX + character FPS shoot anims (owner sees)
+	//
+	// This follows multiplayer guidelines:
+	// - FPSMesh has SetOnlyOwnerSee(true) → only owning client sees it
+	// - TPSMesh has SetOwnerNoSee(true) → only other clients see it
+	//
+	// NOTE: No parameters needed - VFX spawns on mesh bone socket "barrel"
+	// ============================================
 
 protected:
 
+	/** Helper: Spawn muzzle flash VFX on specified mesh */
+	void SpawnMuzzleFlashOnMesh(USkeletalMeshComponent* Mesh);
+
 	/**
-	 * Multicast RPC for spawning muzzle flash on all clients
-	 * Spawns Niagara muzzle flash, plays sound, animates weapon
+	 * Multicast RPC: TPSMesh effects for OTHER players
+	 * - Spawns muzzle flash on TPSMesh (visible to others)
+	 * - Plays shoot montage on character Body mesh (TPS view)
+	 * Runs on: Server + ALL clients (but only affects TPSMesh which others see)
 	 */
 	UFUNCTION(NetMulticast, Reliable)
-	void Multicast_PlayMuzzleFlash(
-		FVector_NetQuantize MuzzleLocation,
-		FVector_NetQuantizeNormal Direction
-	);
+	void Multicast_PlayMuzzleFlash();
+
+	/**
+	 * Client RPC: FPSMesh effects for OWNING CLIENT only
+	 * - Spawns muzzle flash on FPSMesh (visible to owner)
+	 * - Plays shoot montage on character Arms mesh (FPS view)
+	 * Runs on: OWNING CLIENT only (the player who fired)
+	 */
+	UFUNCTION(Client, Reliable)
+	void Client_PlayMuzzleFlash();
 
 	/**
 	 * Multicast RPC for spawning impact effects on all clients
