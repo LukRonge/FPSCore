@@ -42,6 +42,10 @@ public:
 
 	// IRecoilHandlerInterface implementation
 	virtual void ApplyRecoilKick_Implementation(float RecoilScale) override;
+	virtual void ApplyCameraPitchKick_Implementation(float PitchDelta) override;
+	virtual void ApplyCameraYawKick_Implementation(float YawDelta) override;
+	virtual bool IsAimingDownSights_Implementation() const override;
+	virtual bool IsLocalPlayer_Implementation() const override;
 
 	// ICharacterMeshProviderInterface implementation
 	virtual USkeletalMeshComponent* GetBodyMesh_Implementation() const override;
@@ -93,6 +97,11 @@ protected:
 	// Server RPC to update pitch
 	UFUNCTION(Server, Unreliable)
 	void Server_UpdatePitch(float NewPitch);
+
+	// Server RPC to set aiming state
+	// Called from AimingPressed/AimingReleased to replicate bIsAiming to all clients
+	UFUNCTION(Server, Reliable)
+	void Server_SetAiming(bool bNewAiming);
 
 	// Client RPC to setup camera, input, and hands on owning client
 	// This ensures proper setup for listen server remote clients

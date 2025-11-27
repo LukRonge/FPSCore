@@ -944,7 +944,11 @@ void AFPSCharacter::AimingPressed()
 		IHoldableInterface::Execute_SetAiming(ActiveItem, true);
 	}
 
+	// Set local state immediately for responsive feel (local prediction)
 	bIsAiming = true;
+
+	// Notify server to replicate to other clients
+	Server_SetAiming(true);
 }
 
 void AFPSCharacter::AimingReleased()
@@ -968,8 +972,12 @@ void AFPSCharacter::AimingReleased()
 		IHoldableInterface::Execute_SetAiming(ActiveItem, false);
 	}
 
+	// Set local state immediately for responsive feel (local prediction)
 	bIsAiming = false;
 	bAimingCrosshairSet = false;
+
+	// Notify server to replicate to other clients
+	Server_SetAiming(false);
 
 	// Note: HipLeaningScale and HipBreathingScale are already set from EquipItem()
 	// Current* values will be interpolated in CalculateInterpolatedArmsOffset()
@@ -1047,6 +1055,13 @@ bool AFPSCharacter::IsActivelyMoving() const
 void AFPSCharacter::Server_SetMovementMode_Implementation(EFPSMovementMode NewMode)
 {
 	UpdateMovementSpeed(NewMode);
+}
+
+void AFPSCharacter::Server_SetAiming_Implementation(bool bNewAiming)
+{
+	// SERVER ONLY - set authoritative aiming state
+	// This will replicate to all clients via bIsAiming REPLICATED property
+	bIsAiming = bNewAiming;
 }
 
 void AFPSCharacter::UpdateMovementSpeed(EFPSMovementMode NewMode)
@@ -2155,6 +2170,28 @@ void AFPSCharacter::Multicast_ApplyRecoil_Implementation(float RecoilScale)
 	{
 		RecoilComp->ApplyRecoilToWeapon(RecoilScale);
 	}
+}
+
+void AFPSCharacter::ApplyCameraPitchKick_Implementation(float PitchDelta)
+{
+	// Apply pitch kick (negative = camera looks up)
+	UpdatePitch(PitchDelta);
+}
+
+void AFPSCharacter::ApplyCameraYawKick_Implementation(float YawDelta)
+{
+	// Apply yaw kick via controller input
+	AddControllerYawInput(YawDelta);
+}
+
+bool AFPSCharacter::IsAimingDownSights_Implementation() const
+{
+	return bIsAiming;
+}
+
+bool AFPSCharacter::IsLocalPlayer_Implementation() const
+{
+	return IsLocallyControlled();
 }
 
 // ============================================

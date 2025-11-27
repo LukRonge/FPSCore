@@ -1,7 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Components/RecoilComponent.h"
-#include "FPSCharacter.h"
+#include "Interfaces/RecoilHandlerInterface.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/KismetMathLibrary.h"
 
@@ -92,22 +92,23 @@ void URecoilComponent::AddRecoil(float Scale)
 void URecoilComponent::ApplyRecoilToCamera(float Scale)
 {
 	// OWNING CLIENT ONLY - camera kick
-	AFPSCharacter* Character = Cast<AFPSCharacter>(GetOwner());
-	if (!Character)
+	// Use interface instead of direct cast (Golden Rule compliance)
+	AActor* OwnerActor = GetOwner();
+	if (!OwnerActor || !OwnerActor->Implements<URecoilHandlerInterface>())
 	{
-		UE_LOG(LogTemp, Error, TEXT("RecoilComponent::ApplyRecoilToCamera() - Owner is not AFPSCharacter!"));
+		UE_LOG(LogTemp, Error, TEXT("RecoilComponent::ApplyRecoilToCamera() - Owner does not implement IRecoilHandlerInterface!"));
 		return;
 	}
 
-	if (!Character->IsLocallyControlled())
+	if (!IRecoilHandlerInterface::Execute_IsLocalPlayer(OwnerActor))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("RecoilComponent::ApplyRecoilToCamera() - Called on non-locally controlled character!"));
 		return;
 	}
 
-	// Get ADS modifier from character aiming state
+	// Get ADS modifier from character aiming state via interface
 	float ADSModifier = 1.0f;
-	if (Character->bIsAiming)
+	if (IRecoilHandlerInterface::Execute_IsAimingDownSights(OwnerActor))
 	{
 		ADSModifier = ADSRecoilMultiplier; // 0.5 = 50% recoil when aiming
 	}
@@ -122,10 +123,10 @@ void URecoilComponent::ApplyRecoilToCamera(float Scale)
 	float HorizontalKick = FMath::RandRange(-BaseHorizontalRecoil, BaseHorizontalRecoil);
 	HorizontalKick = (HorizontalKick + HorizontalBias) * Scale * ADSModifier;
 
-	// Apply to camera
+	// Apply to camera via interface
 	// Negative pitch = kick upward (camera looks up)
-	Character->UpdatePitch(-VerticalKick);
-	Character->AddControllerYawInput(HorizontalKick);
+	IRecoilHandlerInterface::Execute_ApplyCameraPitchKick(OwnerActor, -VerticalKick);
+	IRecoilHandlerInterface::Execute_ApplyCameraYawKick(OwnerActor, HorizontalKick);
 
 	// Track accumulated recoil for recovery
 	CurrentRecoilPitch += VerticalKick;
@@ -144,34 +145,40 @@ void URecoilComponent::ApplyRecoilToCamera(float Scale)
 
 void URecoilComponent::ApplyRecoilToWeapon(float Scale)
 {
-	// REMOTE CLIENTS ONLY - weapon animation
-	AFPSCharacter* Character = Cast<AFPSCharacter>(GetOwner());
-	if (!Character)
+	// REMOTE CLIENTS ONLY - weapon visual feedback for third-person view
+	// Use interface instead of direct cast (Golden Rule compliance)
+	AActor* OwnerActor = GetOwner();
+	if (!OwnerActor || !OwnerActor->Implements<URecoilHandlerInterface>())
 	{
-		UE_LOG(LogTemp, Error, TEXT("RecoilComponent::ApplyRecoilToWeapon() - Owner is not AFPSCharacter!"));
+		UE_LOG(LogTemp, Error, TEXT("RecoilComponent::ApplyRecoilToWeapon() - Owner does not implement IRecoilHandlerInterface!"));
 		return;
 	}
 
-	if (Character->IsLocallyControlled())
+	if (IRecoilHandlerInterface::Execute_IsLocalPlayer(OwnerActor))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("RecoilComponent::ApplyRecoilToWeapon() - Called on locally controlled character!"));
 		return;
 	}
 
-	// TODO: Implement weapon TPS mesh animation
-	// Options:
-	// 1. Play weapon recoil animation montage on Body mesh
-	// 2. Add procedural rotation offset to weapon TPS mesh
-	// 3. Use timeline for smooth kick/return animation
+	// NOTE: Primary TPS recoil animation is already handled by:
+	// BaseWeapon::Multicast_PlayMuzzleFlash() which plays ShootMontage on Body mesh
+	//
+	// This function is called for additional procedural feedback if needed
+	// Current implementation: Track state for accumulation (montage handles visual)
+	//
+	// Future options for enhanced TPS weapon kick:
+	// 1. Procedural rotation offset on weapon TPSMesh via interface
+	// 2. Additional additive animation layer on Body mesh
+	// 3. Physics impulse on weapon mesh
 
-	// For now, just track state
+	// Track state for accumulation logic
 	ShotCount++;
 	LastShotTime = GetWorld()->GetTimeSeconds();
 
 	// Enable tick for state decay
 	SetComponentTickEnabled(true);
 
-	UE_LOG(LogTemp, Verbose, TEXT("RecoilComponent::ApplyRecoilToWeapon() - Scale=%.2f (TODO: Implement weapon animation)"), Scale);
+	UE_LOG(LogTemp, Verbose, TEXT("RecoilComponent::ApplyRecoilToWeapon() - Scale=%.2f, ShotCount=%d (TPS animation handled by ShootMontage)"), Scale, ShotCount);
 }
 
 void URecoilComponent::ResetRecoil()
