@@ -69,18 +69,18 @@ void AHKVP9::OnRep_SlideLockedBack()
 
 void AHKVP9::PropagateStateToAnimInstances()
 {
-	// Propagate state to FPS mesh AnimInstance
+	// AnimBP reads bSlideLockedBack via PropertyAccess from this weapon actor
+	// PropertyAccess refreshes on animation tick, but we can force update via NativeUpdateAnimation
+	// This ensures AnimBP sees the new value immediately
+
 	if (FPSMesh)
 	{
 		if (UAnimInstance* FPSAnimInstance = FPSMesh->GetAnimInstance())
 		{
-			// AnimInstance reads BlueprintReadOnly properties directly from owner actor
-			// Force AnimInstance to update by marking it dirty
 			FPSAnimInstance->NativeUpdateAnimation(0.0f);
 		}
 	}
 
-	// Propagate state to TPS mesh AnimInstance
 	if (TPSMesh)
 	{
 		if (UAnimInstance* TPSAnimInstance = TPSMesh->GetAnimInstance())
@@ -94,37 +94,49 @@ void AHKVP9::PropagateStateToAnimInstances()
 // BASEWEAPON OVERRIDES
 // ============================================
 
-void AHKVP9::Multicast_PlayMuzzleFlash_Implementation(
-	FVector_NetQuantize MuzzleLocation,
-	FVector_NetQuantizeNormal Direction)
+void AHKVP9::Multicast_PlayMuzzleFlash_Implementation()
 {
-	// Call base implementation (muzzle VFX + character shoot anims)
-	Super::Multicast_PlayMuzzleFlash_Implementation(MuzzleLocation, Direction);
+	// Call base implementation (TPSMesh muzzle VFX + character Body/Legs anims)
+	Super::Multicast_PlayMuzzleFlash_Implementation();
 
-	// VP9-specific: Play slide shoot montage on weapon meshes
-	// This runs on ALL clients (server + remote clients)
-	PlayWeaponMontage(SlideShootMontage);
+	// VP9-specific: Play slide shoot montage on TPSMesh (visible to others)
+	if (SlideShootMontage && TPSMesh)
+	{
+		if (UAnimInstance* TPSAnimInstance = TPSMesh->GetAnimInstance())
+		{
+			TPSAnimInstance->Montage_Play(SlideShootMontage);
+		}
+	}
+}
+
+void AHKVP9::Client_PlayMuzzleFlash_Implementation()
+{
+	// Call base implementation (FPSMesh muzzle VFX + character Arms anims)
+	Super::Client_PlayMuzzleFlash_Implementation();
+
+	// VP9-specific: Play slide shoot montage on FPSMesh (visible to owner)
+	if (SlideShootMontage && FPSMesh)
+	{
+		if (UAnimInstance* FPSAnimInstance = FPSMesh->GetAnimInstance())
+		{
+			FPSAnimInstance->Montage_Play(SlideShootMontage);
+		}
+	}
 }
 
 void AHKVP9::HandleShotFired_Implementation(
 	FVector_NetQuantize MuzzleLocation,
 	FVector_NetQuantizeNormal Direction)
 {
-	// Call base implementation (triggers Multicast_PlayMuzzleFlash for character anims + muzzle VFX)
+	// Call base implementation (triggers Multicast + Client RPCs for muzzle VFX and character anims)
 	Super::HandleShotFired_Implementation(MuzzleLocation, Direction);
 
 	// VP9-specific: Check if magazine is empty after this shot → slide locks back (SERVER ONLY)
-	bool bStateChanged = false;
-	if (CurrentMagazine && CurrentMagazine->CurrentAmmo == 0)
+	if (HasAuthority() && CurrentMagazine && CurrentMagazine->CurrentAmmo == 0)
 	{
 		bSlideLockedBack = true;
-		bStateChanged = true;
-	}
-
-	// Server: propagate state to AnimInstances immediately
-	// Clients receive state via OnRep which calls PropagateStateToAnimInstances
-	if (bStateChanged && HasAuthority())
-	{
+		// Note: bSlideLockedBack is REPLICATED, OnRep will update clients
+		// Server must also update locally since OnRep doesn't run on server
 		PropagateStateToAnimInstances();
 	}
 }
@@ -165,31 +177,3 @@ void AHKVP9::OnWeaponReloadComplete_Implementation()
 	}
 }
 
-// ============================================
-// HELPERS
-// ============================================
-
-void AHKVP9::PlayWeaponMontage(UAnimMontage* Montage)
-{
-	if (!Montage) return;
-
-	// Play on FPS mesh (visible to owner)
-	if (FPSMesh)
-	{
-		UAnimInstance* FPSAnimInstance = FPSMesh->GetAnimInstance();
-		if (FPSAnimInstance)
-		{
-			FPSAnimInstance->Montage_Play(Montage);
-		}
-	}
-
-	// Play on TPS mesh (visible to others)
-	if (TPSMesh)
-	{
-		UAnimInstance* TPSAnimInstance = TPSMesh->GetAnimInstance();
-		if (TPSAnimInstance)
-		{
-			TPSAnimInstance->Montage_Play(Montage);
-		}
-	}
-}

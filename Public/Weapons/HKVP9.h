@@ -105,18 +105,21 @@ public:
 
 	/**
 	 * Override Multicast_PlayMuzzleFlash to add VP9-specific behavior
-	 * - Calls base implementation (muzzle VFX + character anims)
-	 * - Plays SlideShootMontage on weapon meshes (runs on ALL clients)
+	 * - Calls base implementation (TPSMesh muzzle VFX + character Body anims)
+	 * - Plays SlideShootMontage on TPSMesh (visible to others)
 	 */
-	virtual void Multicast_PlayMuzzleFlash_Implementation(
-		FVector_NetQuantize MuzzleLocation,
-		FVector_NetQuantizeNormal Direction
-	) override;
+	virtual void Multicast_PlayMuzzleFlash_Implementation() override;
+
+	/**
+	 * Override Client_PlayMuzzleFlash to add VP9-specific behavior
+	 * - Calls base implementation (FPSMesh muzzle VFX + character Arms anims)
+	 * - Plays SlideShootMontage on FPSMesh (visible to owner)
+	 */
+	virtual void Client_PlayMuzzleFlash_Implementation() override;
 
 	/**
 	 * Handle shot fired - VP9 specific behavior (SERVER ONLY)
 	 * - Sets bSlideLockedBack = true if magazine empty after shot
-	 * NOTE: SlideShootMontage is played in Multicast_PlayMuzzleFlash (runs on all clients)
 	 */
 	virtual void HandleShotFired_Implementation(
 		FVector_NetQuantize MuzzleLocation,
@@ -151,14 +154,4 @@ protected:
 	// Box magazine reload component
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VP9|Components")
 	UBoxMagazineReloadComponent* BoxMagazineReloadComponent;
-
-	// ============================================
-	// HELPERS
-	// ============================================
-
-	/**
-	 * Play montage on weapon meshes (FPSMesh + TPSMesh)
-	 * Used for slide_shoot and other weapon-specific animations
-	 */
-	void PlayWeaponMontage(UAnimMontage* Montage);
 };

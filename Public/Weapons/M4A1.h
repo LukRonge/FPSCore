@@ -125,10 +125,7 @@ public:
 	 * - Calls base implementation (muzzle VFX + character anims)
 	 * - Plays BoltCarrierShootMontage on weapon meshes (runs on ALL clients)
 	 */
-	virtual void Multicast_PlayMuzzleFlash_Implementation(
-		FVector_NetQuantize MuzzleLocation,
-		FVector_NetQuantizeNormal Direction
-	) override;
+	virtual void Multicast_PlayMuzzleFlash_Implementation() override;
 
 	/**
 	 * Handle shot fired - M4A1 specific behavior (SERVER ONLY)
