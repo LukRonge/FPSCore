@@ -51,14 +51,19 @@ void UBoltActionReloadComponent::PlayReloadMontages()
 		bReattachDuringReload ? TEXT("true") : TEXT("false"));
 
 	// Re-attach weapon to reload socket if configured
+	// Uses BoltActionFireComponent's shared implementation to avoid code duplication
 	if (bReattachDuringReload)
 	{
-		AActor* WeaponActor = GetOwnerItem();
-		if (WeaponActor && WeaponActor->Implements<UHoldableInterface>())
+		UBoltActionFireComponent* BoltComp = GetBoltActionFireComponent();
+		if (BoltComp)
 		{
-			FName ReloadSocket = IHoldableInterface::Execute_GetReloadAttachSocket(WeaponActor);
-			UE_LOG(LogBoltActionReload, Log, TEXT("Reattaching weapon to reload socket: %s"), *ReloadSocket.ToString());
-			ReattachWeaponToSocket(ReloadSocket);
+			AActor* WeaponActor = GetOwnerItem();
+			if (WeaponActor && WeaponActor->Implements<UHoldableInterface>())
+			{
+				FName ReloadSocket = IHoldableInterface::Execute_GetReloadAttachSocket(WeaponActor);
+				UE_LOG(LogBoltActionReload, Log, TEXT("Reattaching weapon to reload socket: %s"), *ReloadSocket.ToString());
+				BoltComp->ReattachWeaponToSocket(ReloadSocket);
+			}
 		}
 	}
 
@@ -85,14 +90,9 @@ void UBoltActionReloadComponent::OnMontageEnded(UAnimMontage* Montage, bool bInt
 
 		// Re-attach weapon to original socket (only if bolt-action NOT in progress)
 		// If bolt-action is in progress, weapon stays on weapon_l for bolt-action sequence
-		if (bReattachDuringReload && !bBoltActionInProgress)
+		if (bReattachDuringReload && !bBoltActionInProgress && BoltComp)
 		{
-			AActor* WeaponActor = GetOwnerItem();
-			if (WeaponActor && WeaponActor->Implements<UHoldableInterface>())
-			{
-				FName EquipSocket = IHoldableInterface::Execute_GetAttachSocket(WeaponActor);
-				ReattachWeaponToSocket(EquipSocket);
-			}
+			BoltComp->ReattachWeaponToSocket(false);  // Back to equip socket
 		}
 
 		// Reset state (only if bolt-action NOT in progress) - SERVER ONLY
@@ -119,14 +119,9 @@ void UBoltActionReloadComponent::OnMontageEnded(UAnimMontage* Montage, bool bInt
 	if (GetOwner() && GetOwner()->HasAuthority())
 	{
 		// Re-attach weapon to original socket
-		if (bReattachDuringReload)
+		if (bReattachDuringReload && BoltComp)
 		{
-			AActor* WeaponActor = GetOwnerItem();
-			if (WeaponActor && WeaponActor->Implements<UHoldableInterface>())
-			{
-				FName EquipSocket = IHoldableInterface::Execute_GetAttachSocket(WeaponActor);
-				ReattachWeaponToSocket(EquipSocket);
-			}
+			BoltComp->ReattachWeaponToSocket(false);  // Back to equip socket
 		}
 
 		// Complete reload
@@ -139,53 +134,45 @@ void UBoltActionReloadComponent::StopReloadMontages()
 	// Call parent to stop montages
 	Super::StopReloadMontages();
 
-	// Re-attach weapon to original socket
-	if (bReattachDuringReload)
+	// Re-attach weapon to original socket using BoltActionFireComponent's shared implementation
+	UBoltActionFireComponent* BoltComp = GetBoltActionFireComponent();
+	if (bReattachDuringReload && BoltComp)
 	{
-		AActor* WeaponActor = GetOwnerItem();
-		if (WeaponActor && WeaponActor->Implements<UHoldableInterface>())
-		{
-			FName EquipSocket = IHoldableInterface::Execute_GetAttachSocket(WeaponActor);
-			ReattachWeaponToSocket(EquipSocket);
-		}
+		BoltComp->ReattachWeaponToSocket(false);  // Back to equip socket
 	}
 
 	// Also stop any bolt-action montages if pending
-	if (bBoltActionPending)
+	if (bBoltActionPending && BoltComp)
 	{
-		UBoltActionFireComponent* BoltComp = GetBoltActionFireComponent();
-		if (BoltComp)
+		// Stop bolt-action montages (character and weapon)
+		AActor* CharacterActor = GetOwnerCharacterActor();
+		if (CharacterActor && CharacterActor->Implements<UCharacterMeshProviderInterface>())
 		{
-			// Stop bolt-action montages (character and weapon)
-			AActor* CharacterActor = GetOwnerCharacterActor();
-			if (CharacterActor && CharacterActor->Implements<UCharacterMeshProviderInterface>())
+			if (BoltComp->BoltActionMontage)
 			{
-				if (BoltComp->BoltActionMontage)
-				{
-					USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(CharacterActor);
-					USkeletalMeshComponent* ArmsMesh = ICharacterMeshProviderInterface::Execute_GetArmsMesh(CharacterActor);
-					USkeletalMeshComponent* LegsMesh = ICharacterMeshProviderInterface::Execute_GetLegsMesh(CharacterActor);
+				USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(CharacterActor);
+				USkeletalMeshComponent* ArmsMesh = ICharacterMeshProviderInterface::Execute_GetArmsMesh(CharacterActor);
+				USkeletalMeshComponent* LegsMesh = ICharacterMeshProviderInterface::Execute_GetLegsMesh(CharacterActor);
 
-					if (BodyMesh)
+				if (BodyMesh)
+				{
+					if (UAnimInstance* AnimInst = BodyMesh->GetAnimInstance())
 					{
-						if (UAnimInstance* AnimInst = BodyMesh->GetAnimInstance())
-						{
-							AnimInst->Montage_Stop(0.2f, BoltComp->BoltActionMontage);
-						}
+						AnimInst->Montage_Stop(0.2f, BoltComp->BoltActionMontage);
 					}
-					if (ArmsMesh)
+				}
+				if (ArmsMesh)
+				{
+					if (UAnimInstance* AnimInst = ArmsMesh->GetAnimInstance())
 					{
-						if (UAnimInstance* AnimInst = ArmsMesh->GetAnimInstance())
-						{
-							AnimInst->Montage_Stop(0.2f, BoltComp->BoltActionMontage);
-						}
+						AnimInst->Montage_Stop(0.2f, BoltComp->BoltActionMontage);
 					}
-					if (LegsMesh)
+				}
+				if (LegsMesh)
+				{
+					if (UAnimInstance* AnimInst = LegsMesh->GetAnimInstance())
 					{
-						if (UAnimInstance* AnimInst = LegsMesh->GetAnimInstance())
-						{
-							AnimInst->Montage_Stop(0.2f, BoltComp->BoltActionMontage);
-						}
+						AnimInst->Montage_Stop(0.2f, BoltComp->BoltActionMontage);
 					}
 				}
 			}
@@ -229,9 +216,9 @@ void UBoltActionReloadComponent::OnReloadBoltActionNotify()
 
 	bBoltActionPending = true;
 
-	// Set bolt-action state (will replicate to clients)
-	BoltComp->bIsCyclingBolt = true;
-	BoltComp->bChamberEmpty = false;  // Chambering from reload
+	// Set bolt-action state via encapsulated method (will replicate to clients)
+	// Using SetBoltActionState() instead of direct property access for proper encapsulation
+	BoltComp->SetBoltActionState(true, false);  // bCycling=true, bChamberEmpty=false (chambering from reload)
 
 	// Get character meshes to play bolt-action montage
 	AActor* CharacterActor = GetOwnerCharacterActor();
@@ -299,17 +286,9 @@ void UBoltActionReloadComponent::OnBoltActionAfterReloadComplete()
 	}
 	else
 	{
-		// Fallback: No BoltComp, manually reattach weapon
-		UE_LOG(LogBoltActionReload, Warning, TEXT("No BoltActionFireComponent found - manually reattaching weapon"));
-		if (bReattachDuringReload)
-		{
-			AActor* WeaponActor = GetOwnerItem();
-			if (WeaponActor && WeaponActor->Implements<UHoldableInterface>())
-			{
-				FName EquipSocket = IHoldableInterface::Execute_GetAttachSocket(WeaponActor);
-				ReattachWeaponToSocket(EquipSocket);
-			}
-		}
+		// Fallback: No BoltComp - this should not happen in normal operation
+		// Log warning but continue with reload completion
+		UE_LOG(LogBoltActionReload, Warning, TEXT("No BoltActionFireComponent found - cannot reattach weapon!"));
 	}
 
 	// Complete reload using parent implementation (SERVER ONLY)
@@ -320,44 +299,6 @@ void UBoltActionReloadComponent::OnBoltActionAfterReloadComplete()
 // ============================================
 // INTERNAL HELPERS
 // ============================================
-
-void UBoltActionReloadComponent::ReattachWeaponToSocket(FName SocketName)
-{
-	AActor* WeaponActor = GetOwnerItem();
-	AActor* CharacterActor = GetOwnerCharacterActor();
-
-	if (!WeaponActor || !CharacterActor) return;
-	if (!WeaponActor->Implements<UHoldableInterface>()) return;
-	if (!CharacterActor->Implements<UCharacterMeshProviderInterface>()) return;
-
-	USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(CharacterActor);
-	USkeletalMeshComponent* ArmsMesh = ICharacterMeshProviderInterface::Execute_GetArmsMesh(CharacterActor);
-
-	UPrimitiveComponent* FPSWeaponMesh = IHoldableInterface::Execute_GetFPSMeshComponent(WeaponActor);
-	UPrimitiveComponent* TPSWeaponMesh = IHoldableInterface::Execute_GetTPSMeshComponent(WeaponActor);
-
-	// Re-attach FPS weapon mesh to Arms
-	if (FPSWeaponMesh && ArmsMesh)
-	{
-		FPSWeaponMesh->AttachToComponent(
-			ArmsMesh,
-			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
-			SocketName
-		);
-		FPSWeaponMesh->SetRelativeTransform(FTransform::Identity);
-	}
-
-	// Re-attach TPS weapon mesh to Body
-	if (TPSWeaponMesh && BodyMesh)
-	{
-		TPSWeaponMesh->AttachToComponent(
-			BodyMesh,
-			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
-			SocketName
-		);
-		TPSWeaponMesh->SetRelativeTransform(FTransform::Identity);
-	}
-}
 
 UBoltActionFireComponent* UBoltActionReloadComponent::GetBoltActionFireComponent() const
 {

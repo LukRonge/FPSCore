@@ -461,6 +461,23 @@ void UBoltActionFireComponent::StopWeaponMontage(UAnimMontage* Montage)
 void UBoltActionFireComponent::ReattachWeaponToSocket(bool bToReloadSocket)
 {
 	AActor* WeaponActor = GetOwner();
+	if (!WeaponActor || !WeaponActor->Implements<UHoldableInterface>())
+	{
+		UE_LOG(LogBoltActionFire, Warning, TEXT("ReattachWeaponToSocket(bool) - No WeaponActor or doesn't implement HoldableInterface!"));
+		return;
+	}
+
+	// Resolve socket name from weapon interface and delegate to FName overload
+	FName SocketName = bToReloadSocket
+		? IHoldableInterface::Execute_GetReloadAttachSocket(WeaponActor)
+		: IHoldableInterface::Execute_GetAttachSocket(WeaponActor);
+
+	ReattachWeaponToSocket(SocketName);
+}
+
+void UBoltActionFireComponent::ReattachWeaponToSocket(FName SocketName)
+{
+	AActor* WeaponActor = GetOwner();
 	if (!WeaponActor)
 	{
 		UE_LOG(LogBoltActionFire, Warning, TEXT("ReattachWeaponToSocket - No WeaponActor!"));
@@ -484,11 +501,6 @@ void UBoltActionFireComponent::ReattachWeaponToSocket(bool bToReloadSocket)
 		UE_LOG(LogBoltActionFire, Warning, TEXT("ReattachWeaponToSocket - Character doesn't implement CharacterMeshProviderInterface!"));
 		return;
 	}
-
-	// Get target socket name from weapon
-	FName SocketName = bToReloadSocket
-		? IHoldableInterface::Execute_GetReloadAttachSocket(WeaponActor)
-		: IHoldableInterface::Execute_GetAttachSocket(WeaponActor);
 
 	// Get character meshes
 	USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(CharacterActor);
@@ -544,4 +556,22 @@ void UBoltActionFireComponent::ReattachWeaponToSocket(bool bToReloadSocket)
 			TPSWeaponMesh ? TEXT("valid") : TEXT("NULL"),
 			BodyMesh ? TEXT("valid") : TEXT("NULL"));
 	}
+}
+
+void UBoltActionFireComponent::SetBoltActionState(bool bCycling, bool bChamberIsEmpty)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		UE_LOG(LogBoltActionFire, Warning, TEXT("SetBoltActionState - Not authority, ignoring!"));
+		return;
+	}
+
+	UE_LOG(LogBoltActionFire, Log, TEXT("[Server] SetBoltActionState - bCycling: %s, bChamberIsEmpty: %s"),
+		bCycling ? TEXT("true") : TEXT("false"),
+		bChamberIsEmpty ? TEXT("true") : TEXT("false"));
+
+	bIsCyclingBolt = bCycling;
+	bChamberEmpty = bChamberIsEmpty;
+
+	PropagateStateToAnimInstances();
 }

@@ -117,14 +117,6 @@ protected:
 	// ============================================
 
 	/**
-	 * Re-attach weapon to specified socket on character
-	 * Handles both FPS (Arms) and TPS (Body) mesh attachments
-	 *
-	 * @param SocketName - Socket name on character mesh
-	 */
-	void ReattachWeaponToSocket(FName SocketName);
-
-	/**
 	 * Get BoltActionFireComponent from owner weapon
 	 * @return BoltActionFireComponent or nullptr
 	 */

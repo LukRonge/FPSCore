@@ -209,6 +209,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "BoltAction")
 	bool IsBoltActionPendingAfterShoot() const { return bBoltActionPendingAfterShoot; }
 
+	/**
+	 * Set bolt-action state for reload integration (SERVER ONLY)
+	 * Called by BoltActionReloadComponent when triggering bolt-action after reload
+	 * Encapsulates state modification - external components should use this instead of direct property access
+	 *
+	 * @param bCycling - Set bIsCyclingBolt state
+	 * @param bChamberIsEmpty - Set bChamberEmpty state
+	 */
+	UFUNCTION(BlueprintCallable, Category = "BoltAction")
+	void SetBoltActionState(bool bCycling, bool bChamberIsEmpty);
+
 protected:
 	/**
 	 * Is bolt-action pending after shoot? (waiting for shoot montage to end)
@@ -259,4 +270,13 @@ public:
 	 * @param bToReloadSocket - true: attach to ReloadAttachSocket (weapon_l), false: attach to CharacterAttachSocket (weapon_r)
 	 */
 	void ReattachWeaponToSocket(bool bToReloadSocket);
+
+	/**
+	 * Reattach weapon to specific socket on character (overload)
+	 * Shared implementation used by both BoltActionFireComponent and BoltActionReloadComponent
+	 * Handles both FPS (Arms) and TPS (Body) mesh attachments
+	 *
+	 * @param SocketName - Socket name on character mesh to attach weapon to
+	 */
+	void ReattachWeaponToSocket(FName SocketName);
 };
