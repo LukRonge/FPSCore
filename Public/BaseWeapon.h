@@ -661,4 +661,11 @@ private:
 	// Get current sight actor from FPSSightComponent
 	// Returns nullptr if no sight attached
 	AActor* GetCurrentSightActor() const;
+
+	/**
+	 * Propagate owner to all child actors (magazine, sights)
+	 * Called from SetOwner() and OnRep_Owner()
+	 * @param NewOwner - New owner to propagate
+	 */
+	void PropagateOwnerToChildActors(AActor* NewOwner);
 };

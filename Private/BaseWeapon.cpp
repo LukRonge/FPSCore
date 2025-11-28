@@ -121,24 +121,17 @@ void ABaseWeapon::BeginPlay()
 	}
 
 	// ============================================
-	// SERVER ONLY: Initialize authoritative magazine reference
+	// SERVER ONLY: Link FireComponent to BallisticsComponent
 	// ============================================
-	if (HasAuthority() && MagazineComponent && MagazineComponent->GetChildActor())
+	if (HasAuthority() && FireComponent && BallisticsComponent)
 	{
-		// Use direct cast here - CurrentMagazine is authoritative replicated reference
-		// This is internal initialization, not external access pattern
-		CurrentMagazine = Cast<ABaseMagazine>(MagazineComponent->GetChildActor());
+		FireComponent->BallisticsComponent = BallisticsComponent;
 
-		// Link FireComponent to BallisticsComponent
-		if (FireComponent && BallisticsComponent)
+		// Initialize ballistics with magazine's ammo type
+		// CurrentMagazine is set in InitMagazineComponents via SetChildActorClass
+		if (CurrentMagazine)
 		{
-			FireComponent->BallisticsComponent = BallisticsComponent;
-
-			// Initialize ballistics with magazine's ammo type
-			if (CurrentMagazine)
-			{
-				BallisticsComponent->InitAmmoType(CurrentMagazine->AmmoType);
-			}
+			BallisticsComponent->InitAmmoType(CurrentMagazine->AmmoType);
 		}
 	}
 }
@@ -165,31 +158,17 @@ void ABaseWeapon::OnRep_CurrentMagazine()
 void ABaseWeapon::SetOwner(AActor* NewOwner)
 {
 	Super::SetOwner(NewOwner);
-
-	// Propagate owner to magazine component
-	if (MagazineComponent && MagazineComponent->GetChildActor())
-	{
-		MagazineComponent->GetChildActor()->SetOwner(NewOwner);
-	}
-
-	// Propagate owner to sight components
-	if (FPSSightComponent && FPSSightComponent->GetChildActor())
-	{
-		FPSSightComponent->GetChildActor()->SetOwner(NewOwner);
-	}
-
-	if (TPSSightComponent && TPSSightComponent->GetChildActor())
-	{
-		TPSSightComponent->GetChildActor()->SetOwner(NewOwner);
-	}
+	PropagateOwnerToChildActors(NewOwner);
 }
 
 void ABaseWeapon::OnRep_Owner()
 {
 	Super::OnRep_Owner();
+	PropagateOwnerToChildActors(GetOwner());
+}
 
-	AActor* NewOwner = GetOwner();
-
+void ABaseWeapon::PropagateOwnerToChildActors(AActor* NewOwner)
+{
 	// Propagate owner to magazine component
 	if (MagazineComponent && MagazineComponent->GetChildActor())
 	{
@@ -573,6 +552,14 @@ void ABaseWeapon::InitMagazineComponents(TSubclassOf<ABaseMagazine> MagazineClas
 
 		if (MagActor)
 		{
+			// SERVER ONLY: Set authoritative magazine reference
+			// CurrentMagazine is ABaseMagazine* UPROPERTY required for replication
+			// MagazineClass guarantees the child actor is ABaseMagazine subclass
+			if (HasAuthority())
+			{
+				CurrentMagazine = Cast<ABaseMagazine>(MagActor);
+			}
+
 			// Propagate owner for correct visibility
 			MagActor->SetOwner(GetOwner());
 
@@ -584,6 +571,10 @@ void ABaseWeapon::InitMagazineComponents(TSubclassOf<ABaseMagazine> MagazineClas
 	else
 	{
 		MagazineComponent->SetChildActorClass(nullptr);
+		if (HasAuthority())
+		{
+			CurrentMagazine = nullptr;
+		}
 	}
 }
 
