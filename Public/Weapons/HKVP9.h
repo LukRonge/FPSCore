@@ -106,7 +106,8 @@ public:
 	/**
 	 * Override Multicast_PlayShootEffects to add VP9-specific behavior
 	 * - Calls base implementation (muzzle VFX + character anims)
-	 * - Plays SlideShootMontage on weapon meshes (FPS/TPS based on IsLocallyControlled)
+	 * - Plays SlideShootMontage on BOTH weapon meshes (FPS + TPS)
+	 * Visibility handled by mesh settings (OnlyOwnerSee/OwnerNoSee)
 	 */
 	virtual void Multicast_PlayShootEffects_Implementation() override;
 

@@ -36,7 +36,8 @@ ABaseWeapon::ABaseWeapon()
 	FPSMesh->SetupAttachment(SceneRoot);
 	FPSMesh->SetOnlyOwnerSee(true);
 	FPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	FPSMesh->PrimaryComponentTick.bCanEverTick = false;
+	// NOTE: Do NOT disable tick - required for animations (montages) to play
+	// FPSMesh->PrimaryComponentTick.bCanEverTick = false;
 
 	BallisticsComponent = CreateDefaultSubobject<UBallisticsComponent>(TEXT("BallisticsComponent"));
 	FireComponent = nullptr;
