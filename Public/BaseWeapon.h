@@ -95,15 +95,11 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
 	UChildActorComponent* MagazineComponent;
 
-	// FPS Sight component (attached to FPS mesh "attachment0" bone)
-	// Visible only to owner, spawned from CurrentSightClass
+	// Sight component (single ChildActorComponent attached to FPSMesh)
+	// Socket name obtained from sight via ISightMeshProviderInterface::GetAttachSocket()
+	// Sight FPS mesh attaches to weapon FPSMesh, TPS mesh attaches to weapon TPSMesh
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
-	UChildActorComponent* FPSSightComponent;
-
-	// TPS Sight component (attached to TPS mesh "attachment0" bone)
-	// Visible to others, spawned from CurrentSightClass
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
-	UChildActorComponent* TPSSightComponent;
+	UChildActorComponent* SightComponent;
 
 protected:
 	// ============================================
@@ -218,11 +214,11 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Aiming")
 	TSubclassOf<ABaseSight> DefaultSightClass;
 
-	// Current attached sight class (REPLICATED)
-	// Auto-initialized in PostInitializeComponents() from DefaultSightClass
-	// Can be changed at runtime for modular sight swapping
-	UPROPERTY(BlueprintReadWrite, Category = "Weapon|Aiming", ReplicatedUsing = OnRep_CurrentSightClass)
-	TSubclassOf<ABaseSight> CurrentSightClass;
+	// Current attached sight actor reference (REPLICATED)
+	// SERVER: Set in InitSightComponents() after child actor creation
+	// CLIENT: Receives via replication, OnRep handles attachment
+	UPROPERTY(BlueprintReadWrite, Category = "Weapon|Aiming", ReplicatedUsing = OnRep_CurrentSight)
+	ABaseSight* CurrentSight = nullptr;
 
 	// Hip-fire crosshair widget class (shown when not aiming)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|UI")
@@ -236,21 +232,31 @@ public:
 
 protected:
 	/**
-	 * Called on CLIENTS when CurrentSightClass is replicated from server
-	 * Re-initializes sight components with new sight class
+	 * Called on CLIENTS when CurrentSight actor is replicated from server
+	 * Attaches sight meshes to weapon meshes and propagates owner
 	 */
 	UFUNCTION()
-	void OnRep_CurrentSightClass();
+	void OnRep_CurrentSight();
 
 public:
 	/**
-	 * Initialize sight components with specified sight class
-	 * Spawns child actors for FPSSightComponent and TPSSightComponent
-	 * Runs on ALL machines (called from PostInitializeComponents or OnRep)
-	 * @param SightClass - Sight class to spawn (nullptr to clear sights)
+	 * Initialize sight component with specified sight class (SERVER ONLY)
+	 * Spawns child actor, sets CurrentSight, and attaches meshes
+	 * Client receives CurrentSight via replication → OnRep_CurrentSight handles attachment
+	 * @param SightClass - Sight class to spawn (nullptr to clear sight)
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Weapon|Aiming")
 	void InitSightComponents(TSubclassOf<ABaseSight> SightClass);
+
+	/**
+	 * Attach sight meshes to weapon meshes
+	 * LOCAL operation - each machine executes independently
+	 * - FPS sight mesh -> FPS weapon mesh (visible only to owner)
+	 * - TPS sight mesh -> TPS weapon mesh (visible to others)
+	 *
+	 * Called from InitSightComponents() (server) or OnRep_CurrentSight() (client)
+	 */
+	void AttachSightMeshes();
 
 	// ============================================
 	// EFFECTS
@@ -310,30 +316,16 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Magazine")
 	TSubclassOf<ABaseMagazine> DefaultMagazineClass;
 
-	// Current attached magazine class (REPLICATED)
-	// Auto-initialized in PostInitializeComponents() from DefaultMagazineClass
-	// Can be changed at runtime for modular magazine swapping
-	UPROPERTY(BlueprintReadWrite, Category = "Weapon|Magazine", ReplicatedUsing = OnRep_CurrentMagazineClass)
-	TSubclassOf<ABaseMagazine> CurrentMagazineClass;
-
 	// Accepted caliber type (for magazine compatibility checks)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Magazine")
 	EAmmoCaliberType AcceptedCaliberType = EAmmoCaliberType::NATO_556x45mm;
 
-protected:
-	/**
-	 * Called on CLIENTS when CurrentMagazineClass is replicated from server
-	 * Re-initializes magazine components with new magazine class
-	 */
-	UFUNCTION()
-	void OnRep_CurrentMagazineClass();
-
 public:
 	/**
-	 * Initialize magazine components with specified magazine class
-	 * Spawns child actor and attaches magazine meshes to weapon meshes
-	 * Runs on ALL machines (called from PostInitializeComponents or OnRep)
-	 * @param MagazineClass - Magazine class to spawn (nullptr to clear magazines)
+	 * Initialize magazine component with specified magazine class (SERVER ONLY)
+	 * Spawns child actor, sets CurrentMagazine, and attaches meshes
+	 * Client receives CurrentMagazine via replication → OnRep_CurrentMagazine handles attachment
+	 * @param MagazineClass - Magazine class to spawn (nullptr to clear magazine)
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Weapon|Magazine")
 	void InitMagazineComponents(TSubclassOf<ABaseMagazine> MagazineClass);
@@ -344,7 +336,7 @@ public:
 	 * - FPS magazine mesh -> FPS weapon mesh (visible only to owner)
 	 * - TPS magazine mesh -> TPS weapon mesh (visible to others)
 	 *
-	 * Called from InitMagazineComponents() after child actor is created
+	 * Called from InitMagazineComponents() (server) or OnRep_CurrentMagazine() (client)
 	 */
 	void AttachMagazineMeshes();
 
@@ -410,26 +402,25 @@ public:
 
 protected:
 
-	/** Helper: Spawn muzzle flash VFX on specified mesh */
-	void SpawnMuzzleFlashOnMesh(USkeletalMeshComponent* Mesh);
+	/**
+	 * Helper: Spawn muzzle flash VFX on specified mesh
+	 * @param Mesh - Mesh to attach Niagara to
+	 * @param bIsFirstPerson - True for FPS mesh (OnlyOwnerSee), False for TPS mesh (OwnerNoSee)
+	 */
+	void SpawnMuzzleFlashOnMesh(USkeletalMeshComponent* Mesh, bool bIsFirstPerson);
 
 	/**
-	 * Multicast RPC: TPSMesh effects for OTHER players
-	 * - Spawns muzzle flash on TPSMesh (visible to others)
-	 * - Plays shoot montage on character Body mesh (TPS view)
-	 * Runs on: Server + ALL clients (but only affects TPSMesh which others see)
+	 * Single Multicast RPC for ALL shoot visual effects
+	 * Each machine locally determines what to render:
+	 * - IsLocallyControlled() → FPS view (FPSMesh VFX + Arms animation)
+	 * - !IsLocallyControlled() → TPS view (TPSMesh VFX + Body/Legs animation)
+	 * - DedicatedServer → Skip VFX, keep animations for physics
+	 *
+	 * ARCHITECTURE: Replicate the EVENT, not the visuals
+	 * Each client spawns appropriate effects based on their perspective
 	 */
-	UFUNCTION(NetMulticast, Reliable)
-	void Multicast_PlayMuzzleFlash();
-
-	/**
-	 * Client RPC: FPSMesh effects for OWNING CLIENT only
-	 * - Spawns muzzle flash on FPSMesh (visible to owner)
-	 * - Plays shoot montage on character Arms mesh (FPS view)
-	 * Runs on: OWNING CLIENT only (the player who fired)
-	 */
-	UFUNCTION(Client, Reliable)
-	void Client_PlayMuzzleFlash();
+	UFUNCTION(NetMulticast, Unreliable)
+	void Multicast_PlayShootEffects();
 
 	/**
 	 * Multicast RPC for spawning impact effects on all clients
@@ -659,7 +650,7 @@ private:
 	// HELPER METHODS
 	// ============================================
 
-	// Get current sight actor from FPSSightComponent
+	// Get current sight actor from SightComponent
 	// Returns nullptr if no sight attached
 	AActor* GetCurrentSightActor() const;
 

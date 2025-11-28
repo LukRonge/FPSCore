@@ -121,11 +121,11 @@ public:
 	// ============================================
 
 	/**
-	 * Override Multicast_PlayMuzzleFlash to add M4A1-specific behavior
+	 * Override Multicast_PlayShootEffects to add M4A1-specific behavior
 	 * - Calls base implementation (muzzle VFX + character anims)
 	 * - Plays BoltCarrierShootMontage on weapon meshes (runs on ALL clients)
 	 */
-	virtual void Multicast_PlayMuzzleFlash_Implementation() override;
+	virtual void Multicast_PlayShootEffects_Implementation() override;
 
 	/**
 	 * Handle shot fired - M4A1 specific behavior (SERVER ONLY)

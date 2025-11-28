@@ -6,12 +6,18 @@ ABaseSight::ABaseSight()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	PrimaryActorTick.bStartWithTickEnabled = false;
+
+	bReplicates = true;
 }
 
 void ABaseSight::BeginPlay()
 {
 	Super::BeginPlay();
 }
+
+// ============================================
+// SIGHT INTERFACE IMPLEMENTATIONS
+// ============================================
 
 FVector ABaseSight::GetAimingPoint_Implementation() const
 {
@@ -51,49 +57,4 @@ float ABaseSight::GetAimLeaningScale_Implementation() const
 float ABaseSight::GetAimBreathingScale_Implementation() const
 {
 	return AimBreathingScale;
-}
-
-void ABaseSight::SetOwner(AActor* NewOwner)
-{
-	Super::SetOwner(NewOwner);
-
-	// Apply visibility settings to all mesh components when owner changes
-	ApplyVisibilityToMeshes();
-}
-
-void ABaseSight::ApplyVisibilityToMeshes()
-{
-	if (FirstPersonPrimitiveType == EFirstPersonPrimitiveType::None)
-	{
-		return;
-	}
-
-	bool bOnlyOwnerSee = false;
-	bool bOwnerNoSee = false;
-
-	switch (FirstPersonPrimitiveType)
-	{
-		case EFirstPersonPrimitiveType::FirstPerson:
-			bOnlyOwnerSee = true;
-			bOwnerNoSee = false;
-			break;
-
-		case EFirstPersonPrimitiveType::WorldSpaceRepresentation:
-			bOnlyOwnerSee = false;
-			bOwnerNoSee = true;
-			break;
-
-		default:
-			break;
-	}
-
-	TArray<UPrimitiveComponent*> PrimitiveComponents;
-	GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-
-	for (UPrimitiveComponent* PrimitiveComp : PrimitiveComponents)
-	{
-		PrimitiveComp->SetFirstPersonPrimitiveType(FirstPersonPrimitiveType);
-		PrimitiveComp->SetOnlyOwnerSee(bOnlyOwnerSee);
-		PrimitiveComp->SetOwnerNoSee(bOwnerNoSee);
-	}
 }

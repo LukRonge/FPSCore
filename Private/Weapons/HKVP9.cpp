@@ -94,32 +94,42 @@ void AHKVP9::PropagateStateToAnimInstances()
 // BASEWEAPON OVERRIDES
 // ============================================
 
-void AHKVP9::Multicast_PlayMuzzleFlash_Implementation()
+void AHKVP9::Multicast_PlayShootEffects_Implementation()
 {
-	// Call base implementation (TPSMesh muzzle VFX + character Body/Legs anims)
-	Super::Multicast_PlayMuzzleFlash_Implementation();
+	// Call base implementation (muzzle VFX + character anims)
+	Super::Multicast_PlayShootEffects_Implementation();
 
-	// VP9-specific: Play slide shoot montage on TPSMesh (visible to others)
-	if (SlideShootMontage && TPSMesh)
+	// VP9-specific: Play slide shoot montage on appropriate weapon mesh
+	// Based on IsLocallyControlled - consistent with base class architecture
+	if (!SlideShootMontage)
 	{
-		if (UAnimInstance* TPSAnimInstance = TPSMesh->GetAnimInstance())
+		return;
+	}
+
+	AActor* WeaponOwner = GetOwner();
+	APawn* OwnerPawn = WeaponOwner ? Cast<APawn>(WeaponOwner) : nullptr;
+	const bool bIsLocallyControlled = OwnerPawn && OwnerPawn->IsLocallyControlled();
+
+	if (bIsLocallyControlled)
+	{
+		// FPS: Play on FPSMesh (visible to owner)
+		if (FPSMesh)
 		{
-			TPSAnimInstance->Montage_Play(SlideShootMontage);
+			if (UAnimInstance* FPSAnimInstance = FPSMesh->GetAnimInstance())
+			{
+				FPSAnimInstance->Montage_Play(SlideShootMontage);
+			}
 		}
 	}
-}
-
-void AHKVP9::Client_PlayMuzzleFlash_Implementation()
-{
-	// Call base implementation (FPSMesh muzzle VFX + character Arms anims)
-	Super::Client_PlayMuzzleFlash_Implementation();
-
-	// VP9-specific: Play slide shoot montage on FPSMesh (visible to owner)
-	if (SlideShootMontage && FPSMesh)
+	else
 	{
-		if (UAnimInstance* FPSAnimInstance = FPSMesh->GetAnimInstance())
+		// TPS: Play on TPSMesh (visible to others)
+		if (TPSMesh)
 		{
-			FPSAnimInstance->Montage_Play(SlideShootMontage);
+			if (UAnimInstance* TPSAnimInstance = TPSMesh->GetAnimInstance())
+			{
+				TPSAnimInstance->Montage_Play(SlideShootMontage);
+			}
 		}
 	}
 }

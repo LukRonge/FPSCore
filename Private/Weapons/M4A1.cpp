@@ -102,10 +102,10 @@ void AM4A1::PropagateStateToAnimInstances()
 // BASEWEAPON OVERRIDES
 // ============================================
 
-void AM4A1::Multicast_PlayMuzzleFlash_Implementation()
+void AM4A1::Multicast_PlayShootEffects_Implementation()
 {
 	// Call base implementation (muzzle VFX + character shoot anims)
-	Super::Multicast_PlayMuzzleFlash_Implementation();
+	Super::Multicast_PlayShootEffects_Implementation();
 
 	// M4A1-specific: Play bolt carrier shoot montage on weapon meshes
 	// This runs on ALL clients (server + remote clients)

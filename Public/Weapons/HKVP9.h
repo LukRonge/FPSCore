@@ -104,18 +104,11 @@ public:
 	// ============================================
 
 	/**
-	 * Override Multicast_PlayMuzzleFlash to add VP9-specific behavior
-	 * - Calls base implementation (TPSMesh muzzle VFX + character Body anims)
-	 * - Plays SlideShootMontage on TPSMesh (visible to others)
+	 * Override Multicast_PlayShootEffects to add VP9-specific behavior
+	 * - Calls base implementation (muzzle VFX + character anims)
+	 * - Plays SlideShootMontage on weapon meshes (FPS/TPS based on IsLocallyControlled)
 	 */
-	virtual void Multicast_PlayMuzzleFlash_Implementation() override;
-
-	/**
-	 * Override Client_PlayMuzzleFlash to add VP9-specific behavior
-	 * - Calls base implementation (FPSMesh muzzle VFX + character Arms anims)
-	 * - Plays SlideShootMontage on FPSMesh (visible to owner)
-	 */
-	virtual void Client_PlayMuzzleFlash_Implementation() override;
+	virtual void Multicast_PlayShootEffects_Implementation() override;
 
 	/**
 	 * Handle shot fired - VP9 specific behavior (SERVER ONLY)

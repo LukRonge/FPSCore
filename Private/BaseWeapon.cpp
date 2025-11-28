@@ -13,6 +13,8 @@
 #include "Interfaces/CharacterMeshProviderInterface.h"
 #include "Interfaces/AmmoProviderInterface.h"
 #include "Interfaces/MagazineMeshProviderInterface.h"
+#include "Interfaces/SightMeshProviderInterface.h"
+#include "NiagaraComponent.h"
 
 ABaseWeapon::ABaseWeapon()
 {
@@ -43,20 +45,24 @@ ABaseWeapon::ABaseWeapon()
 	// Magazine actor has its own FPS/TPS meshes with appropriate visibility
 	MagazineComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("MagazineComponent"));
 	MagazineComponent->SetupAttachment(TPSMesh, FName("magazine"));
-	MagazineComponent->SetIsReplicated(false);  // Child actor spawned via OnRep_CurrentMagazineClass
+	MagazineComponent->SetIsReplicated(false);  // CurrentMagazine (actor pointer) is replicated instead
 
-	FPSSightComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("FPSSightComponent"));
-	FPSSightComponent->SetupAttachment(FPSMesh, FName("attachment0"));
-	FPSSightComponent->SetIsReplicated(false);
-
-	TPSSightComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("TPSSightComponent"));
-	TPSSightComponent->SetupAttachment(TPSMesh, FName("attachment0"));
-	TPSSightComponent->SetIsReplicated(false);
+	// Single sight component - initially attached to FPSMesh without socket
+	// Socket is set in InitSightComponents() after sight actor is created (socket name comes from sight)
+	SightComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("SightComponent"));
+	SightComponent->SetupAttachment(FPSMesh);
+	SightComponent->SetIsReplicated(false);  // CurrentSight (actor pointer) is replicated instead
 }
 
 void ABaseWeapon::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
+
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] PostInitializeComponents - %s | HasAuthority=%d | NetMode=%d | Owner=%s"),
+		*GetName(),
+		HasAuthority(),
+		(int32)GetNetMode(),
+		GetOwner() ? *GetOwner()->GetName() : TEXT("nullptr"));
 
 	// ============================================
 	// COMPONENT INITIALIZATION (ALL MACHINES)
@@ -77,20 +83,14 @@ void ABaseWeapon::PostInitializeComponents()
 	// ============================================
 	// SERVER ONLY: Initialize magazine and sight components
 	// ============================================
-	// Remote clients receive these via OnRep_CurrentMagazineClass / OnRep_CurrentSightClass
-	// This prevents ChildActor destruction caused by bReplicates=true conflict
+	// Server creates child actors and sets CurrentMagazine/CurrentSight (REPLICATED)
+	// Remote clients receive actor pointers via OnRep_CurrentMagazine / OnRep_CurrentSight
 
 	if (HasAuthority())
 	{
-		if (DefaultMagazineClass)
-		{
-			CurrentMagazineClass = DefaultMagazineClass;
-		}
-
-		if (DefaultSightClass)
-		{
-			CurrentSightClass = DefaultSightClass;
-		}
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] PostInitializeComponents SERVER - Initializing Magazine=%s, Sight=%s"),
+			DefaultMagazineClass ? *DefaultMagazineClass->GetName() : TEXT("nullptr"),
+			DefaultSightClass ? *DefaultSightClass->GetName() : TEXT("nullptr"));
 
 		InitMagazineComponents(DefaultMagazineClass);
 		InitSightComponents(DefaultSightClass);
@@ -101,24 +101,21 @@ void ABaseWeapon::BeginPlay()
 {
 	Super::BeginPlay();
 
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] BeginPlay - %s | HasAuthority=%d | NetMode=%d | Owner=%s"),
+		*GetName(),
+		HasAuthority(),
+		(int32)GetNetMode(),
+		GetOwner() ? *GetOwner()->GetName() : TEXT("nullptr"));
+
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] BeginPlay - CurrentMagazine=%s | CurrentSight=%s"),
+		CurrentMagazine ? *CurrentMagazine->GetName() : TEXT("nullptr"),
+		CurrentSight ? *CurrentSight->GetName() : TEXT("nullptr"));
+
 	// ============================================
-	// REMOTE CLIENT: Initialize magazine/sight child actors from replicated class
+	// CLIENT NOTE: Magazine and Sight actors are received via replication
+	// OnRep_CurrentMagazine and OnRep_CurrentSight handle attachment
+	// No client-side initialization needed here
 	// ============================================
-	// On remote clients, CurrentMagazineClass/CurrentSightClass are replicated BEFORE BeginPlay.
-	// Child actors must be created here because ChildActorComponent::SetChildActorClass()
-	// requires the component to be fully registered (which happens after BeginPlay starts).
-	// OnRep callbacks may fire before component registration is complete.
-	if (!HasAuthority())
-	{
-		if (CurrentMagazineClass)
-		{
-			InitMagazineComponents(CurrentMagazineClass);
-		}
-		if (CurrentSightClass)
-		{
-			InitSightComponents(CurrentSightClass);
-		}
-	}
 
 	// ============================================
 	// SERVER ONLY: Link FireComponent to BallisticsComponent
@@ -128,7 +125,7 @@ void ABaseWeapon::BeginPlay()
 		FireComponent->BallisticsComponent = BallisticsComponent;
 
 		// Initialize ballistics with magazine's ammo type
-		// CurrentMagazine is set in InitMagazineComponents via SetChildActorClass
+		// CurrentMagazine is set in InitMagazineComponents (PostInitializeComponents)
 		if (CurrentMagazine)
 		{
 			BallisticsComponent->InitAmmoType(CurrentMagazine->AmmoType);
@@ -140,51 +137,98 @@ void ABaseWeapon::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifet
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
+	// Replicate actor pointers ONLY - not class references
+	// This eliminates race conditions where OnRep_Class fires before actor exists
+	// Client receives actor via replication → OnRep handles local attachment
 	DOREPLIFETIME(ABaseWeapon, CurrentMagazine);
-	DOREPLIFETIME(ABaseWeapon, CurrentMagazineClass);
-	DOREPLIFETIME(ABaseWeapon, CurrentSightClass);
+	DOREPLIFETIME(ABaseWeapon, CurrentSight);
 }
 
 void ABaseWeapon::OnRep_CurrentMagazine()
 {
-	// CLIENT ONLY - called when CurrentMagazine reference is replicated from server
-	// Synchronize BallisticsComponent with new magazine's ammo type
-	if (BallisticsComponent && CurrentMagazine)
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] OnRep_CurrentMagazine - %s | CurrentMagazine=%s | NetMode=%d"),
+		*GetName(),
+		CurrentMagazine ? *CurrentMagazine->GetName() : TEXT("nullptr"),
+		(int32)GetNetMode());
+
+	// CLIENT ONLY - called when CurrentMagazine actor is replicated from server
+	if (CurrentMagazine)
 	{
-		BallisticsComponent->InitAmmoType(CurrentMagazine->AmmoType);
+		// Synchronize BallisticsComponent with magazine's ammo type
+		if (BallisticsComponent)
+		{
+			BallisticsComponent->InitAmmoType(CurrentMagazine->AmmoType);
+		}
+
+		// Propagate owner for correct visibility (OnlyOwnerSee/OwnerNoSee)
+		CurrentMagazine->SetOwner(GetOwner());
+
+		// Attach magazine meshes to weapon meshes (LOCAL operation)
+		AttachMagazineMeshes();
 	}
 }
 
 void ABaseWeapon::SetOwner(AActor* NewOwner)
 {
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] SetOwner - %s | NewOwner=%s | HasAuthority=%d | NetMode=%d"),
+		*GetName(),
+		NewOwner ? *NewOwner->GetName() : TEXT("nullptr"),
+		HasAuthority(),
+		(int32)GetNetMode());
+
 	Super::SetOwner(NewOwner);
 	PropagateOwnerToChildActors(NewOwner);
 }
 
 void ABaseWeapon::OnRep_Owner()
 {
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] OnRep_Owner - %s | Owner=%s | NetMode=%d | HasBegunPlay=%d"),
+		*GetName(),
+		GetOwner() ? *GetOwner()->GetName() : TEXT("nullptr"),
+		(int32)GetNetMode(),
+		HasActorBegunPlay());
+
 	Super::OnRep_Owner();
 	PropagateOwnerToChildActors(GetOwner());
 }
 
 void ABaseWeapon::PropagateOwnerToChildActors(AActor* NewOwner)
 {
-	// Propagate owner to magazine component
-	if (MagazineComponent && MagazineComponent->GetChildActor())
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] PropagateOwnerToChildActors - %s | NewOwner=%s"),
+		*GetName(),
+		NewOwner ? *NewOwner->GetName() : TEXT("nullptr"));
+
+	// Propagate owner to magazine (use replicated actor pointer)
+	if (CurrentMagazine)
 	{
-		MagazineComponent->GetChildActor()->SetOwner(NewOwner);
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon]   -> Magazine %s | OldOwner=%s | NewOwner=%s"),
+			*CurrentMagazine->GetName(),
+			CurrentMagazine->GetOwner() ? *CurrentMagazine->GetOwner()->GetName() : TEXT("nullptr"),
+			NewOwner ? *NewOwner->GetName() : TEXT("nullptr"));
+		CurrentMagazine->SetOwner(NewOwner);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon]   -> Magazine NOT FOUND (CurrentMagazine=nullptr)"));
 	}
 
-	// Propagate owner to sight components
-	if (FPSSightComponent && FPSSightComponent->GetChildActor())
+	// Propagate owner to sight (use replicated actor pointer)
+	if (CurrentSight)
 	{
-		FPSSightComponent->GetChildActor()->SetOwner(NewOwner);
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon]   -> Sight %s | OldOwner=%s | NewOwner=%s"),
+			*CurrentSight->GetName(),
+			CurrentSight->GetOwner() ? *CurrentSight->GetOwner()->GetName() : TEXT("nullptr"),
+			NewOwner ? *NewOwner->GetName() : TEXT("nullptr"));
+		CurrentSight->SetOwner(NewOwner);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon]   -> Sight NOT FOUND (CurrentSight=nullptr)"));
 	}
 
-	if (TPSSightComponent && TPSSightComponent->GetChildActor())
-	{
-		TPSSightComponent->GetChildActor()->SetOwner(NewOwner);
-	}
+	// NOTE: No re-attachment needed - meshes are attached once in Init*Components() (server)
+	// or OnRep_CurrentMagazine/OnRep_CurrentSight (client)
+	// Visibility is handled natively by engine via render flags (OnlyOwnerSee/OwnerNoSee)
 }
 
 void ABaseWeapon::UseStart_Implementation(const FUseContext& Ctx)
@@ -274,10 +318,36 @@ void ABaseWeapon::OnDropped_Implementation(const FInteractionContext& Ctx)
 
 void ABaseWeapon::OnEquipped_Implementation(APawn* OwnerPawn)
 {
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] OnEquipped - %s | OwnerPawn=%s | CurrentOwner=%s | HasAuthority=%d | NetMode=%d"),
+		*GetName(),
+		OwnerPawn ? *OwnerPawn->GetName() : TEXT("nullptr"),
+		GetOwner() ? *GetOwner()->GetName() : TEXT("nullptr"),
+		HasAuthority(),
+		(int32)GetNetMode());
+
+	// Log magazine and sight owners (use replicated pointers)
+	if (CurrentMagazine)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] OnEquipped - Magazine %s Owner=%s"),
+			*CurrentMagazine->GetName(),
+			CurrentMagazine->GetOwner() ? *CurrentMagazine->GetOwner()->GetName() : TEXT("nullptr"));
+	}
+	if (CurrentSight)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] OnEquipped - Sight %s Owner=%s"),
+			*CurrentSight->GetName(),
+			CurrentSight->GetOwner() ? *CurrentSight->GetOwner()->GetName() : TEXT("nullptr"));
+	}
 }
 
 void ABaseWeapon::OnUnequipped_Implementation()
 {
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] OnUnequipped - %s | CurrentOwner=%s | HasAuthority=%d | NetMode=%d"),
+		*GetName(),
+		GetOwner() ? *GetOwner()->GetName() : TEXT("nullptr"),
+		HasAuthority(),
+		(int32)GetNetMode());
+
 	IsAiming = false;
 
 	if (ReloadComponent && ReloadComponent->bIsReloading)
@@ -332,11 +402,9 @@ void ABaseWeapon::HandleShotFired_Implementation(
 {
 	if (HasAuthority())
 	{
-		// TPSMesh effects for OTHER players (Multicast runs on all clients)
-		Multicast_PlayMuzzleFlash();
-
-		// FPSMesh effects for OWNING CLIENT only (Client RPC runs on owner)
-		Client_PlayMuzzleFlash();
+		// Single Multicast handles all visual effects
+		// Each client locally determines what to render based on IsLocallyControlled()
+		Multicast_PlayShootEffects();
 	}
 }
 
@@ -351,14 +419,14 @@ void ABaseWeapon::HandleImpactDetected_Implementation(
 	}
 }
 
-void ABaseWeapon::SpawnMuzzleFlashOnMesh(USkeletalMeshComponent* Mesh)
+void ABaseWeapon::SpawnMuzzleFlashOnMesh(USkeletalMeshComponent* Mesh, bool bIsFirstPerson)
 {
 	if (!MuzzleFlashNiagara || !Mesh)
 	{
 		return;
 	}
 
-	UNiagaraFunctionLibrary::SpawnSystemAttached(
+	UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAttached(
 		MuzzleFlashNiagara,
 		Mesh,
 		FName("barrel"),
@@ -369,55 +437,79 @@ void ABaseWeapon::SpawnMuzzleFlashOnMesh(USkeletalMeshComponent* Mesh)
 		true,
 		ENCPoolMethod::None
 	);
-}
 
-void ABaseWeapon::Multicast_PlayMuzzleFlash_Implementation()
-{
-	// TPSMesh muzzle flash (visible to others due to OwnerNoSee)
-	SpawnMuzzleFlashOnMesh(TPSMesh);
-
-	// Character shoot montage on Body + Legs mesh
-	if (ShootMontage)
+	// CRITICAL: Niagara components do NOT inherit visibility from parent mesh
+	// Must explicitly set visibility flags to match the mesh
+	if (NiagaraComp)
 	{
-		AActor* WeaponOwner = GetOwner();
-		if (WeaponOwner && WeaponOwner->Implements<UCharacterMeshProviderInterface>())
+		if (bIsFirstPerson)
 		{
-			USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(WeaponOwner);
-			if (BodyMesh)
-			{
-				if (UAnimInstance* AnimInst = BodyMesh->GetAnimInstance())
-				{
-					AnimInst->Montage_Play(ShootMontage);
-				}
-			}
-
-			USkeletalMeshComponent* LegsMesh = ICharacterMeshProviderInterface::Execute_GetLegsMesh(WeaponOwner);
-			if (LegsMesh)
-			{
-				if (UAnimInstance* AnimInst = LegsMesh->GetAnimInstance())
-				{
-					AnimInst->Montage_Play(ShootMontage);
-				}
-			}
+			// FPS: Only owner sees this
+			NiagaraComp->SetOnlyOwnerSee(true);
+			NiagaraComp->SetOwnerNoSee(false);
+		}
+		else
+		{
+			// TPS: Everyone except owner sees this
+			NiagaraComp->SetOnlyOwnerSee(false);
+			NiagaraComp->SetOwnerNoSee(true);
 		}
 	}
 }
 
-void ABaseWeapon::Client_PlayMuzzleFlash_Implementation()
+void ABaseWeapon::Multicast_PlayShootEffects_Implementation()
 {
-	// Safety check - Client RPC should only run on locally controlled client
+	// ============================================
+	// STEP 1: EARLY OUT FOR DEDICATED SERVER
+	// ============================================
+	// Dedicated servers don't render - skip particle spawning
+	// BUT keep animations running for physics/hitbox updates
+	const bool bIsDedicatedServer = (GetNetMode() == NM_DedicatedServer);
+
+	// ============================================
+	// STEP 2: DETERMINE VIEW PERSPECTIVE
+	// ============================================
 	AActor* WeaponOwner = GetOwner();
 	APawn* OwnerPawn = WeaponOwner ? Cast<APawn>(WeaponOwner) : nullptr;
-	if (!OwnerPawn || !OwnerPawn->IsLocallyControlled())
+	const bool bIsLocallyControlled = OwnerPawn && OwnerPawn->IsLocallyControlled();
+
+	// ============================================
+	// STEP 3: MUZZLE FLASH VFX (Skip on dedicated server)
+	// ============================================
+	if (!bIsDedicatedServer)
+	{
+		if (bIsLocallyControlled)
+		{
+			// FPS VIEW: Spawn on FPSMesh (OnlyOwnerSee)
+			SpawnMuzzleFlashOnMesh(FPSMesh, true);
+		}
+		else
+		{
+			// TPS VIEW: Spawn on TPSMesh (OwnerNoSee)
+			SpawnMuzzleFlashOnMesh(TPSMesh, false);
+		}
+	}
+
+	// ============================================
+	// STEP 4: SHOOT ANIMATIONS
+	// ============================================
+	// Animations run on ALL machines (including dedicated server)
+	// Reason: Animation drives physics, hitboxes, IK, and gameplay state
+	// Visibility is handled by mesh settings (OwnerNoSee, OnlyOwnerSee)
+
+	if (!ShootMontage || !WeaponOwner)
 	{
 		return;
 	}
 
-	// FPSMesh muzzle flash (visible to owner due to OnlyOwnerSee)
-	SpawnMuzzleFlashOnMesh(FPSMesh);
+	if (!WeaponOwner->Implements<UCharacterMeshProviderInterface>())
+	{
+		return;
+	}
 
-	// Character shoot montage on Arms mesh (FPS view)
-	if (ShootMontage && WeaponOwner->Implements<UCharacterMeshProviderInterface>())
+	// --- FPS ANIMATIONS (Owning client only) ---
+	// Arms mesh has OnlyOwnerSee, so only owning client sees this
+	if (bIsLocallyControlled)
 	{
 		USkeletalMeshComponent* ArmsMesh = ICharacterMeshProviderInterface::Execute_GetArmsMesh(WeaponOwner);
 		if (ArmsMesh)
@@ -426,6 +518,27 @@ void ABaseWeapon::Client_PlayMuzzleFlash_Implementation()
 			{
 				AnimInst->Montage_Play(ShootMontage);
 			}
+		}
+	}
+
+	// --- TPS ANIMATIONS (All machines for remote view) ---
+	// Body/Legs have OwnerNoSee, so owning client won't see them rendering
+	// But animation still plays for physics synchronization and remote clients
+	USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(WeaponOwner);
+	if (BodyMesh)
+	{
+		if (UAnimInstance* AnimInst = BodyMesh->GetAnimInstance())
+		{
+			AnimInst->Montage_Play(ShootMontage);
+		}
+	}
+
+	USkeletalMeshComponent* LegsMesh = ICharacterMeshProviderInterface::Execute_GetLegsMesh(WeaponOwner);
+	if (LegsMesh)
+	{
+		if (UAnimInstance* AnimInst = LegsMesh->GetAnimInstance())
+		{
+			AnimInst->Montage_Play(ShootMontage);
 		}
 	}
 }
@@ -510,99 +623,234 @@ int32 ABaseWeapon::ConsumeAmmo_Implementation(int32 Requested, const FUseContext
 
 void ABaseWeapon::InitSightComponents(TSubclassOf<ABaseSight> SightClass)
 {
-	if (!FPSSightComponent || !TPSSightComponent) return;
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] InitSightComponents - %s | SightClass=%s | HasAuthority=%d | NetMode=%d"),
+		*GetName(),
+		SightClass ? *SightClass->GetName() : TEXT("nullptr"),
+		HasAuthority(),
+		(int32)GetNetMode());
+
+	// SERVER ONLY - clients receive CurrentSight via replication
+	if (!HasAuthority())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] InitSightComponents - SKIPPED (not authority, will receive via replication)"));
+		return;
+	}
+
+	if (!SightComponent)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[BaseWeapon] InitSightComponents - SightComponent is nullptr!"));
+		return;
+	}
 
 	if (SightClass)
 	{
-		FPSSightComponent->SetChildActorClass(TSubclassOf<AActor>(SightClass));
-		TPSSightComponent->SetChildActorClass(TSubclassOf<AActor>(SightClass));
+		// Create child actor
+		SightComponent->SetChildActorClass(TSubclassOf<AActor>(SightClass));
 
-		// FPS Sight: FirstPerson visibility (only owner sees)
-		if (ABaseSight* FPSSight = Cast<ABaseSight>(FPSSightComponent->GetChildActor()))
+		AActor* SightActor = SightComponent->GetChildActor();
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] InitSightComponents - ChildActor=%s"),
+			SightActor ? *SightActor->GetName() : TEXT("nullptr"));
+
+		if (SightActor)
 		{
-			FPSSight->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::FirstPerson;
-			FPSSight->ApplyVisibilityToMeshes();
-			FPSSight->SetOwner(GetOwner());
+			// Set authoritative sight reference (REPLICATED to clients)
+			CurrentSight = Cast<ABaseSight>(SightActor);
+			UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] InitSightComponents - SERVER set CurrentSight=%s"),
+				CurrentSight ? *CurrentSight->GetName() : TEXT("nullptr"));
+
+			// Propagate owner for correct visibility
+			UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] InitSightComponents - Propagating Owner=%s to SightActor"),
+				GetOwner() ? *GetOwner()->GetName() : TEXT("nullptr"));
+			SightActor->SetOwner(GetOwner());
+
+			// Attach sight meshes to weapon meshes (SERVER does this locally too)
+			AttachSightMeshes();
 		}
-
-		// TPS Sight: WorldSpaceRepresentation visibility (others see, owner doesn't)
-		if (ABaseSight* TPSSight = Cast<ABaseSight>(TPSSightComponent->GetChildActor()))
+		else
 		{
-			TPSSight->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::WorldSpaceRepresentation;
-			TPSSight->ApplyVisibilityToMeshes();
-			TPSSight->SetOwner(GetOwner());
+			UE_LOG(LogTemp, Error, TEXT("[BaseWeapon] InitSightComponents - SetChildActorClass succeeded but GetChildActor returned nullptr!"));
 		}
 	}
 	else
 	{
-		FPSSightComponent->SetChildActorClass(nullptr);
-		TPSSightComponent->SetChildActorClass(nullptr);
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] InitSightComponents - Clearing sight (SightClass is nullptr)"));
+		SightComponent->SetChildActorClass(nullptr);
+		CurrentSight = nullptr;
 	}
 }
 
-void ABaseWeapon::OnRep_CurrentSightClass()
+void ABaseWeapon::AttachSightMeshes()
 {
-	InitSightComponents(CurrentSightClass);
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] AttachSightMeshes - %s | CurrentSight=%s"),
+		*GetName(),
+		CurrentSight ? *CurrentSight->GetName() : TEXT("nullptr"));
+
+	// Use CurrentSight (replicated actor pointer) instead of SightComponent->GetChildActor()
+	if (!CurrentSight)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[BaseWeapon] AttachSightMeshes - CurrentSight is nullptr!"));
+		return;
+	}
+
+	if (!CurrentSight->Implements<USightMeshProviderInterface>())
+	{
+		UE_LOG(LogTemp, Error, TEXT("[BaseWeapon] AttachSightMeshes - CurrentSight does NOT implement USightMeshProviderInterface!"));
+		return;
+	}
+
+	UPrimitiveComponent* FPSSightMesh = ISightMeshProviderInterface::Execute_GetFPSMesh(CurrentSight);
+	UPrimitiveComponent* TPSSightMesh = ISightMeshProviderInterface::Execute_GetTPSMesh(CurrentSight);
+	FName AttachSocket = ISightMeshProviderInterface::Execute_GetAttachSocket(CurrentSight);
+
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] AttachSightMeshes - FPSSightMesh=%s | TPSSightMesh=%s | AttachSocket=%s"),
+		FPSSightMesh ? *FPSSightMesh->GetName() : TEXT("nullptr"),
+		TPSSightMesh ? *TPSSightMesh->GetName() : TEXT("nullptr"),
+		*AttachSocket.ToString());
+
+	// FPS sight mesh -> FPS weapon mesh (visible only to owner)
+	if (FPSSightMesh && FPSMesh)
+	{
+		FPSSightMesh->AttachToComponent(
+			FPSMesh,
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+			AttachSocket
+		);
+
+		USceneComponent* AttachParent = FPSSightMesh->GetAttachParent();
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] AttachSightMeshes - FPSSightMesh attached to %s at socket %s"),
+			AttachParent ? *AttachParent->GetName() : TEXT("nullptr"),
+			*FPSSightMesh->GetAttachSocketName().ToString());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[BaseWeapon] AttachSightMeshes - FPSSightMesh=%s FPSMesh=%s - CANNOT ATTACH FPS!"),
+			FPSSightMesh ? TEXT("valid") : TEXT("nullptr"),
+			FPSMesh ? TEXT("valid") : TEXT("nullptr"));
+	}
+
+	// TPS sight mesh -> TPS weapon mesh (visible to others)
+	if (TPSSightMesh && TPSMesh)
+	{
+		TPSSightMesh->AttachToComponent(
+			TPSMesh,
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+			AttachSocket
+		);
+
+		USceneComponent* AttachParent = TPSSightMesh->GetAttachParent();
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] AttachSightMeshes - TPSSightMesh attached to %s at socket %s"),
+			AttachParent ? *AttachParent->GetName() : TEXT("nullptr"),
+			*TPSSightMesh->GetAttachSocketName().ToString());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[BaseWeapon] AttachSightMeshes - TPSSightMesh=%s TPSMesh=%s - CANNOT ATTACH TPS!"),
+			TPSSightMesh ? TEXT("valid") : TEXT("nullptr"),
+			TPSMesh ? TEXT("valid") : TEXT("nullptr"));
+	}
+}
+
+void ABaseWeapon::OnRep_CurrentSight()
+{
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] OnRep_CurrentSight - %s | CurrentSight=%s | NetMode=%d"),
+		*GetName(),
+		CurrentSight ? *CurrentSight->GetName() : TEXT("nullptr"),
+		(int32)GetNetMode());
+
+	// CLIENT ONLY - called when CurrentSight actor is replicated from server
+	if (CurrentSight)
+	{
+		// Propagate owner for correct visibility (OnlyOwnerSee/OwnerNoSee)
+		CurrentSight->SetOwner(GetOwner());
+
+		// Attach sight meshes to weapon meshes (LOCAL operation)
+		AttachSightMeshes();
+	}
 }
 
 void ABaseWeapon::InitMagazineComponents(TSubclassOf<ABaseMagazine> MagazineClass)
 {
-	if (!MagazineComponent) return;
-
-#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
-	UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::InitMagazineComponents() - %s, MagazineClass=%s, HasAuthority=%d"),
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] InitMagazineComponents - %s | MagazineClass=%s | HasAuthority=%d | NetMode=%d"),
 		*GetName(),
 		MagazineClass ? *MagazineClass->GetName() : TEXT("nullptr"),
-		HasAuthority());
-#endif
+		HasAuthority(),
+		(int32)GetNetMode());
+
+	// SERVER ONLY - clients receive CurrentMagazine via replication
+	if (!HasAuthority())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] InitMagazineComponents - SKIPPED (not authority, will receive via replication)"));
+		return;
+	}
+
+	if (!MagazineComponent)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[BaseWeapon] InitMagazineComponents - MagazineComponent is nullptr!"));
+		return;
+	}
 
 	if (MagazineClass)
 	{
+		// Create child actor
 		MagazineComponent->SetChildActorClass(TSubclassOf<AActor>(MagazineClass));
 
 		AActor* MagActor = MagazineComponent->GetChildActor();
-#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
-		UE_LOG(LogTemp, Verbose, TEXT("  -> After SetChildActorClass: ChildActor=%s"),
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] InitMagazineComponents - ChildActor=%s"),
 			MagActor ? *MagActor->GetName() : TEXT("nullptr"));
-#endif
 
 		if (MagActor)
 		{
-			// SERVER ONLY: Set authoritative magazine reference
-			// CurrentMagazine is ABaseMagazine* UPROPERTY required for replication
-			// MagazineClass guarantees the child actor is ABaseMagazine subclass
-			if (HasAuthority())
-			{
-				CurrentMagazine = Cast<ABaseMagazine>(MagActor);
-			}
+			// Set authoritative magazine reference (REPLICATED to clients)
+			CurrentMagazine = Cast<ABaseMagazine>(MagActor);
+			UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] InitMagazineComponents - SERVER set CurrentMagazine=%s"),
+				CurrentMagazine ? *CurrentMagazine->GetName() : TEXT("nullptr"));
 
 			// Propagate owner for correct visibility
+			UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] InitMagazineComponents - Propagating Owner=%s to MagActor"),
+				GetOwner() ? *GetOwner()->GetName() : TEXT("nullptr"));
 			MagActor->SetOwner(GetOwner());
 
-			// Attach magazine meshes to weapon meshes
-			// This is a LOCAL operation - each machine does it independently
+			// Attach magazine meshes to weapon meshes (SERVER does this locally too)
 			AttachMagazineMeshes();
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("[BaseWeapon] InitMagazineComponents - SetChildActorClass succeeded but GetChildActor returned nullptr!"));
 		}
 	}
 	else
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] InitMagazineComponents - Clearing magazine (MagazineClass is nullptr)"));
 		MagazineComponent->SetChildActorClass(nullptr);
-		if (HasAuthority())
-		{
-			CurrentMagazine = nullptr;
-		}
+		CurrentMagazine = nullptr;
 	}
 }
 
 void ABaseWeapon::AttachMagazineMeshes()
 {
-	AActor* MagActor = MagazineComponent ? MagazineComponent->GetChildActor() : nullptr;
-	if (!MagActor) return;
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] AttachMagazineMeshes - %s | CurrentMagazine=%s"),
+		*GetName(),
+		CurrentMagazine ? *CurrentMagazine->GetName() : TEXT("nullptr"));
 
-	if (!MagActor->Implements<UMagazineMeshProviderInterface>()) return;
+	// Use CurrentMagazine (replicated actor pointer) instead of MagazineComponent->GetChildActor()
+	if (!CurrentMagazine)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[BaseWeapon] AttachMagazineMeshes - CurrentMagazine is nullptr!"));
+		return;
+	}
 
-	UPrimitiveComponent* FPSMagMesh = IMagazineMeshProviderInterface::Execute_GetFPSMesh(MagActor);
-	UPrimitiveComponent* TPSMagMesh = IMagazineMeshProviderInterface::Execute_GetTPSMesh(MagActor);
+	if (!CurrentMagazine->Implements<UMagazineMeshProviderInterface>())
+	{
+		UE_LOG(LogTemp, Error, TEXT("[BaseWeapon] AttachMagazineMeshes - CurrentMagazine does NOT implement UMagazineMeshProviderInterface!"));
+		return;
+	}
+
+	UPrimitiveComponent* FPSMagMesh = IMagazineMeshProviderInterface::Execute_GetFPSMesh(CurrentMagazine);
+	UPrimitiveComponent* TPSMagMesh = IMagazineMeshProviderInterface::Execute_GetTPSMesh(CurrentMagazine);
+
+	UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] AttachMagazineMeshes - FPSMagMesh=%s | TPSMagMesh=%s"),
+		FPSMagMesh ? *FPSMagMesh->GetName() : TEXT("nullptr"),
+		TPSMagMesh ? *TPSMagMesh->GetName() : TEXT("nullptr"));
 
 	// FPS magazine mesh -> FPS weapon mesh (visible only to owner)
 	if (FPSMagMesh && FPSMesh)
@@ -612,6 +860,17 @@ void ABaseWeapon::AttachMagazineMeshes()
 			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
 			FName("magazine")
 		);
+
+		USceneComponent* AttachParent = FPSMagMesh->GetAttachParent();
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] AttachMagazineMeshes - FPSMagMesh attached to %s at socket %s"),
+			AttachParent ? *AttachParent->GetName() : TEXT("nullptr"),
+			*FPSMagMesh->GetAttachSocketName().ToString());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[BaseWeapon] AttachMagazineMeshes - FPSMagMesh=%s FPSMesh=%s - CANNOT ATTACH FPS!"),
+			FPSMagMesh ? TEXT("valid") : TEXT("nullptr"),
+			FPSMesh ? TEXT("valid") : TEXT("nullptr"));
 	}
 
 	// TPS magazine mesh -> TPS weapon mesh (visible to others)
@@ -622,29 +881,18 @@ void ABaseWeapon::AttachMagazineMeshes()
 			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
 			FName("magazine")
 		);
+
+		USceneComponent* AttachParent = TPSMagMesh->GetAttachParent();
+		UE_LOG(LogTemp, Warning, TEXT("[BaseWeapon] AttachMagazineMeshes - TPSMagMesh attached to %s at socket %s"),
+			AttachParent ? *AttachParent->GetName() : TEXT("nullptr"),
+			*TPSMagMesh->GetAttachSocketName().ToString());
 	}
-}
-
-void ABaseWeapon::OnRep_CurrentMagazineClass()
-{
-#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
-	UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::OnRep_CurrentMagazineClass() - %s, CurrentMagazineClass=%s, HasBegunPlay=%d"),
-		*GetName(),
-		CurrentMagazineClass ? *CurrentMagazineClass->GetName() : TEXT("nullptr"),
-		HasActorBegunPlay());
-#endif
-
-	// Skip if called before BeginPlay - BeginPlay will handle initialization
-	// OnRep can fire before component registration is complete, causing SetChildActorClass to fail
-	if (!HasActorBegunPlay())
+	else
 	{
-#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
-		UE_LOG(LogTemp, Verbose, TEXT("  -> Skipping: BeginPlay not called yet"));
-#endif
-		return;
+		UE_LOG(LogTemp, Error, TEXT("[BaseWeapon] AttachMagazineMeshes - TPSMagMesh=%s TPSMesh=%s - CANNOT ATTACH TPS!"),
+			TPSMagMesh ? TEXT("valid") : TEXT("nullptr"),
+			TPSMesh ? TEXT("valid") : TEXT("nullptr"));
 	}
-
-	InitMagazineComponents(CurrentMagazineClass);
 }
 
 TSubclassOf<UUserWidget> ABaseWeapon::GetCrossHair_Implementation() const
@@ -654,11 +902,9 @@ TSubclassOf<UUserWidget> ABaseWeapon::GetCrossHair_Implementation() const
 
 AActor* ABaseWeapon::GetCurrentSightActor() const
 {
-	if (FPSSightComponent)
-	{
-		return FPSSightComponent->GetChildActor();
-	}
-	return nullptr;
+	// Use replicated CurrentSight pointer instead of SightComponent->GetChildActor()
+	// This ensures clients have correct sight reference even before component is ready
+	return CurrentSight;
 }
 
 TSubclassOf<UUserWidget> ABaseWeapon::GetAimingCrosshair_Implementation() const
@@ -783,29 +1029,26 @@ bool ABaseWeapon::IsReloading_Implementation() const
 
 AActor* ABaseWeapon::GetMagazineActor_Implementation() const
 {
-	if (MagazineComponent)
-	{
-		return MagazineComponent->GetChildActor();
-	}
-	return nullptr;
+	// Use replicated CurrentMagazine pointer for consistent access on all machines
+	return CurrentMagazine;
 }
 
 UPrimitiveComponent* ABaseWeapon::GetFPSMagazineMesh_Implementation() const
 {
-	AActor* MagActor = MagazineComponent ? MagazineComponent->GetChildActor() : nullptr;
-	if (MagActor && MagActor->Implements<UMagazineMeshProviderInterface>())
+	// Use replicated CurrentMagazine pointer
+	if (CurrentMagazine && CurrentMagazine->Implements<UMagazineMeshProviderInterface>())
 	{
-		return IMagazineMeshProviderInterface::Execute_GetFPSMesh(MagActor);
+		return IMagazineMeshProviderInterface::Execute_GetFPSMesh(CurrentMagazine);
 	}
 	return nullptr;
 }
 
 UPrimitiveComponent* ABaseWeapon::GetTPSMagazineMesh_Implementation() const
 {
-	AActor* MagActor = MagazineComponent ? MagazineComponent->GetChildActor() : nullptr;
-	if (MagActor && MagActor->Implements<UMagazineMeshProviderInterface>())
+	// Use replicated CurrentMagazine pointer
+	if (CurrentMagazine && CurrentMagazine->Implements<UMagazineMeshProviderInterface>())
 	{
-		return IMagazineMeshProviderInterface::Execute_GetTPSMesh(MagActor);
+		return IMagazineMeshProviderInterface::Execute_GetTPSMesh(CurrentMagazine);
 	}
 	return nullptr;
 }
