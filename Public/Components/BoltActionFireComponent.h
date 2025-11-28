@@ -13,21 +13,25 @@
  * FIRE MODE: Bolt-Action
  *
  * BEHAVIOR:
- * - TriggerPulled() → Fire one shot, then start bolt-action sequence
+ * - TriggerPulled() → Fire one shot, mark bolt-action as pending
+ * - ShootMontage plays (recoil animation)
+ * - ShootMontage ends → OnShootMontageEnded() → StartBoltAction()
  * - Bolt-action montage plays (shell ejection, chamber next round)
  * - Cannot fire again until bolt-action completes
  * - TriggerReleased() → Reset trigger state
  *
- * BOLT-ACTION SEQUENCE:
- * 1. Fire() → Shot fired
- * 2. BoltActionMontage starts on weapon + character meshes
- * 3. AnimNotify_ShellEject → Shell casing ejected (if ammo available)
- * 4. AnimNotify_ChamberRound → Next round chambered (if ammo available)
- * 5. Montage ends → bIsCyclingBolt = false, can fire again
+ * BOLT-ACTION SEQUENCE (after shoot montage):
+ * 1. Fire() → Shot fired, bBoltActionPendingAfterShoot = true
+ * 2. ShootMontage ends → OnShootMontageEnded()
+ * 3. StartBoltAction() → BoltActionMontage starts
+ * 4. AnimNotify_ShellEject → Shell casing ejected (if ammo available)
+ * 5. AnimNotify_ChamberRound → Next round chambered (if ammo available)
+ * 6. BoltActionMontage ends → bIsCyclingBolt = false, can fire again
  *
  * STATE:
  * - bIsCyclingBolt: True during bolt-action animation, blocks firing
  * - bChamberEmpty: True if no round in chamber (must reload)
+ * - bBoltActionPendingAfterShoot: True after fire, waiting for shoot montage to end
  *
  * USE CASES:
  * - Bolt-action sniper rifles (Sako 85, Remington 700, AWM)
@@ -190,7 +194,30 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "BoltAction")
 	void ResetChamberState();
 
+	/**
+	 * Called when shoot montage ends - triggers bolt-action sequence
+	 * Should be called by weapon class (e.g., Sako85) after ShootMontage completes
+	 * SERVER: Starts bolt-action if bBoltActionPendingAfterShoot is true
+	 */
+	UFUNCTION(BlueprintCallable, Category = "BoltAction")
+	void OnShootMontageEnded();
+
+	/**
+	 * Check if bolt-action is pending after shoot
+	 * Used by weapon class to know if it should register shoot montage delegate
+	 */
+	UFUNCTION(BlueprintPure, Category = "BoltAction")
+	bool IsBoltActionPendingAfterShoot() const { return bBoltActionPendingAfterShoot; }
+
 protected:
+	/**
+	 * Is bolt-action pending after shoot? (waiting for shoot montage to end)
+	 * Set to true after Fire(), reset when OnShootMontageEnded() is called
+	 * NOT replicated - server-only state for timing control
+	 */
+	bool bBoltActionPendingAfterShoot = false;
+
+public:
 	// ============================================
 	// INTERNAL HELPERS
 	// ============================================
@@ -225,4 +252,11 @@ protected:
 	 * @param Montage - Montage to stop
 	 */
 	void StopWeaponMontage(UAnimMontage* Montage);
+
+	/**
+	 * Reattach weapon to socket on character
+	 * Used during bolt-action to move weapon from weapon_r to weapon_l and back
+	 * @param bToReloadSocket - true: attach to ReloadAttachSocket (weapon_l), false: attach to CharacterAttachSocket (weapon_r)
+	 */
+	void ReattachWeaponToSocket(bool bToReloadSocket);
 };

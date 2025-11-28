@@ -73,6 +73,29 @@ void ASako85::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeP
 // BASEWEAPON OVERRIDES
 // ============================================
 
+bool ASako85::CanBeUnequipped_Implementation() const
+{
+	// First check base conditions (not reloading, no montage playing)
+	if (!Super::CanBeUnequipped_Implementation())
+	{
+		return false;
+	}
+
+	// Bolt-action specific: Cannot unequip while bolt is cycling
+	if (BoltActionFireComponent && BoltActionFireComponent->IsCyclingBolt())
+	{
+		return false;
+	}
+
+	// Cannot unequip while bolt-action pending after shoot
+	if (BoltActionFireComponent && BoltActionFireComponent->IsBoltActionPendingAfterShoot())
+	{
+		return false;
+	}
+
+	return true;
+}
+
 void ASako85::OnUnequipped_Implementation()
 {
 	// Call base implementation (cancels reload, resets aiming)

@@ -7,6 +7,8 @@
 #include "Animation/AnimInstance.h"
 #include "Components/SkeletalMeshComponent.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogBoltActionReload, Log, All);
+
 UBoltActionReloadComponent::UBoltActionReloadComponent()
 {
 	// Bolt-action rifles need weapon repositioning during reload
@@ -17,8 +19,37 @@ UBoltActionReloadComponent::UBoltActionReloadComponent()
 // VIRTUAL OVERRIDES
 // ============================================
 
+bool UBoltActionReloadComponent::CanReload_Internal() const
+{
+	// First check base conditions (not reloading, magazine not full, etc.)
+	if (!Super::CanReload_Internal())
+	{
+		return false;
+	}
+
+	// Bolt-action specific: Cannot reload while bolt is cycling
+	UBoltActionFireComponent* BoltComp = GetBoltActionFireComponent();
+	if (BoltComp && BoltComp->IsCyclingBolt())
+	{
+		UE_LOG(LogBoltActionReload, Verbose, TEXT("CanReload_Internal: false - bolt is cycling"));
+		return false;
+	}
+
+	// Cannot reload while bolt-action pending after shoot
+	if (BoltComp && BoltComp->IsBoltActionPendingAfterShoot())
+	{
+		UE_LOG(LogBoltActionReload, Verbose, TEXT("CanReload_Internal: false - bolt-action pending after shoot"));
+		return false;
+	}
+
+	return true;
+}
+
 void UBoltActionReloadComponent::PlayReloadMontages()
 {
+	UE_LOG(LogBoltActionReload, Log, TEXT("PlayReloadMontages - bReattachDuringReload: %s"),
+		bReattachDuringReload ? TEXT("true") : TEXT("false"));
+
 	// Re-attach weapon to reload socket if configured
 	if (bReattachDuringReload)
 	{
@@ -26,6 +57,7 @@ void UBoltActionReloadComponent::PlayReloadMontages()
 		if (WeaponActor && WeaponActor->Implements<UHoldableInterface>())
 		{
 			FName ReloadSocket = IHoldableInterface::Execute_GetReloadAttachSocket(WeaponActor);
+			UE_LOG(LogBoltActionReload, Log, TEXT("Reattaching weapon to reload socket: %s"), *ReloadSocket.ToString());
 			ReattachWeaponToSocket(ReloadSocket);
 		}
 	}
@@ -36,8 +68,55 @@ void UBoltActionReloadComponent::PlayReloadMontages()
 
 void UBoltActionReloadComponent::OnMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
+	// Check if bolt-action is in progress (works on both server and clients via replicated state)
+	UBoltActionFireComponent* BoltComp = GetBoltActionFireComponent();
+	bool bBoltActionInProgress = bBoltActionPending || (BoltComp && BoltComp->IsCyclingBolt());
+
+	UE_LOG(LogBoltActionReload, Log, TEXT("OnMontageEnded (Reload) - bInterrupted: %s, Authority: %s, bBoltActionPending: %s, bIsCyclingBolt: %s"),
+		bInterrupted ? TEXT("true") : TEXT("false"),
+		GetOwner() && GetOwner()->HasAuthority() ? TEXT("Server") : TEXT("Client"),
+		bBoltActionPending ? TEXT("true") : TEXT("false"),
+		BoltComp && BoltComp->IsCyclingBolt() ? TEXT("true") : TEXT("false"));
+
 	// If interrupted, handle cleanup
 	if (bInterrupted)
+	{
+		UE_LOG(LogBoltActionReload, Log, TEXT("Reload interrupted - cleaning up"));
+
+		// Re-attach weapon to original socket (only if bolt-action NOT in progress)
+		// If bolt-action is in progress, weapon stays on weapon_l for bolt-action sequence
+		if (bReattachDuringReload && !bBoltActionInProgress)
+		{
+			AActor* WeaponActor = GetOwnerItem();
+			if (WeaponActor && WeaponActor->Implements<UHoldableInterface>())
+			{
+				FName EquipSocket = IHoldableInterface::Execute_GetAttachSocket(WeaponActor);
+				ReattachWeaponToSocket(EquipSocket);
+			}
+		}
+
+		// Reset state (only if bolt-action NOT in progress) - SERVER ONLY
+		if (GetOwner() && GetOwner()->HasAuthority() && !bBoltActionInProgress)
+		{
+			bIsReloading = false;
+		}
+		return;
+	}
+
+	// Reload montage completed normally
+	// If bolt-action is in progress, don't do anything - weapon stays on weapon_l
+	// The bolt-action sequence will complete and handle reattachment via OnRep_IsCyclingBolt
+	if (bBoltActionInProgress)
+	{
+		UE_LOG(LogBoltActionReload, Log, TEXT("Reload montage ended - bolt-action in progress, weapon stays on weapon_l"));
+		return;
+	}
+
+	// If no bolt-action in progress (notify wasn't triggered), complete reload immediately
+	// This is fallback for weapons without AnimNotify_ReloadBoltAction in their reload montage
+	UE_LOG(LogBoltActionReload, Log, TEXT("Reload montage ended - no bolt-action in progress, completing reload"));
+
+	if (GetOwner() && GetOwner()->HasAuthority())
 	{
 		// Re-attach weapon to original socket
 		if (bReattachDuringReload)
@@ -50,51 +129,8 @@ void UBoltActionReloadComponent::OnMontageEnded(UAnimMontage* Montage, bool bInt
 			}
 		}
 
-		// Reset state
-		if (GetOwner() && GetOwner()->HasAuthority())
-		{
-			bIsReloading = false;
-		}
-		return;
-	}
-
-	// Reload montage completed normally
-	// Now trigger bolt-action to chamber first round
-
-	// SERVER: Start bolt-action sequence
-	if (GetOwner() && GetOwner()->HasAuthority())
-	{
-		UBoltActionFireComponent* BoltComp = GetBoltActionFireComponent();
-		if (BoltComp)
-		{
-			bBoltActionPending = true;
-			BoltComp->StartBoltAction(true);  // true = from reload
-
-			// Get character Body mesh to bind montage end delegate
-			AActor* CharacterActor = GetOwnerCharacterActor();
-			if (CharacterActor && CharacterActor->Implements<UCharacterMeshProviderInterface>())
-			{
-				USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(CharacterActor);
-				if (BodyMesh)
-				{
-					if (UAnimInstance* AnimInst = BodyMesh->GetAnimInstance())
-					{
-						// Bind to bolt-action montage end
-						if (BoltComp->BoltActionMontage)
-						{
-							FOnMontageEnded EndDelegate;
-							EndDelegate.BindUObject(this, &UBoltActionReloadComponent::OnBoltActionMontageEnded);
-							AnimInst->Montage_SetEndDelegate(EndDelegate, BoltComp->BoltActionMontage);
-						}
-					}
-				}
-			}
-		}
-		else
-		{
-			// No bolt-action component - complete reload immediately
-			OnBoltActionAfterReloadComplete();
-		}
+		// Complete reload
+		Super::OnReloadComplete();
 	}
 }
 
@@ -162,26 +198,118 @@ void UBoltActionReloadComponent::StopReloadMontages()
 // BOLT-ACTION INTEGRATION
 // ============================================
 
-void UBoltActionReloadComponent::OnBoltActionAfterReloadComplete()
+void UBoltActionReloadComponent::OnReloadBoltActionNotify()
 {
-	bBoltActionPending = false;
+	UE_LOG(LogBoltActionReload, Log, TEXT("OnReloadBoltActionNotify - Authority: %s, bBoltActionPending: %s"),
+		GetOwner() && GetOwner()->HasAuthority() ? TEXT("Server") : TEXT("Client"),
+		bBoltActionPending ? TEXT("true") : TEXT("false"));
 
-	// Re-attach weapon back to equip socket
-	if (bReattachDuringReload)
+	// Prevent double-triggering
+	if (bBoltActionPending)
 	{
-		AActor* WeaponActor = GetOwnerItem();
-		if (WeaponActor && WeaponActor->Implements<UHoldableInterface>())
-		{
-			FName EquipSocket = IHoldableInterface::Execute_GetAttachSocket(WeaponActor);
-			ReattachWeaponToSocket(EquipSocket);
-		}
+		UE_LOG(LogBoltActionReload, Warning, TEXT("OnReloadBoltActionNotify - Bolt-action already pending, ignoring"));
+		return;
 	}
 
-	// Reset bolt-action fire component chamber state
+	// SERVER ONLY: Set state and trigger bolt-action sequence
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		UE_LOG(LogBoltActionReload, Log, TEXT("OnReloadBoltActionNotify - Not authority, skipping (clients will get state via OnRep)"));
+		return;
+	}
+
+	UBoltActionFireComponent* BoltComp = GetBoltActionFireComponent();
+	if (!BoltComp)
+	{
+		UE_LOG(LogBoltActionReload, Warning, TEXT("OnReloadBoltActionNotify - No BoltActionFireComponent found"));
+		return;
+	}
+
+	UE_LOG(LogBoltActionReload, Log, TEXT("[Server] AnimNotify triggered - starting bolt-action to chamber round"));
+
+	bBoltActionPending = true;
+
+	// Set bolt-action state (will replicate to clients)
+	BoltComp->bIsCyclingBolt = true;
+	BoltComp->bChamberEmpty = false;  // Chambering from reload
+
+	// Get character meshes to play bolt-action montage
+	AActor* CharacterActor = GetOwnerCharacterActor();
+	if (CharacterActor && CharacterActor->Implements<UCharacterMeshProviderInterface>())
+	{
+		USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(CharacterActor);
+		USkeletalMeshComponent* ArmsMesh = ICharacterMeshProviderInterface::Execute_GetArmsMesh(CharacterActor);
+		USkeletalMeshComponent* LegsMesh = ICharacterMeshProviderInterface::Execute_GetLegsMesh(CharacterActor);
+
+		// Play bolt-action montage on character meshes
+		if (BoltComp->BoltActionMontage)
+		{
+			if (BodyMesh)
+			{
+				if (UAnimInstance* AnimInst = BodyMesh->GetAnimInstance())
+				{
+					AnimInst->Montage_Play(BoltComp->BoltActionMontage);
+
+					// Bind OUR delegate to handle reload completion
+					FOnMontageEnded EndDelegate;
+					EndDelegate.BindUObject(this, &UBoltActionReloadComponent::OnBoltActionMontageEnded);
+					AnimInst->Montage_SetEndDelegate(EndDelegate, BoltComp->BoltActionMontage);
+				}
+			}
+
+			if (ArmsMesh)
+			{
+				if (UAnimInstance* AnimInst = ArmsMesh->GetAnimInstance())
+				{
+					AnimInst->Montage_Play(BoltComp->BoltActionMontage);
+				}
+			}
+
+			if (LegsMesh)
+			{
+				if (UAnimInstance* AnimInst = LegsMesh->GetAnimInstance())
+				{
+					AnimInst->Montage_Play(BoltComp->BoltActionMontage);
+				}
+			}
+
+			UE_LOG(LogBoltActionReload, Log, TEXT("[Server] Bolt-action montage started"));
+		}
+		else
+		{
+			UE_LOG(LogBoltActionReload, Warning, TEXT("[Server] No BoltActionMontage assigned - completing reload immediately"));
+			OnBoltActionAfterReloadComplete();
+		}
+	}
+}
+
+void UBoltActionReloadComponent::OnBoltActionAfterReloadComplete()
+{
+	UE_LOG(LogBoltActionReload, Log, TEXT("OnBoltActionAfterReloadComplete - Authority: %s"),
+		GetOwner() && GetOwner()->HasAuthority() ? TEXT("Server") : TEXT("Client"));
+
+	bBoltActionPending = false;
+
+	// Complete bolt-action sequence - this resets bIsCyclingBolt AND handles weapon reattachment
 	UBoltActionFireComponent* BoltComp = GetBoltActionFireComponent();
 	if (BoltComp)
 	{
-		BoltComp->ResetChamberState();
+		UE_LOG(LogBoltActionReload, Log, TEXT("Calling BoltComp->OnBoltActionComplete() to reset bolt state"));
+		BoltComp->OnBoltActionComplete();
+	}
+	else
+	{
+		// Fallback: No BoltComp, manually reattach weapon
+		UE_LOG(LogBoltActionReload, Warning, TEXT("No BoltActionFireComponent found - manually reattaching weapon"));
+		if (bReattachDuringReload)
+		{
+			AActor* WeaponActor = GetOwnerItem();
+			if (WeaponActor && WeaponActor->Implements<UHoldableInterface>())
+			{
+				FName EquipSocket = IHoldableInterface::Execute_GetAttachSocket(WeaponActor);
+				ReattachWeaponToSocket(EquipSocket);
+			}
+		}
 	}
 
 	// Complete reload using parent implementation (SERVER ONLY)

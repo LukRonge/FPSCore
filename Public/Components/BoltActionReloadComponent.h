@@ -23,8 +23,9 @@ class UBoltActionFireComponent;
  * 4. AnimNotify "MagazineIn" fires → OnMagazineIn()
  *    - Detach magazine from hand
  *    - Re-attach to weapon socket
- * 5. Reload montage blend-out starts → OnReloadMontageBlendingOut()
+ * 5. AnimNotify "ReloadBoltAction" fires → OnReloadBoltActionNotify()
  *    - Start bolt-action sequence to chamber first round
+ *    - BoltActionMontage starts (may overlap with reload montage end)
  * 6. Bolt-action completes → OnBoltActionAfterReloadComplete()
  *    - Weapon re-attaches back to CharacterAttachSocket
  *    - bIsReloading = false
@@ -32,7 +33,7 @@ class UBoltActionFireComponent;
  *
  * Key Differences from BoxMagazineReloadComponent:
  * - Weapon re-attaches to different socket during reload
- * - Bolt-action montage plays at end of reload to chamber round
+ * - Bolt-action triggered by AnimNotify during reload (not at montage end)
  * - Chamber state must be set to ready after reload
  *
  * Used by: Bolt-action sniper rifles (Sako 85, AWM, Remington 700)
@@ -63,6 +64,12 @@ public:
 	// ============================================
 
 	/**
+	 * Check if reload is possible - extends base with bolt-action check
+	 * Returns false if bolt is currently cycling (bIsCyclingBolt)
+	 */
+	virtual bool CanReload_Internal() const override;
+
+	/**
 	 * Play reload montages - override to re-attach weapon first
 	 * Called from Server_StartReload (server) and OnRep_IsReloading (clients)
 	 */
@@ -86,6 +93,15 @@ public:
 	// ============================================
 	// BOLT-ACTION INTEGRATION
 	// ============================================
+
+	/**
+	 * Called by AnimNotify_ReloadBoltAction during reload montage
+	 * Triggers bolt-action sequence to chamber first round
+	 * SERVER: Sets bolt state and triggers montage
+	 * CLIENTS: State replicates, montages play via OnRep
+	 */
+	UFUNCTION(BlueprintCallable, Category = "BoltAction|Reload")
+	void OnReloadBoltActionNotify();
 
 	/**
 	 * Called when bolt-action sequence completes after reload

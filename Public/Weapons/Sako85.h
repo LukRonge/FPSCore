@@ -83,6 +83,12 @@ public:
 	// ============================================
 
 	/**
+	 * Check if weapon can be unequipped - extends base with bolt-action check
+	 * Returns false if bolt is cycling or bolt-action pending after shoot
+	 */
+	virtual bool CanBeUnequipped_Implementation() const override;
+
+	/**
 	 * Handle unequip - Sako85 specific behavior
 	 * Reset any Sako85-specific state on unequip
 	 */

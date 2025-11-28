@@ -2,11 +2,14 @@
 
 #include "Components/BoltActionFireComponent.h"
 #include "Components/BallisticsComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Interfaces/HoldableInterface.h"
 #include "Interfaces/CharacterMeshProviderInterface.h"
 #include "Interfaces/AmmoConsumerInterface.h"
 #include "Animation/AnimInstance.h"
 #include "Net/UnrealNetwork.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogBoltActionFire, Log, All);
 
 UBoltActionFireComponent::UBoltActionFireComponent()
 {
@@ -33,12 +36,20 @@ void UBoltActionFireComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 
 void UBoltActionFireComponent::OnRep_IsCyclingBolt()
 {
+	UE_LOG(LogBoltActionFire, Log, TEXT("[Client] OnRep_IsCyclingBolt: %s"), bIsCyclingBolt ? TEXT("true") : TEXT("false"));
+
 	PropagateStateToAnimInstances();
 
-	// If cycling started on client, play montages
+	// If cycling started on client, reattach weapon and play montages
 	if (bIsCyclingBolt)
 	{
+		ReattachWeaponToSocket(true);  // To reload socket (weapon_l)
 		PlayBoltActionMontages();
+	}
+	else
+	{
+		// Bolt-action ended - reattach weapon back to normal socket
+		ReattachWeaponToSocket(false);  // To equip socket (weapon_r)
 	}
 }
 
@@ -82,29 +93,44 @@ bool UBoltActionFireComponent::CanFire() const
 	// Bolt-action specific checks
 	if (bIsCyclingBolt)
 	{
+		UE_LOG(LogBoltActionFire, Verbose, TEXT("CanFire: false - bIsCyclingBolt is true"));
 		return false;
 	}
 
 	if (bChamberEmpty)
 	{
+		UE_LOG(LogBoltActionFire, Verbose, TEXT("CanFire: false - bChamberEmpty is true"));
 		return false;
 	}
 
 	// Base class checks (ammo, BallisticsComponent, etc.)
-	return Super::CanFire();
+	bool bCanFire = Super::CanFire();
+	UE_LOG(LogBoltActionFire, Verbose, TEXT("CanFire: %s (base check)"), bCanFire ? TEXT("true") : TEXT("false"));
+	return bCanFire;
 }
 
 void UBoltActionFireComponent::TriggerPulled()
 {
+	UE_LOG(LogBoltActionFire, Log, TEXT("TriggerPulled - CanFire: %s, bTriggerHeld: %s, Authority: %s"),
+		CanFire() ? TEXT("true") : TEXT("false"),
+		bTriggerHeld ? TEXT("true") : TEXT("false"),
+		GetOwner() && GetOwner()->HasAuthority() ? TEXT("Server") : TEXT("Client"));
+
 	if (CanFire() && !bTriggerHeld)
 	{
 		bTriggerHeld = true;
 		Fire();
 
-		// After firing, start bolt-action sequence (SERVER ONLY)
+		// NOTE: Bolt-action sequence is NOT started here immediately!
+		// It will be started after ShootMontage ends via OnShootMontageEnded callback
+		// The weapon class (Sako85) registers the delegate in Multicast_PlayShootEffects
+		// This ensures proper animation sequencing: shoot recoil -> bolt manipulation
+
+		// Mark that bolt-action is pending (SERVER ONLY)
 		if (GetOwner() && GetOwner()->HasAuthority())
 		{
-			StartBoltAction(false);
+			bBoltActionPendingAfterShoot = true;
+			UE_LOG(LogBoltActionFire, Log, TEXT("[Server] Fire complete - bolt-action pending after shoot montage"));
 		}
 	}
 }
@@ -122,7 +148,11 @@ void UBoltActionFireComponent::StartBoltAction(bool bFromReload)
 {
 	if (!GetOwner()) return;
 
-	// SERVER: Set state and play montages
+	UE_LOG(LogBoltActionFire, Log, TEXT("StartBoltAction - bFromReload: %s, Authority: %s"),
+		bFromReload ? TEXT("true") : TEXT("false"),
+		GetOwner()->HasAuthority() ? TEXT("Server") : TEXT("Client"));
+
+	// SERVER: Set state
 	if (GetOwner()->HasAuthority())
 	{
 		bIsCyclingBolt = true;
@@ -134,6 +164,9 @@ void UBoltActionFireComponent::StartBoltAction(bool bFromReload)
 		}
 
 		PropagateStateToAnimInstances();
+
+		// Reattach weapon to reload socket (weapon_l) for bolt manipulation
+		ReattachWeaponToSocket(true);
 	}
 
 	// Play montages (LOCAL - runs on server immediately, clients via OnRep)
@@ -142,6 +175,9 @@ void UBoltActionFireComponent::StartBoltAction(bool bFromReload)
 
 void UBoltActionFireComponent::OnBoltActionComplete()
 {
+	UE_LOG(LogBoltActionFire, Log, TEXT("OnBoltActionComplete - Authority: %s"),
+		GetOwner() && GetOwner()->HasAuthority() ? TEXT("Server") : TEXT("Client"));
+
 	// SERVER: Update state
 	if (GetOwner() && GetOwner()->HasAuthority())
 	{
@@ -155,10 +191,17 @@ void UBoltActionFireComponent::OnBoltActionComplete()
 			if (CurrentAmmo <= 0)
 			{
 				bChamberEmpty = true;
+				UE_LOG(LogBoltActionFire, Log, TEXT("[Server] Chamber empty - no ammo to chamber"));
 			}
 		}
 
 		PropagateStateToAnimInstances();
+
+		// Reattach weapon back to equip socket (weapon_r)
+		ReattachWeaponToSocket(false);
+
+		UE_LOG(LogBoltActionFire, Log, TEXT("[Server] Bolt-action complete - bIsCyclingBolt: false, bChamberEmpty: %s"),
+			bChamberEmpty ? TEXT("true") : TEXT("false"));
 	}
 }
 
@@ -217,6 +260,26 @@ void UBoltActionFireComponent::ResetChamberState()
 	{
 		bChamberEmpty = false;
 		PropagateStateToAnimInstances();
+	}
+}
+
+void UBoltActionFireComponent::OnShootMontageEnded()
+{
+	UE_LOG(LogBoltActionFire, Log, TEXT("OnShootMontageEnded - bBoltActionPendingAfterShoot: %s, Authority: %s"),
+		bBoltActionPendingAfterShoot ? TEXT("true") : TEXT("false"),
+		GetOwner() && GetOwner()->HasAuthority() ? TEXT("Server") : TEXT("Client"));
+
+	// SERVER ONLY: Start bolt-action if pending
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
+	if (bBoltActionPendingAfterShoot)
+	{
+		bBoltActionPendingAfterShoot = false;
+		UE_LOG(LogBoltActionFire, Log, TEXT("[Server] Shoot montage ended - starting bolt-action sequence"));
+		StartBoltAction(false);
 	}
 }
 
@@ -392,5 +455,93 @@ void UBoltActionFireComponent::StopWeaponMontage(UAnimMontage* Montage)
 				AnimInst->Montage_Stop(0.2f, Montage);
 			}
 		}
+	}
+}
+
+void UBoltActionFireComponent::ReattachWeaponToSocket(bool bToReloadSocket)
+{
+	AActor* WeaponActor = GetOwner();
+	if (!WeaponActor)
+	{
+		UE_LOG(LogBoltActionFire, Warning, TEXT("ReattachWeaponToSocket - No WeaponActor!"));
+		return;
+	}
+
+	AActor* CharacterActor = WeaponActor->GetOwner();
+	if (!CharacterActor)
+	{
+		UE_LOG(LogBoltActionFire, Warning, TEXT("ReattachWeaponToSocket - No CharacterActor (weapon has no owner)!"));
+		return;
+	}
+
+	if (!WeaponActor->Implements<UHoldableInterface>())
+	{
+		UE_LOG(LogBoltActionFire, Warning, TEXT("ReattachWeaponToSocket - Weapon doesn't implement HoldableInterface!"));
+		return;
+	}
+	if (!CharacterActor->Implements<UCharacterMeshProviderInterface>())
+	{
+		UE_LOG(LogBoltActionFire, Warning, TEXT("ReattachWeaponToSocket - Character doesn't implement CharacterMeshProviderInterface!"));
+		return;
+	}
+
+	// Get target socket name from weapon
+	FName SocketName = bToReloadSocket
+		? IHoldableInterface::Execute_GetReloadAttachSocket(WeaponActor)
+		: IHoldableInterface::Execute_GetAttachSocket(WeaponActor);
+
+	// Get character meshes
+	USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(CharacterActor);
+	USkeletalMeshComponent* ArmsMesh = ICharacterMeshProviderInterface::Execute_GetArmsMesh(CharacterActor);
+
+	// Get weapon meshes
+	UPrimitiveComponent* FPSWeaponMesh = IHoldableInterface::Execute_GetFPSMeshComponent(WeaponActor);
+	UPrimitiveComponent* TPSWeaponMesh = IHoldableInterface::Execute_GetTPSMeshComponent(WeaponActor);
+
+	UE_LOG(LogBoltActionFire, Log, TEXT("ReattachWeaponToSocket - Socket: %s, Character: %s, IsLocallyControlled: %s"),
+		*SocketName.ToString(),
+		*CharacterActor->GetName(),
+		CharacterActor->GetInstigatorController() && CharacterActor->GetInstigatorController()->IsLocalController() ? TEXT("true") : TEXT("false"));
+
+	UE_LOG(LogBoltActionFire, Log, TEXT("  BodyMesh: %s, ArmsMesh: %s, FPSWeapon: %s, TPSWeapon: %s"),
+		BodyMesh ? *BodyMesh->GetName() : TEXT("NULL"),
+		ArmsMesh ? *ArmsMesh->GetName() : TEXT("NULL"),
+		FPSWeaponMesh ? *FPSWeaponMesh->GetName() : TEXT("NULL"),
+		TPSWeaponMesh ? *TPSWeaponMesh->GetName() : TEXT("NULL"));
+
+	// Re-attach FPS weapon mesh to Arms
+	if (FPSWeaponMesh && ArmsMesh)
+	{
+		FPSWeaponMesh->AttachToComponent(
+			ArmsMesh,
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+			SocketName
+		);
+		FPSWeaponMesh->SetRelativeTransform(FTransform::Identity);
+		UE_LOG(LogBoltActionFire, Log, TEXT("  FPS weapon attached to Arms socket: %s"), *SocketName.ToString());
+	}
+	else
+	{
+		UE_LOG(LogBoltActionFire, Warning, TEXT("  Cannot attach FPS weapon - FPSWeaponMesh: %s, ArmsMesh: %s"),
+			FPSWeaponMesh ? TEXT("valid") : TEXT("NULL"),
+			ArmsMesh ? TEXT("valid") : TEXT("NULL"));
+	}
+
+	// Re-attach TPS weapon mesh to Body
+	if (TPSWeaponMesh && BodyMesh)
+	{
+		TPSWeaponMesh->AttachToComponent(
+			BodyMesh,
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+			SocketName
+		);
+		TPSWeaponMesh->SetRelativeTransform(FTransform::Identity);
+		UE_LOG(LogBoltActionFire, Log, TEXT("  TPS weapon attached to Body socket: %s"), *SocketName.ToString());
+	}
+	else
+	{
+		UE_LOG(LogBoltActionFire, Warning, TEXT("  Cannot attach TPS weapon - TPSWeaponMesh: %s, BodyMesh: %s"),
+			TPSWeaponMesh ? TEXT("valid") : TEXT("NULL"),
+			BodyMesh ? TEXT("valid") : TEXT("NULL"));
 	}
 }

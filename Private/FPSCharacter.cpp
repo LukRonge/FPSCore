@@ -603,6 +603,12 @@ FVector AFPSCharacter::CalculateInterpolatedArmsOffset(float DeltaTime)
 		if (ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(ActiveItem) && Arms->IsVisible())
 		{
 			Arms->SetVisibility(false, true);
+
+			// Hide weapon FPS mesh on locally controlled client
+			if (ActiveItem->Implements<UHoldableInterface>())
+			{
+				IHoldableInterface::Execute_SetFPSMeshVisibility(ActiveItem, false);
+			}
 		}
 
 		bAimingCrosshairSet = true;
@@ -1036,6 +1042,12 @@ void AFPSCharacter::UpdateAimingState()
 		Arms->SetVisibility(true, true);
 		Camera->SetFieldOfView(DefaultFOV);
 		CurrentLookSpeed = 1.0f;
+
+		// Restore weapon FPS mesh visibility on locally controlled client
+		if (ActiveItem && ActiveItem->Implements<UHoldableInterface>())
+		{
+			IHoldableInterface::Execute_SetFPSMeshVisibility(ActiveItem, true);
+		}
 
 		// Notify item about aiming state
 		if (ActiveItem && ActiveItem->Implements<UHoldableInterface>())
