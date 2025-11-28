@@ -82,6 +82,9 @@ public:
 	// AMMO PROVIDER INTERFACE
 	// ============================================
 
+	// Get ammo type as FName (for interface compatibility)
+	virtual FName GetAmmoType_Implementation() const override { return FName(*UEnum::GetValueAsString(AmmoType)); }
+
 	// Get current ammo in magazine
 	virtual int32 GetCurrentAmmo_Implementation() const override { return CurrentAmmo; }
 
@@ -93,4 +96,7 @@ public:
 
 	// Get available ammo (same as current for magazine)
 	virtual int32 GetAvailableAmmo_Implementation() const override { return CurrentAmmo; }
+
+	// Get maximum capacity of the magazine
+	virtual int32 GetMaxCapacity_Implementation() const override { return MaxCapacity; }
 };

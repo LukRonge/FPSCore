@@ -456,21 +456,29 @@ void ABaseWeapon::Multicast_SpawnImpactEffect_Implementation(
 
 FName ABaseWeapon::GetAmmoType_Implementation() const
 {
-	if (CurrentMagazine)
+	if (CurrentMagazine && CurrentMagazine->Implements<UAmmoProviderInterface>())
 	{
-		return FName(*UEnum::GetValueAsString(CurrentMagazine->AmmoType));
+		return IAmmoProviderInterface::Execute_GetAmmoType(CurrentMagazine);
 	}
 	return NAME_None;
 }
 
 int32 ABaseWeapon::GetClip_Implementation() const
 {
-	return CurrentMagazine ? CurrentMagazine->CurrentAmmo : 0;
+	if (CurrentMagazine && CurrentMagazine->Implements<UAmmoProviderInterface>())
+	{
+		return IAmmoProviderInterface::Execute_GetCurrentAmmo(CurrentMagazine);
+	}
+	return 0;
 }
 
 int32 ABaseWeapon::GetClipSize_Implementation() const
 {
-	return CurrentMagazine ? CurrentMagazine->MaxCapacity : 0;
+	if (CurrentMagazine && CurrentMagazine->Implements<UAmmoProviderInterface>())
+	{
+		return IAmmoProviderInterface::Execute_GetMaxCapacity(CurrentMagazine);
+	}
+	return 0;
 }
 
 int32 ABaseWeapon::GetTotalAmmo_Implementation() const
@@ -481,17 +489,21 @@ int32 ABaseWeapon::GetTotalAmmo_Implementation() const
 int32 ABaseWeapon::ConsumeAmmo_Implementation(int32 Requested, const FUseContext& Ctx)
 {
 	if (!HasAuthority()) return 0;
-	if (!CurrentMagazine || CurrentMagazine->CurrentAmmo <= 0) return 0;
+	if (!CurrentMagazine || !CurrentMagazine->Implements<UAmmoProviderInterface>()) return 0;
 	if (ReloadComponent && ReloadComponent->bIsReloading) return 0;
 
 	// Validate requested amount
 	if (Requested <= 0) return 0;
 
-	int32 AmmoToConsume = FMath::Min(Requested, CurrentMagazine->CurrentAmmo);
+	// Get current ammo via interface
+	int32 CurrentAmmo = IAmmoProviderInterface::Execute_GetCurrentAmmo(CurrentMagazine);
+	if (CurrentAmmo <= 0) return 0;
+
+	int32 AmmoToConsume = FMath::Min(Requested, CurrentAmmo);
 
 	// Single ammo update instead of loop - reduces network traffic
 	// CurrentMagazine->CurrentAmmo is REPLICATED, so this triggers one replication
-	CurrentMagazine->CurrentAmmo = FMath::Max(0, CurrentMagazine->CurrentAmmo - AmmoToConsume);
+	IAmmoProviderInterface::Execute_SetCurrentAmmo(CurrentMagazine, FMath::Max(0, CurrentAmmo - AmmoToConsume));
 
 	return AmmoToConsume;
 }
@@ -537,18 +549,22 @@ void ABaseWeapon::InitMagazineComponents(TSubclassOf<ABaseMagazine> MagazineClas
 {
 	if (!MagazineComponent) return;
 
-	UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::InitMagazineComponents() - %s, MagazineClass=%s, HasAuthority=%d"),
+#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
+	UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::InitMagazineComponents() - %s, MagazineClass=%s, HasAuthority=%d"),
 		*GetName(),
 		MagazineClass ? *MagazineClass->GetName() : TEXT("nullptr"),
 		HasAuthority());
+#endif
 
 	if (MagazineClass)
 	{
 		MagazineComponent->SetChildActorClass(TSubclassOf<AActor>(MagazineClass));
 
 		AActor* MagActor = MagazineComponent->GetChildActor();
-		UE_LOG(LogTemp, Warning, TEXT("  -> After SetChildActorClass: ChildActor=%s"),
+#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
+		UE_LOG(LogTemp, Verbose, TEXT("  -> After SetChildActorClass: ChildActor=%s"),
 			MagActor ? *MagActor->GetName() : TEXT("nullptr"));
+#endif
 
 		if (MagActor)
 		{
@@ -611,16 +627,20 @@ void ABaseWeapon::AttachMagazineMeshes()
 
 void ABaseWeapon::OnRep_CurrentMagazineClass()
 {
-	UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::OnRep_CurrentMagazineClass() - %s, CurrentMagazineClass=%s, HasBegunPlay=%d"),
+#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
+	UE_LOG(LogTemp, Verbose, TEXT("BaseWeapon::OnRep_CurrentMagazineClass() - %s, CurrentMagazineClass=%s, HasBegunPlay=%d"),
 		*GetName(),
 		CurrentMagazineClass ? *CurrentMagazineClass->GetName() : TEXT("nullptr"),
 		HasActorBegunPlay());
+#endif
 
 	// Skip if called before BeginPlay - BeginPlay will handle initialization
 	// OnRep can fire before component registration is complete, causing SetChildActorClass to fail
 	if (!HasActorBegunPlay())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("  -> Skipping: BeginPlay not called yet"));
+#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
+		UE_LOG(LogTemp, Verbose, TEXT("  -> Skipping: BeginPlay not called yet"));
+#endif
 		return;
 	}
 

@@ -105,11 +105,13 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
 	UChildActorComponent* TPSSightComponent;
 
-public:
-
+protected:
 	// ============================================
 	// DUAL-MESH SYSTEM (FPS + TPS)
 	// ============================================
+	// ENCAPSULATION: External code should access via interfaces:
+	// - IHoldableInterface::GetFPSMeshComponent()
+	// - IHoldableInterface::GetTPSMeshComponent()
 
 	// Scene root (empty component, serves as hierarchy root)
 	// Both FPS and TPS meshes are SIBLINGS (children of this root)
@@ -128,6 +130,8 @@ public:
 	// Shadows disabled, no collision (optimization)
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Meshes")
 	USkeletalMeshComponent* FPSMesh;
+
+public:
 
 	// ============================================
 	// ITEM INFO
@@ -640,16 +644,13 @@ public:
 	// UTILITY METHODS
 	// ============================================
 
-	// Get weapon skeletal mesh component (TPS mesh, root component)
-	// DEPRECATED: Use GetTPSMesh() instead for clarity
-	UFUNCTION(BlueprintPure, Category = "Weapon|Mesh")
-	USkeletalMeshComponent* GetWeaponMesh() const { return TPSMesh; }
-
 	// Get FPS mesh component (visible only to owner)
+	// NOTE: Prefer IHoldableInterface::GetFPSMeshComponent() for external access
 	UFUNCTION(BlueprintPure, Category = "Weapon|Mesh")
 	USkeletalMeshComponent* GetFPSMesh() const { return FPSMesh; }
 
-	// Get TPS mesh component (root, visible to others)
+	// Get TPS mesh component (visible to others)
+	// NOTE: Prefer IHoldableInterface::GetTPSMeshComponent() for external access
 	UFUNCTION(BlueprintPure, Category = "Weapon|Mesh")
 	USkeletalMeshComponent* GetTPSMesh() const { return TPSMesh; }
 

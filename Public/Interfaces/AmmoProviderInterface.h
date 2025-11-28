@@ -55,4 +55,9 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "AmmoProvider")
 	int32 AddAmmoToProvider(int32 Amount);
 	virtual int32 AddAmmoToProvider_Implementation(int32 Amount) { return 0; }
+
+	// Get maximum capacity of the provider (magazine capacity)
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "AmmoProvider")
+	int32 GetMaxCapacity() const;
+	virtual int32 GetMaxCapacity_Implementation() const { return 0; }
 };
