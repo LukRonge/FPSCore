@@ -96,106 +96,29 @@ void AHKVP9::PropagateStateToAnimInstances()
 
 void AHKVP9::Multicast_PlayShootEffects_Implementation()
 {
-	// Call base implementation (muzzle VFX + character anims)
 	Super::Multicast_PlayShootEffects_Implementation();
 
-	// DEBUG: Log context
-	AActor* WeaponOwner = GetOwner();
-	APawn* OwnerPawn = WeaponOwner ? Cast<APawn>(WeaponOwner) : nullptr;
-	const bool bIsLocallyControlled = OwnerPawn && OwnerPawn->IsLocallyControlled();
-
-	UE_LOG(LogTemp, Warning, TEXT("[HKVP9] Multicast_PlayShootEffects - NetMode=%d | IsLocallyControlled=%d | HasAuthority=%d | Owner=%s"),
-		(int32)GetNetMode(),
-		bIsLocallyControlled,
-		HasAuthority(),
-		WeaponOwner ? *WeaponOwner->GetName() : TEXT("nullptr"));
-
-	// VP9-specific: Play slide shoot montage on weapon meshes
-	// Play on BOTH meshes - visibility handled by OnlyOwnerSee/OwnerNoSee settings
-	// (Same pattern as M4A1::PlayWeaponMontage)
+	// VP9-specific: Play slide shoot montage on BOTH weapon meshes
+	// Visibility handled by mesh settings (OnlyOwnerSee/OwnerNoSee)
 	if (!SlideShootMontage)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[HKVP9] SlideShootMontage is nullptr!"));
 		return;
 	}
 
-	// Play on FPS mesh (OnlyOwnerSee - visible to owner only)
 	if (FPSMesh)
 	{
-		UAnimInstance* FPSAnimInstance = FPSMesh->GetAnimInstance();
-
-		// Extended debug info
-		USceneComponent* AttachParent = FPSMesh->GetAttachParent();
-		AActor* AttachOwner = AttachParent ? AttachParent->GetOwner() : nullptr;
-
-		UE_LOG(LogTemp, Warning, TEXT("[HKVP9] FPSMesh: Valid=%d | AnimInstance=%s | AnimClass=%s | IsVisible=%d | OnlyOwnerSee=%d | HiddenInGame=%d"),
-			true,
-			FPSAnimInstance ? *FPSAnimInstance->GetClass()->GetName() : TEXT("nullptr"),
-			FPSMesh->GetAnimClass() ? *FPSMesh->GetAnimClass()->GetName() : TEXT("nullptr"),
-			FPSMesh->IsVisible(),
-			FPSMesh->bOnlyOwnerSee,
-			FPSMesh->bHiddenInGame);
-
-		UE_LOG(LogTemp, Warning, TEXT("[HKVP9] FPSMesh AttachParent=%s | AttachParentOwner=%s | ComponentTick=%d"),
-			AttachParent ? *AttachParent->GetName() : TEXT("nullptr"),
-			AttachOwner ? *AttachOwner->GetName() : TEXT("nullptr"),
-			FPSMesh->PrimaryComponentTick.IsTickFunctionEnabled());
-
-		if (FPSAnimInstance)
+		if (UAnimInstance* FPSAnimInstance = FPSMesh->GetAnimInstance())
 		{
-			// Check if there's already a montage playing in same slot
-			FName SlotName = SlideShootMontage->GetGroupName();
-			UAnimMontage* CurrentMontage = FPSAnimInstance->GetCurrentActiveMontage();
-
-			UE_LOG(LogTemp, Warning, TEXT("[HKVP9] FPSMesh Before Play: CurrentMontage=%s | SlotName=%s"),
-				CurrentMontage ? *CurrentMontage->GetName() : TEXT("nullptr"),
-				*SlotName.ToString());
-
-			float Duration = FPSAnimInstance->Montage_Play(SlideShootMontage);
-
-			// Check again after play
-			UAnimMontage* AfterMontage = FPSAnimInstance->GetCurrentActiveMontage();
-			bool bIsPlaying = FPSAnimInstance->Montage_IsPlaying(SlideShootMontage);
-
-			UE_LOG(LogTemp, Warning, TEXT("[HKVP9] FPSMesh After Play: Duration=%.3f | CurrentMontage=%s | IsPlaying=%d"),
-				Duration,
-				AfterMontage ? *AfterMontage->GetName() : TEXT("nullptr"),
-				bIsPlaying);
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("[HKVP9] FPSMesh->GetAnimInstance() returned nullptr!"));
+			FPSAnimInstance->Montage_Play(SlideShootMontage);
 		}
 	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("[HKVP9] FPSMesh is nullptr!"));
-	}
 
-	// Play on TPS mesh (OwnerNoSee - visible to others)
 	if (TPSMesh)
 	{
-		UAnimInstance* TPSAnimInstance = TPSMesh->GetAnimInstance();
-		UE_LOG(LogTemp, Warning, TEXT("[HKVP9] TPSMesh: Valid=%d | AnimInstance=%s | AnimClass=%s | IsVisible=%d | OwnerNoSee=%d"),
-			true,
-			TPSAnimInstance ? *TPSAnimInstance->GetClass()->GetName() : TEXT("nullptr"),
-			TPSMesh->GetAnimClass() ? *TPSMesh->GetAnimClass()->GetName() : TEXT("nullptr"),
-			TPSMesh->IsVisible(),
-			TPSMesh->bOwnerNoSee);
-
-		if (TPSAnimInstance)
+		if (UAnimInstance* TPSAnimInstance = TPSMesh->GetAnimInstance())
 		{
-			float Duration = TPSAnimInstance->Montage_Play(SlideShootMontage);
-			UE_LOG(LogTemp, Warning, TEXT("[HKVP9] TPSMesh Montage_Play returned Duration=%.3f"), Duration);
+			TPSAnimInstance->Montage_Play(SlideShootMontage);
 		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("[HKVP9] TPSMesh->GetAnimInstance() returned nullptr!"));
-		}
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("[HKVP9] TPSMesh is nullptr!"));
 	}
 }
 
