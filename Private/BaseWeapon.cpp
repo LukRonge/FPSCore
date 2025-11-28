@@ -4,7 +4,6 @@
 #include "Components/BallisticsComponent.h"
 #include "Components/FireComponent.h"
 #include "Components/ReloadComponent.h"
-#include "Components/MagazineChildActorComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Core/FPSGameplayTags.h"
 #include "BaseMagazine.h"
@@ -13,6 +12,7 @@
 #include "Interfaces/ItemWidgetProviderInterface.h"
 #include "Interfaces/CharacterMeshProviderInterface.h"
 #include "Interfaces/AmmoProviderInterface.h"
+#include "Interfaces/MagazineMeshProviderInterface.h"
 
 ABaseWeapon::ABaseWeapon()
 {
@@ -39,15 +39,11 @@ ABaseWeapon::ABaseWeapon()
 	BallisticsComponent = CreateDefaultSubobject<UBallisticsComponent>(TEXT("BallisticsComponent"));
 	FireComponent = nullptr;
 
-	FPSMagazineComponent = CreateDefaultSubobject<UMagazineChildActorComponent>(TEXT("FPSMagazineComponent"));
-	FPSMagazineComponent->SetupAttachment(FPSMesh, FName("magazine"));
-	FPSMagazineComponent->SetIsReplicated(false);  // Child actor spawned via OnRep_CurrentMagazineClass
-	// FirstPersonPrimitiveType = FirstPerson (set in Blueprint defaults)
-
-	TPSMagazineComponent = CreateDefaultSubobject<UMagazineChildActorComponent>(TEXT("TPSMagazineComponent"));
-	TPSMagazineComponent->SetupAttachment(TPSMesh, FName("magazine"));
-	TPSMagazineComponent->SetIsReplicated(false);  // Child actor spawned via OnRep_CurrentMagazineClass
-	// FirstPersonPrimitiveType = WorldSpaceRepresentation (set in Blueprint defaults)
+	// Single magazine component - attached to TPSMesh "magazine" socket
+	// Magazine actor has its own FPS/TPS meshes with appropriate visibility
+	MagazineComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("MagazineComponent"));
+	MagazineComponent->SetupAttachment(TPSMesh, FName("magazine"));
+	MagazineComponent->SetIsReplicated(false);  // Child actor spawned via OnRep_CurrentMagazineClass
 
 	FPSSightComponent = CreateDefaultSubobject<UChildActorComponent>(TEXT("FPSSightComponent"));
 	FPSSightComponent->SetupAttachment(FPSMesh, FName("attachment0"));
@@ -127,11 +123,11 @@ void ABaseWeapon::BeginPlay()
 	// ============================================
 	// SERVER ONLY: Initialize authoritative magazine reference
 	// ============================================
-	if (HasAuthority() && TPSMagazineComponent && TPSMagazineComponent->GetChildActor())
+	if (HasAuthority() && MagazineComponent && MagazineComponent->GetChildActor())
 	{
 		// Use direct cast here - CurrentMagazine is authoritative replicated reference
 		// This is internal initialization, not external access pattern
-		CurrentMagazine = Cast<ABaseMagazine>(TPSMagazineComponent->GetChildActor());
+		CurrentMagazine = Cast<ABaseMagazine>(MagazineComponent->GetChildActor());
 
 		// Link FireComponent to BallisticsComponent
 		if (FireComponent && BallisticsComponent)
@@ -164,24 +160,16 @@ void ABaseWeapon::OnRep_CurrentMagazine()
 	{
 		BallisticsComponent->InitAmmoType(CurrentMagazine->AmmoType);
 	}
-
-	// Sync visual magazines (FPS/TPS) with authoritative CurrentMagazine ammo count
-	SyncVisualMagazines();
 }
 
 void ABaseWeapon::SetOwner(AActor* NewOwner)
 {
 	Super::SetOwner(NewOwner);
 
-	// Propagate owner to magazine components
-	if (FPSMagazineComponent)
+	// Propagate owner to magazine component
+	if (MagazineComponent && MagazineComponent->GetChildActor())
 	{
-		FPSMagazineComponent->PropagateOwner(NewOwner);
-	}
-
-	if (TPSMagazineComponent)
-	{
-		TPSMagazineComponent->PropagateOwner(NewOwner);
+		MagazineComponent->GetChildActor()->SetOwner(NewOwner);
 	}
 
 	// Propagate owner to sight components
@@ -202,15 +190,10 @@ void ABaseWeapon::OnRep_Owner()
 
 	AActor* NewOwner = GetOwner();
 
-	// Propagate owner to magazine components
-	if (FPSMagazineComponent)
+	// Propagate owner to magazine component
+	if (MagazineComponent && MagazineComponent->GetChildActor())
 	{
-		FPSMagazineComponent->PropagateOwner(NewOwner);
-	}
-
-	if (TPSMagazineComponent)
-	{
-		TPSMagazineComponent->PropagateOwner(NewOwner);
+		MagazineComponent->GetChildActor()->SetOwner(NewOwner);
 	}
 
 	// Propagate owner to sight components
@@ -531,10 +514,6 @@ int32 ABaseWeapon::ConsumeAmmo_Implementation(int32 Requested, const FUseContext
 	// CurrentMagazine->CurrentAmmo is REPLICATED, so this triggers one replication
 	CurrentMagazine->CurrentAmmo = FMath::Max(0, CurrentMagazine->CurrentAmmo - AmmoToConsume);
 
-	// Sync visual magazines with authoritative CurrentMagazine
-	// This ensures FPS magazine matches TPS magazine ammo count
-	SyncVisualMagazines();
-
 	return AmmoToConsume;
 }
 
@@ -577,6 +556,8 @@ void ABaseWeapon::OnRep_CurrentSightClass()
 
 void ABaseWeapon::InitMagazineComponents(TSubclassOf<ABaseMagazine> MagazineClass)
 {
+	if (!MagazineComponent) return;
+
 	UE_LOG(LogTemp, Warning, TEXT("BaseWeapon::InitMagazineComponents() - %s, MagazineClass=%s, HasAuthority=%d"),
 		*GetName(),
 		MagazineClass ? *MagazineClass->GetName() : TEXT("nullptr"),
@@ -584,27 +565,56 @@ void ABaseWeapon::InitMagazineComponents(TSubclassOf<ABaseMagazine> MagazineClas
 
 	if (MagazineClass)
 	{
-		FPSMagazineComponent->SetChildActorClass(TSubclassOf<AActor>(MagazineClass));
-		TPSMagazineComponent->SetChildActorClass(TSubclassOf<AActor>(MagazineClass));
+		MagazineComponent->SetChildActorClass(TSubclassOf<AActor>(MagazineClass));
 
-		UE_LOG(LogTemp, Warning, TEXT("  -> After SetChildActorClass: FPS ChildActor=%s, TPS ChildActor=%s"),
-			FPSMagazineComponent->GetChildActor() ? *FPSMagazineComponent->GetChildActor()->GetName() : TEXT("nullptr"),
-			TPSMagazineComponent->GetChildActor() ? *TPSMagazineComponent->GetChildActor()->GetName() : TEXT("nullptr"));
+		AActor* MagActor = MagazineComponent->GetChildActor();
+		UE_LOG(LogTemp, Warning, TEXT("  -> After SetChildActorClass: ChildActor=%s"),
+			MagActor ? *MagActor->GetName() : TEXT("nullptr"));
 
-		// Initialize visibility AFTER SetChildActorClass creates the child actor
-		// FirstPersonPrimitiveType is set in Blueprint defaults on the component
-		FPSMagazineComponent->InitializeChildActorVisibility();
-		TPSMagazineComponent->InitializeChildActorVisibility();
+		if (MagActor)
+		{
+			// Propagate owner for correct visibility
+			MagActor->SetOwner(GetOwner());
 
-		// Propagate owner for correct visibility (owner may be nullptr for world weapons)
-		// When owner is nullptr, FPS magazine will be hidden, TPS magazine will be visible
-		FPSMagazineComponent->PropagateOwner(GetOwner());
-		TPSMagazineComponent->PropagateOwner(GetOwner());
+			// Attach magazine meshes to weapon meshes
+			// This is a LOCAL operation - each machine does it independently
+			AttachMagazineMeshes();
+		}
 	}
 	else
 	{
-		FPSMagazineComponent->SetChildActorClass(nullptr);
-		TPSMagazineComponent->SetChildActorClass(nullptr);
+		MagazineComponent->SetChildActorClass(nullptr);
+	}
+}
+
+void ABaseWeapon::AttachMagazineMeshes()
+{
+	AActor* MagActor = MagazineComponent ? MagazineComponent->GetChildActor() : nullptr;
+	if (!MagActor) return;
+
+	if (!MagActor->Implements<UMagazineMeshProviderInterface>()) return;
+
+	UPrimitiveComponent* FPSMagMesh = IMagazineMeshProviderInterface::Execute_GetFPSMesh(MagActor);
+	UPrimitiveComponent* TPSMagMesh = IMagazineMeshProviderInterface::Execute_GetTPSMesh(MagActor);
+
+	// FPS magazine mesh -> FPS weapon mesh (visible only to owner)
+	if (FPSMagMesh && FPSMesh)
+	{
+		FPSMagMesh->AttachToComponent(
+			FPSMesh,
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+			FName("magazine")
+		);
+	}
+
+	// TPS magazine mesh -> TPS weapon mesh (visible to others)
+	if (TPSMagMesh && TPSMesh)
+	{
+		TPSMagMesh->AttachToComponent(
+			TPSMesh,
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+			FName("magazine")
+		);
 	}
 }
 
@@ -760,20 +770,31 @@ bool ABaseWeapon::IsReloading_Implementation() const
 	return ReloadComponent->bIsReloading;
 }
 
-AActor* ABaseWeapon::GetFPSMagazineActor_Implementation() const
+AActor* ABaseWeapon::GetMagazineActor_Implementation() const
 {
-	if (FPSMagazineComponent)
+	if (MagazineComponent)
 	{
-		return FPSMagazineComponent->GetChildActor();
+		return MagazineComponent->GetChildActor();
 	}
 	return nullptr;
 }
 
-AActor* ABaseWeapon::GetTPSMagazineActor_Implementation() const
+UPrimitiveComponent* ABaseWeapon::GetFPSMagazineMesh_Implementation() const
 {
-	if (TPSMagazineComponent)
+	AActor* MagActor = MagazineComponent ? MagazineComponent->GetChildActor() : nullptr;
+	if (MagActor && MagActor->Implements<UMagazineMeshProviderInterface>())
 	{
-		return TPSMagazineComponent->GetChildActor();
+		return IMagazineMeshProviderInterface::Execute_GetFPSMesh(MagActor);
+	}
+	return nullptr;
+}
+
+UPrimitiveComponent* ABaseWeapon::GetTPSMagazineMesh_Implementation() const
+{
+	AActor* MagActor = MagazineComponent ? MagazineComponent->GetChildActor() : nullptr;
+	if (MagActor && MagActor->Implements<UMagazineMeshProviderInterface>())
+	{
+		return IMagazineMeshProviderInterface::Execute_GetTPSMesh(MagActor);
 	}
 	return nullptr;
 }
@@ -793,25 +814,4 @@ void ABaseWeapon::OnWeaponReloadComplete_Implementation()
 TSubclassOf<UUserWidget> ABaseWeapon::GetItemWidgetClass_Implementation() const
 {
 	return ItemWidgetClass;
-}
-
-void ABaseWeapon::SyncVisualMagazines()
-{
-	if (!CurrentMagazine) return;
-
-	int32 AuthoritativeAmmo = CurrentMagazine->CurrentAmmo;
-
-	// Sync FPS magazine via interface
-	AActor* FPSMagActor = FPSMagazineComponent ? FPSMagazineComponent->GetChildActor() : nullptr;
-	if (FPSMagActor && FPSMagActor->Implements<UAmmoProviderInterface>())
-	{
-		IAmmoProviderInterface::Execute_SetCurrentAmmo(FPSMagActor, AuthoritativeAmmo);
-	}
-
-	// Sync TPS magazine via interface
-	AActor* TPSMagActor = TPSMagazineComponent ? TPSMagazineComponent->GetChildActor() : nullptr;
-	if (TPSMagActor && TPSMagActor->Implements<UAmmoProviderInterface>())
-	{
-		IAmmoProviderInterface::Execute_SetCurrentAmmo(TPSMagActor, AuthoritativeAmmo);
-	}
 }

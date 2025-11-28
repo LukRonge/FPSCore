@@ -90,27 +90,23 @@ public:
 	 *
 	 * SERVER ONLY operation (HasAuthority check)
 	 * - Calculates ammo needed (MaxCapacity - CurrentAmmo)
-	 * - Adds ammo to both FPS and TPS magazines
+	 * - Adds ammo to magazine via IAmmoProviderInterface
 	 * - Magazine->CurrentAmmo is REPLICATED (clients auto-update)
 	 * - Clears bIsReloading state (replicates to clients)
-	 *
-	 * NOTE: FPS and TPS magazines are separate actors with separate
-	 * CurrentAmmo properties. Both must be updated for visual sync.
 	 */
 	virtual void OnReloadComplete() override;
 
 protected:
 	/**
-	 * Helper: Attach magazine actor to socket
+	 * Helper: Attach mesh component to socket
 	 * Handles attachment with Identity transform (socket defines position)
 	 *
-	 * @param Magazine - Magazine actor to attach
+	 * @param Mesh - Mesh component to attach (FPS or TPS magazine mesh)
 	 * @param Parent - Parent component to attach to (Arms/Body/FPSMesh/TPSMesh)
 	 * @param SocketName - Socket name on parent component
 	 *
-	 * NOTE: Magazine ALWAYS uses Identity relative transform.
+	 * NOTE: Mesh ALWAYS uses Identity relative transform.
 	 *       Socket itself defines correct position/rotation.
-	 *       No offset applied - magazine snaps exactly to socket.
 	 */
-	void AttachMagazineToSocket(AActor* Magazine, USceneComponent* Parent, FName SocketName);
+	void AttachMeshToSocket(USceneComponent* Mesh, USceneComponent* Parent, FName SocketName);
 };

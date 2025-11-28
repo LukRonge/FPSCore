@@ -34,7 +34,6 @@ class UBallisticsComponent;
 class UFireComponent;
 class UReloadComponent;
 class ABaseSight;
-class UMagazineChildActorComponent;
 
 UCLASS()
 class FPSCORE_API ABaseWeapon : public AActor, public IInteractableInterface, public IPickupableInterface, public IHoldableInterface, public ISightInterface, public IUsableInterface, public IAmmoConsumerInterface, public IBallisticsHandlerInterface, public IReloadableInterface, public IItemWidgetProviderInterface
@@ -71,7 +70,8 @@ protected:
 	// ============================================
 	// ENCAPSULATION: External code should access via interfaces:
 	// - IReloadableInterface::GetReloadComponent()
-	// - IReloadableInterface::GetFPSMagazineActor() / GetTPSMagazineActor()
+	// - IReloadableInterface::GetMagazineActor()
+	// - IReloadableInterface::GetFPSMagazineMesh() / GetTPSMagazineMesh()
 	// - IHoldableInterface::GetFPSMeshComponent() / GetTPSMeshComponent()
 
 	// Ballistics component (pure ballistic physics and projectile spawning)
@@ -89,19 +89,11 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Components")
 	UReloadComponent* ReloadComponent = nullptr;
 
-	// FPS Magazine component (attached to FPS mesh "magazine" socket)
-	// Visible only to owner, spawned from CurrentMagazineClass
-	// FirstPersonPrimitiveType = FirstPerson (set in Blueprint defaults)
-	// External access: IReloadableInterface::Execute_GetFPSMagazineActor()
+	// Magazine component (single ChildActorComponent attached to TPSMesh "magazine" socket)
+	// Magazine actor has its own FPS/TPS meshes with appropriate visibility
+	// External access: IReloadableInterface::Execute_GetMagazineActor()
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
-	UMagazineChildActorComponent* FPSMagazineComponent;
-
-	// TPS Magazine component (attached to TPS mesh "magazine" socket)
-	// Visible to others, spawned from CurrentMagazineClass
-	// FirstPersonPrimitiveType = WorldSpaceRepresentation (set in Blueprint defaults)
-	// External access: IReloadableInterface::Execute_GetTPSMagazineActor()
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Components")
-	UMagazineChildActorComponent* TPSMagazineComponent;
+	UChildActorComponent* MagazineComponent;
 
 	// FPS Sight component (attached to FPS mesh "attachment0" bone)
 	// Visible only to owner, spawned from CurrentSightClass
@@ -335,12 +327,22 @@ protected:
 public:
 	/**
 	 * Initialize magazine components with specified magazine class
-	 * Spawns child actors for FPSMagazineComponent and TPSMagazineComponent
+	 * Spawns child actor and attaches magazine meshes to weapon meshes
 	 * Runs on ALL machines (called from PostInitializeComponents or OnRep)
 	 * @param MagazineClass - Magazine class to spawn (nullptr to clear magazines)
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Weapon|Magazine")
 	void InitMagazineComponents(TSubclassOf<ABaseMagazine> MagazineClass);
+
+	/**
+	 * Attach magazine meshes to weapon meshes
+	 * LOCAL operation - each machine executes independently
+	 * - FPS magazine mesh -> FPS weapon mesh (visible only to owner)
+	 * - TPS magazine mesh -> TPS weapon mesh (visible to others)
+	 *
+	 * Called from InitMagazineComponents() after child actor is created
+	 */
+	void AttachMagazineMeshes();
 
 	// ============================================
 	// USABLE INTERFACE (Item usage - shoot, aim, etc.)
@@ -593,16 +595,24 @@ public:
 	virtual bool IsReloading_Implementation() const override;
 
 	/**
-	 * Get FPS magazine actor (visual representation for first-person)
-	 * @return FPS magazine actor or nullptr if not available
+	 * Get magazine actor (single authoritative magazine)
+	 * @return Magazine actor or nullptr if not available
 	 */
-	virtual AActor* GetFPSMagazineActor_Implementation() const override;
+	virtual AActor* GetMagazineActor_Implementation() const override;
 
 	/**
-	 * Get TPS magazine actor (visual representation for third-person)
-	 * @return TPS magazine actor or nullptr if not available
+	 * Get FPS magazine mesh (visible only to owner)
+	 * Delegates to magazine actor via IReloadableInterface
+	 * @return FPS mesh component or nullptr
 	 */
-	virtual AActor* GetTPSMagazineActor_Implementation() const override;
+	virtual UPrimitiveComponent* GetFPSMagazineMesh_Implementation() const override;
+
+	/**
+	 * Get TPS magazine mesh (visible to others, not owner)
+	 * Delegates to magazine actor via IReloadableInterface
+	 * @return TPS mesh component or nullptr
+	 */
+	virtual UPrimitiveComponent* GetTPSMagazineMesh_Implementation() const override;
 
 	/**
 	 * Get ReloadComponent from this weapon
@@ -642,22 +652,6 @@ public:
 	// Get TPS mesh component (root, visible to others)
 	UFUNCTION(BlueprintPure, Category = "Weapon|Mesh")
 	USkeletalMeshComponent* GetTPSMesh() const { return TPSMesh; }
-
-	/**
-	 * Synchronize visual magazines (FPS/TPS) with CurrentMagazine (authoritative gameplay state)
-	 *
-	 * ARCHITECTURE:
-	 * - CurrentMagazine = Single source of truth (REPLICATED, SERVER authoritative)
-	 * - FPS/TPS magazines = Visual representations only
-	 * - This method syncs visual magazines when CurrentMagazine->CurrentAmmo changes
-	 *
-	 * Called from:
-	 * - BoxMagazineReloadComponent::OnReloadComplete() after reload
-	 * - BaseWeapon::OnRep_CurrentMagazine() when magazine replicates (future)
-	 * - Any gameplay code that modifies CurrentMagazine ammo count
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Weapon|Ammo")
-	void SyncVisualMagazines();
 
 private:
 	// ============================================

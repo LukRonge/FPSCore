@@ -7,6 +7,8 @@
 #include "Core/InteractionContext.h"
 #include "ReloadableInterface.generated.h"
 
+class UPrimitiveComponent;
+
 /**
  * CAPABILITY: Reloadable
  * Interface for items that can be reloaded (weapons)
@@ -45,20 +47,30 @@ public:
 	// ============================================
 
 	/**
-	 * Get FPS magazine actor (visual representation for first-person)
-	 * @return FPS magazine actor or nullptr if not available
+	 * Get magazine actor (single authoritative magazine)
+	 * @return Magazine actor or nullptr if not available
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Reloadable|Magazine")
-	AActor* GetFPSMagazineActor() const;
-	virtual AActor* GetFPSMagazineActor_Implementation() const { return nullptr; }
+	AActor* GetMagazineActor() const;
+	virtual AActor* GetMagazineActor_Implementation() const { return nullptr; }
 
 	/**
-	 * Get TPS magazine actor (visual representation for third-person)
-	 * @return TPS magazine actor or nullptr if not available
+	 * Get FPS magazine mesh (visible only to owner)
+	 * Delegates to magazine actor via IMagazineMeshProviderInterface
+	 * @return FPS mesh component or nullptr
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Reloadable|Magazine")
-	AActor* GetTPSMagazineActor() const;
-	virtual AActor* GetTPSMagazineActor_Implementation() const { return nullptr; }
+	UPrimitiveComponent* GetFPSMagazineMesh() const;
+	virtual UPrimitiveComponent* GetFPSMagazineMesh_Implementation() const { return nullptr; }
+
+	/**
+	 * Get TPS magazine mesh (visible to others, not owner)
+	 * Delegates to magazine actor via IMagazineMeshProviderInterface
+	 * @return TPS mesh component or nullptr
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Reloadable|Magazine")
+	UPrimitiveComponent* GetTPSMagazineMesh() const;
+	virtual UPrimitiveComponent* GetTPSMagazineMesh_Implementation() const { return nullptr; }
 
 	/**
 	 * Get ReloadComponent from this reloadable item

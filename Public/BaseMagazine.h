@@ -5,19 +5,29 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Core/AmmoCaliberTypes.h"
-#include "Components/PrimitiveComponent.h"
 #include "Interfaces/AmmoProviderInterface.h"
+#include "Interfaces/MagazineMeshProviderInterface.h"
 #include "BaseMagazine.generated.h"
 
 /**
- * Base magazine - Pure data holder
+ * Base magazine - Pure data holder with mesh provider capability
  * Represents a detachable magazine/clip for firearms
- * Contains only essential data, no complex logic
  *
- * Visualization and behavior should be handled by ActorComponents
+ * ARCHITECTURE:
+ * - C++ holds only data (ammo count, capacity, caliber)
+ * - Blueprint child classes add FPS/TPS mesh components
+ * - Mesh access via IMagazineMeshProviderInterface::GetFPSMesh/GetTPSMesh
+ *
+ * Magazine is spawned as ChildActor attached to weapon's "magazine" socket.
+ *
+ * BLUEPRINT SETUP:
+ * 1. Add FPSMesh component (StaticMesh/SkeletalMesh) - set OnlyOwnerSee = true
+ * 2. Add TPSMesh component (StaticMesh/SkeletalMesh) - set OwnerNoSee = true
+ * 3. Override GetFPSMesh() to return FPSMesh component
+ * 4. Override GetTPSMesh() to return TPSMesh component
  */
 UCLASS()
-class FPSCORE_API ABaseMagazine : public AActor, public IAmmoProviderInterface
+class FPSCORE_API ABaseMagazine : public AActor, public IAmmoProviderInterface, public IMagazineMeshProviderInterface
 {
 	GENERATED_BODY()
 
@@ -29,13 +39,6 @@ protected:
 
 public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-
-	/**
-	 * Override SetOwner to apply visibility settings when owner changes
-	 * Calls InitFPSType() to apply OnlyOwnerSee/OwnerNoSee flags based on FirstPersonPrimitiveType
-	 * Same pattern as BaseSight::SetOwner()
-	 */
-	virtual void SetOwner(AActor* NewOwner) override;
 
 	// ============================================
 	// MAGAZINE DATA
@@ -57,14 +60,6 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Magazine")
 	FTransform MagazineHandTransform;
 
-	// First-person primitive type (controls mesh visibility for owner)
-	// Set in Blueprint based on magazine usage:
-	// - FirstPerson: Magazine attached to FPSMesh (only owner sees)
-	// - WorldSpaceRepresentation: Magazine attached to TPSMesh (others see, owner doesn't)
-	// - None: No special visibility (default, visible to all)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Magazine")
-	EFirstPersonPrimitiveType FirstPersonPrimitiveType = EFirstPersonPrimitiveType::None;
-
 	// ============================================
 	// SIMPLE API
 	// ============================================
@@ -82,22 +77,6 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Magazine")
 	void RemoveAmmo();
-
-	/**
-	 * Initialize first-person primitive type visibility settings
-	 * Applies FirstPersonPrimitiveType to all mesh components using SetFirstPersonPrimitiveType()
-	 *
-	 * IMPORTANT: This should be called AFTER weapon is equipped to ensure owner chain is correct
-	 * Owner chain: Character → Weapon → Magazine (ChildActor)
-	 *
-	 * Called from:
-	 * - SetupOwnerAndVisibility() - Recommended API
-	 * - Manually from Blueprint when needed
-	 *
-	 * NOT called from BeginPlay() - owner chain not yet established at that point
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Magazine")
-	void ApplyVisibilityToMeshes();
 
 	// ============================================
 	// AMMO PROVIDER INTERFACE

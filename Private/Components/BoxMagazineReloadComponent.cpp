@@ -17,22 +17,24 @@ void UBoxMagazineReloadComponent::OnMagazineOut()
 	if (!OwnerItem->Implements<UReloadableInterface>()) return;
 	if (!CharacterActor->Implements<UCharacterMeshProviderInterface>()) return;
 
-	AActor* FPSMag = IReloadableInterface::Execute_GetFPSMagazineActor(OwnerItem);
-	AActor* TPSMag = IReloadableInterface::Execute_GetTPSMagazineActor(OwnerItem);
+	// Get FPS/TPS magazine meshes from weapon via interface
+	UPrimitiveComponent* FPSMagMesh = IReloadableInterface::Execute_GetFPSMagazineMesh(OwnerItem);
+	UPrimitiveComponent* TPSMagMesh = IReloadableInterface::Execute_GetTPSMagazineMesh(OwnerItem);
 
-	if (!FPSMag || !TPSMag) return;
-
+	// Get character meshes for attachment
 	USkeletalMeshComponent* ArmsMesh = ICharacterMeshProviderInterface::Execute_GetArmsMesh(CharacterActor);
 	USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(CharacterActor);
 
-	if (ArmsMesh)
+	// Attach FPS magazine mesh to Arms mesh (visible only to owner)
+	if (FPSMagMesh && ArmsMesh)
 	{
-		AttachMagazineToSocket(FPSMag, ArmsMesh, MagazineOutSocketName);
+		AttachMeshToSocket(FPSMagMesh, ArmsMesh, MagazineOutSocketName);
 	}
 
-	if (BodyMesh)
+	// Attach TPS magazine mesh to Body mesh (visible to others)
+	if (TPSMagMesh && BodyMesh)
 	{
-		AttachMagazineToSocket(TPSMag, BodyMesh, MagazineOutSocketName);
+		AttachMeshToSocket(TPSMagMesh, BodyMesh, MagazineOutSocketName);
 	}
 }
 
@@ -42,22 +44,24 @@ void UBoxMagazineReloadComponent::OnMagazineIn()
 	if (!OwnerItem) return;
 	if (!OwnerItem->Implements<UReloadableInterface>() || !OwnerItem->Implements<UHoldableInterface>()) return;
 
-	AActor* FPSMag = IReloadableInterface::Execute_GetFPSMagazineActor(OwnerItem);
-	AActor* TPSMag = IReloadableInterface::Execute_GetTPSMagazineActor(OwnerItem);
+	// Get FPS/TPS magazine meshes from weapon via interface
+	UPrimitiveComponent* FPSMagMesh = IReloadableInterface::Execute_GetFPSMagazineMesh(OwnerItem);
+	UPrimitiveComponent* TPSMagMesh = IReloadableInterface::Execute_GetTPSMagazineMesh(OwnerItem);
 
-	if (!FPSMag || !TPSMag) return;
+	// Get weapon meshes for re-attachment
+	UPrimitiveComponent* FPSWeaponMesh = IHoldableInterface::Execute_GetFPSMeshComponent(OwnerItem);
+	UPrimitiveComponent* TPSWeaponMesh = IHoldableInterface::Execute_GetTPSMeshComponent(OwnerItem);
 
-	UPrimitiveComponent* FPSMeshPrim = IHoldableInterface::Execute_GetFPSMeshComponent(OwnerItem);
-	UPrimitiveComponent* TPSMeshPrim = IHoldableInterface::Execute_GetTPSMeshComponent(OwnerItem);
-
-	if (FPSMeshPrim)
+	// Re-attach FPS magazine mesh to weapon FPS mesh
+	if (FPSMagMesh && FPSWeaponMesh)
 	{
-		AttachMagazineToSocket(FPSMag, FPSMeshPrim, MagazineInSocketName);
+		AttachMeshToSocket(FPSMagMesh, FPSWeaponMesh, MagazineInSocketName);
 	}
 
-	if (TPSMeshPrim)
+	// Re-attach TPS magazine mesh to weapon TPS mesh
+	if (TPSMagMesh && TPSWeaponMesh)
 	{
-		AttachMagazineToSocket(TPSMag, TPSMeshPrim, MagazineInSocketName);
+		AttachMeshToSocket(TPSMagMesh, TPSWeaponMesh, MagazineInSocketName);
 	}
 }
 
@@ -81,19 +85,11 @@ void UBoxMagazineReloadComponent::OnReloadComplete()
 
 	if (OwnerItem->Implements<UReloadableInterface>())
 	{
-		AActor* TPSMagActor = IReloadableInterface::Execute_GetTPSMagazineActor(OwnerItem);
-		if (TPSMagActor && TPSMagActor->Implements<UAmmoProviderInterface>())
+		// Get single magazine actor and add ammo
+		AActor* MagActor = IReloadableInterface::Execute_GetMagazineActor(OwnerItem);
+		if (MagActor && MagActor->Implements<UAmmoProviderInterface>())
 		{
-			// Add ammo via interface
-			IAmmoProviderInterface::Execute_AddAmmoToProvider(TPSMagActor, AmmoNeeded);
-
-			// Sync FPS magazine with TPS magazine ammo count
-			int32 NewAmmoCount = IAmmoProviderInterface::Execute_GetCurrentAmmo(TPSMagActor);
-			AActor* FPSMagActor = IReloadableInterface::Execute_GetFPSMagazineActor(OwnerItem);
-			if (FPSMagActor && FPSMagActor->Implements<UAmmoProviderInterface>())
-			{
-				IAmmoProviderInterface::Execute_SetCurrentAmmo(FPSMagActor, NewAmmoCount);
-			}
+			IAmmoProviderInterface::Execute_AddAmmoToProvider(MagActor, AmmoNeeded);
 		}
 
 		// Notify weapon that reload completed (for weapon-specific behavior like M4A1 bolt release)
@@ -103,18 +99,15 @@ void UBoxMagazineReloadComponent::OnReloadComplete()
 	bIsReloading = false;
 }
 
-void UBoxMagazineReloadComponent::AttachMagazineToSocket(AActor* Magazine, USceneComponent* Parent, FName SocketName)
+void UBoxMagazineReloadComponent::AttachMeshToSocket(USceneComponent* Mesh, USceneComponent* Parent, FName SocketName)
 {
-	if (!Magazine || !Parent) return;
+	if (!Mesh || !Parent) return;
 
-	USceneComponent* MagRoot = Magazine->GetRootComponent();
-	if (!MagRoot) return;
-
-	MagRoot->AttachToComponent(
+	Mesh->AttachToComponent(
 		Parent,
 		FAttachmentTransformRules::SnapToTargetNotIncludingScale,
 		SocketName
 	);
 
-	MagRoot->SetRelativeTransform(FTransform::Identity);
+	Mesh->SetRelativeTransform(FTransform::Identity);
 }
