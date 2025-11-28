@@ -270,11 +270,18 @@ public:
 	// ATTACHMENT
 	// ============================================
 
-	// Socket name on CHARACTER where weapon mesh attaches
+	// Socket name on CHARACTER where weapon mesh attaches when equipped (default position)
 	// Weapon root mesh attaches to character mesh (Arms for FPS, Body for TPS) at this socket
 	// Common values: "weapon_r", "hand_r", "weapon_socket"
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Attachment")
 	FName CharacterAttachSocket = FName("weapon_r");
+
+	// Socket name on CHARACTER where weapon mesh attaches during reload/bolt-action operations
+	// Used by bolt-action rifles, shotguns, and other weapons that require hand repositioning
+	// The weapon re-attaches to this socket during reload, then back to CharacterAttachSocket after
+	// Common values: "weapon_r" (same as equip), "weapon_l" (left hand for bolt-action)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Attachment")
+	FName ReloadAttachSocket = FName("weapon_r");
 
 	// ============================================
 	// PICKUP / DROP
@@ -496,6 +503,9 @@ public:
 	// Get attachment socket name
 	virtual FName GetAttachSocket_Implementation() const override;
 
+	// Get reload attachment socket name
+	virtual FName GetReloadAttachSocket_Implementation() const override;
+
 	// Get animation layer class
 	virtual TSubclassOf<UAnimInstance> GetAnimLayer_Implementation() const override;
 
@@ -513,6 +523,26 @@ public:
 
 	// Get current aiming state
 	virtual bool GetIsAiming_Implementation() const override;
+
+	/**
+	 * Check if weapon allows aiming right now
+	 * Returns false if busy (reloading, etc.)
+	 *
+	 * @return true if aiming is allowed, false if blocked
+	 */
+	virtual bool CanAim_Implementation() const override;
+
+	/**
+	 * Check if weapon can be unequipped/dropped right now
+	 * Returns false if busy (reloading, playing montage, etc.)
+	 *
+	 * Checks:
+	 * - ReloadComponent->bIsReloading
+	 * - FPSMesh AnimInstance montage playing
+	 *
+	 * @return true if weapon can be unequipped, false if blocked
+	 */
+	virtual bool CanBeUnequipped_Implementation() const override;
 
 	// ============================================
 	// AMMO CONSUMER INTERFACE

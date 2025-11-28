@@ -270,6 +270,11 @@ FName ABaseWeapon::GetAttachSocket_Implementation() const
 	return CharacterAttachSocket;
 }
 
+FName ABaseWeapon::GetReloadAttachSocket_Implementation() const
+{
+	return ReloadAttachSocket;
+}
+
 TSubclassOf<UAnimInstance> ABaseWeapon::GetAnimLayer_Implementation() const
 {
 	return AnimLayer;
@@ -527,6 +532,14 @@ void ABaseWeapon::InitSightComponents(TSubclassOf<ABaseSight> SightClass)
 		{
 			CurrentSight = Cast<ABaseSight>(SightActor);
 			SightActor->SetOwner(GetOwner());
+
+			// Attach SightComponent to FPSMesh at the socket specified by sight
+			if (CurrentSight->Implements<USightMeshProviderInterface>())
+			{
+				FName AttachSocket = ISightMeshProviderInterface::Execute_GetAttachSocket(CurrentSight);
+				SightComponent->AttachToComponent(FPSMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, AttachSocket);
+			}
+
 			AttachSightMeshes();
 		}
 	}
@@ -564,6 +577,14 @@ void ABaseWeapon::OnRep_CurrentSight()
 	if (CurrentSight)
 	{
 		CurrentSight->SetOwner(GetOwner());
+
+		// Attach SightComponent to FPSMesh at the socket specified by sight
+		if (SightComponent && CurrentSight->Implements<USightMeshProviderInterface>())
+		{
+			FName AttachSocket = ISightMeshProviderInterface::Execute_GetAttachSocket(CurrentSight);
+			SightComponent->AttachToComponent(FPSMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, AttachSocket);
+		}
+
 		AttachSightMeshes();
 	}
 }
@@ -728,6 +749,40 @@ void ABaseWeapon::SetAiming_Implementation(bool bAiming)
 bool ABaseWeapon::GetIsAiming_Implementation() const
 {
 	return IsAiming;
+}
+
+bool ABaseWeapon::CanBeUnequipped_Implementation() const
+{
+	// Block during reload (delegate to component)
+	if (ReloadComponent && ReloadComponent->bIsReloading)
+	{
+		return false;
+	}
+
+	// Block during weapon montage (shoot, inspect, etc.)
+	if (FPSMesh)
+	{
+		if (UAnimInstance* AnimInst = FPSMesh->GetAnimInstance())
+		{
+			if (AnimInst->IsAnyMontagePlaying())
+			{
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+bool ABaseWeapon::CanAim_Implementation() const
+{
+	// Block aiming during reload
+	if (ReloadComponent && ReloadComponent->bIsReloading)
+	{
+		return false;
+	}
+
+	return true;
 }
 
 bool ABaseWeapon::CanReload_Implementation() const

@@ -310,6 +310,9 @@ void AFPSCharacter::Tick(float DeltaTime)
 	{
 		CheckInteractionTrace();
 
+		// Update aiming state (responds to item state changes like reload ending)
+		UpdateAimingState();
+
 		InterpolatedArmsOffset = CalculateInterpolatedArmsOffset(DeltaTime);
 		LeanVector = CalculateLeanVector(DeltaTime);
 		FVector BreathingVector = CalculateBreathing(DeltaTime);
@@ -855,6 +858,16 @@ void AFPSCharacter::DropPressed()
 
 	if (!ActiveItem) return;
 
+	// Check if item can be unequipped via interface (no direct cast)
+	// Blocks drop during reload, montage playing, etc.
+	if (ActiveItem->Implements<UHoldableInterface>())
+	{
+		if (!IHoldableInterface::Execute_CanBeUnequipped(ActiveItem))
+		{
+			return;
+		}
+	}
+
 	Server_DropItem(ActiveItem);
 }
 
@@ -909,46 +922,9 @@ void AFPSCharacter::AimingPressed()
 		return;
 	}
 
-	if (!ActiveItem)
-	{
-		return;
-	}
-
-	if (!ActiveItem->Implements<USightInterface>()) return;
-
-	// ============================================
-	// CALCULATE ARMS OFFSET FOR AIMING
-	// ============================================
-	// Goal: Align sight's AimingPoint with camera center (0,0,0) in camera space
-	// Hierarchy: Camera -> Arms -> Weapon -> FPSSightComponent -> SightActor -> AimingPoint
-
-	FVector AimingPointLocal = ISightInterface::Execute_GetAimingPoint(ActiveItem);
-
-	AActor* SightActor = ISightInterface::Execute_GetSightActor(ActiveItem);
-	if (!SightActor) return;
-
-	FVector CurrentArmsOffset = Arms->GetRelativeLocation();
-
-	// Transform AimingPoint: SightActor local space -> World space -> Camera local space
-	FVector AimingPointWorld = SightActor->GetActorTransform().TransformPosition(AimingPointLocal);
-	FVector AimingPointInCameraSpace = Camera->GetComponentTransform().InverseTransformPosition(AimingPointWorld);
-
-	// Calculate new Arms offset: Move Arms to align AimingPoint with camera center
-	// Formula: NewArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace
-	AimArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace;
-
-	AimLeaningScale = ISightInterface::Execute_GetAimLeaningScale(ActiveItem);
-	AimBreathingScale = ISightInterface::Execute_GetAimBreathingScale(ActiveItem);
-	if (ActiveItem->Implements<UHoldableInterface>())
-	{
-		IHoldableInterface::Execute_SetAiming(ActiveItem, true);
-	}
-
-	// Set local state immediately for responsive feel (local prediction)
-	bIsAiming = true;
-
-	// Notify server to replicate to other clients
-	Server_SetAiming(true);
+	// Set input state and let UpdateAimingState decide if we should actually aim
+	bAimInputHeld = true;
+	UpdateAimingState();
 }
 
 void AFPSCharacter::AimingReleased()
@@ -958,30 +934,122 @@ void AFPSCharacter::AimingReleased()
 		return;
 	}
 
-	if (!bIsAiming)
+	// Clear input state and update aiming
+	bAimInputHeld = false;
+	UpdateAimingState();
+}
+
+bool AFPSCharacter::CanPerformAiming() const
+{
+	// Character-level blocking (for future: obstacle, ladder, swimming)
+	if (AimBlockingFlags != 0)
+	{
+		return false;
+	}
+
+	// Must have active item
+	if (!ActiveItem)
+	{
+		return false;
+	}
+
+	// Item must support aiming (have sight)
+	if (!ActiveItem->Implements<USightInterface>())
+	{
+		return false;
+	}
+
+	// Item-level blocking via interface (reload, overheat, etc.)
+	if (ActiveItem->Implements<UHoldableInterface>())
+	{
+		if (!IHoldableInterface::Execute_CanAim(ActiveItem))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+void AFPSCharacter::UpdateAimingState()
+{
+	if (!IsLocallyControlled())
 	{
 		return;
 	}
 
-	Arms->SetVisibility(true, true);
-	Camera->SetFieldOfView(DefaultFOV);
-	CurrentLookSpeed = 1.0f;
+	bool bShouldAim = bAimInputHeld && CanPerformAiming();
 
-	if (ActiveItem && ActiveItem->Implements<UHoldableInterface>())
+	// No change needed
+	if (bShouldAim == bIsAiming)
 	{
-		IHoldableInterface::Execute_SetAiming(ActiveItem, false);
+		return;
 	}
 
-	// Set local state immediately for responsive feel (local prediction)
-	bIsAiming = false;
-	bAimingCrosshairSet = false;
+	if (bShouldAim)
+	{
+		// ============================================
+		// START AIMING
+		// ============================================
 
-	// Notify server to replicate to other clients
-	Server_SetAiming(false);
+		// Get sight actor for aiming point calculation
+		AActor* SightActor = ISightInterface::Execute_GetSightActor(ActiveItem);
+		if (!SightActor)
+		{
+			return;
+		}
 
-	// Note: HipLeaningScale and HipBreathingScale are already set from EquipItem()
-	// Current* values will be interpolated in CalculateInterpolatedArmsOffset()
-	// Crosshair is updated continuously in Tick() with LeanAlpha
+		// Calculate arms offset for aiming
+		// Goal: Align sight's AimingPoint with camera center (0,0,0) in camera space
+		FVector AimingPointLocal = ISightInterface::Execute_GetAimingPoint(ActiveItem);
+		FVector CurrentArmsOffset = Arms->GetRelativeLocation();
+
+		// Transform AimingPoint: SightActor local space -> World space -> Camera local space
+		FVector AimingPointWorld = SightActor->GetActorTransform().TransformPosition(AimingPointLocal);
+		FVector AimingPointInCameraSpace = Camera->GetComponentTransform().InverseTransformPosition(AimingPointWorld);
+
+		// Calculate new Arms offset: Move Arms to align AimingPoint with camera center
+		AimArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace;
+
+		// Get aiming parameters from sight
+		AimLeaningScale = ISightInterface::Execute_GetAimLeaningScale(ActiveItem);
+		AimBreathingScale = ISightInterface::Execute_GetAimBreathingScale(ActiveItem);
+
+		// Notify item about aiming state
+		if (ActiveItem->Implements<UHoldableInterface>())
+		{
+			IHoldableInterface::Execute_SetAiming(ActiveItem, true);
+		}
+
+		// Set local state immediately for responsive feel
+		bIsAiming = true;
+
+		// Notify server to replicate to other clients
+		Server_SetAiming(true);
+	}
+	else
+	{
+		// ============================================
+		// STOP AIMING
+		// ============================================
+
+		Arms->SetVisibility(true, true);
+		Camera->SetFieldOfView(DefaultFOV);
+		CurrentLookSpeed = 1.0f;
+
+		// Notify item about aiming state
+		if (ActiveItem && ActiveItem->Implements<UHoldableInterface>())
+		{
+			IHoldableInterface::Execute_SetAiming(ActiveItem, false);
+		}
+
+		// Set local state immediately for responsive feel
+		bIsAiming = false;
+		bAimingCrosshairSet = false;
+
+		// Notify server to replicate to other clients
+		Server_SetAiming(false);
+	}
 }
 
 void AFPSCharacter::ReloadPressed()
@@ -1262,6 +1330,16 @@ void AFPSCharacter::Server_DropItem_Implementation(AActor* Item)
 	}
 
 	if (!InventoryComp->ContainsItem(Item)) return;
+
+	// Server re-validates busy state (anti-cheat)
+	// Blocks drop during reload, montage playing, etc.
+	if (Item->Implements<UHoldableInterface>())
+	{
+		if (!IHoldableInterface::Execute_CanBeUnequipped(Item))
+		{
+			return;
+		}
+	}
 
 	InventoryComp->RemoveItem(Item);
 }

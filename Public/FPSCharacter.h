@@ -80,6 +80,20 @@ protected:
 	void UseStopped();
 	void AimingPressed();
 	void AimingReleased();
+
+	/**
+	 * Check if aiming is currently possible
+	 * Considers character-level blocking (flags) and item-level blocking (via interface)
+	 * @return true if aiming is allowed
+	 */
+	bool CanPerformAiming() const;
+
+	/**
+	 * Update aiming state based on input and blocking conditions
+	 * Called from AimingPressed/Released and Tick (to respond to item state changes)
+	 */
+	void UpdateAimingState();
+
 	void ReloadPressed();
 
 	// Movement speed control
@@ -332,6 +346,14 @@ public:
 	// Look control
 	UPROPERTY(BlueprintReadWrite, Replicated, Category = "Look")
 	bool bIsAiming = false;
+
+	// Aim input state - player is holding aim key (LOCAL, not replicated)
+	// Actual aiming depends on CanPerformAiming() which checks item state
+	bool bAimInputHeld = false;
+
+	// Character-level aim blocking flags (for future: obstacle, ladder, swimming)
+	// Zero means no blocking, non-zero means blocked
+	uint8 AimBlockingFlags = 0;
 
 	// Sprint intent flag (local only, not replicated)
 	// When true, character WANTS to sprint (sprint key is held)

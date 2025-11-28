@@ -17,6 +17,10 @@ UBallisticsComponent::UBallisticsComponent()
 	TSoftObjectPtr<UAmmoTypeDataAsset> AmmoType_556NATO(FSoftObjectPath(TEXT("/Script/FPSCore.AmmoTypeDataAsset'/FPSCore/Blueprints/Weapons/AmmoTypes/AmmoType_5_56x45mm_NATO.AmmoType_5_56x45mm_NATO'")));
 	CaliberDataMap.Add(EAmmoCaliberType::NATO_556x45mm, AmmoType_556NATO);
 
+	// 7.62x51mm NATO / .308 Win - Sako 85, G3, FAL, M14, SR-25
+	TSoftObjectPtr<UAmmoTypeDataAsset> AmmoType_762NATO(FSoftObjectPath(TEXT("/Script/FPSCore.AmmoTypeDataAsset'/FPSCore/Blueprints/Weapons/AmmoTypes/AmmoType_7_62x51mm_NATO.AmmoType_7_62x51mm_NATO'")));
+	CaliberDataMap.Add(EAmmoCaliberType::NATO_762x51mm, AmmoType_762NATO);
+
 	// 9x19mm Parabellum - VP9, Glock, MP5, UZI
 	TSoftObjectPtr<UAmmoTypeDataAsset> AmmoType_9mm(FSoftObjectPath(TEXT("/Script/FPSCore.AmmoTypeDataAsset'/FPSCore/Blueprints/Weapons/AmmoTypes/AmmoType_9mm.AmmoType_9mm'")));
 	CaliberDataMap.Add(EAmmoCaliberType::Parabellum_9x19mm, AmmoType_9mm);

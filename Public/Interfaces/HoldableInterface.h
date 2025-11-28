@@ -76,6 +76,13 @@ public:
 	FName GetAttachSocket() const;
 	virtual FName GetAttachSocket_Implementation() const { return FName("hand_r"); }
 
+	// Get socket name for reload/bolt-action attachment
+	// Used by weapons that need to re-attach to different socket during reload (e.g., bolt-action rifles)
+	// Default returns same as GetAttachSocket() - override for weapons with special reload handling
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	FName GetReloadAttachSocket() const;
+	virtual FName GetReloadAttachSocket_Implementation() const { return FName("weapon_r"); }
+
 	// Get animation layer class for this item (weapon-specific animations)
 	// Linked to Body, Legs, and Arms meshes when item is equipped
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
@@ -108,4 +115,34 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
 	bool GetIsAiming() const;
 	virtual bool GetIsAiming_Implementation() const { return false; }
+
+	/**
+	 * Check if item allows aiming right now
+	 * Returns false if item is busy (reloading, overheated, jammed, etc.)
+	 *
+	 * Used by: FPSCharacter::CanPerformAiming()
+	 * Override in items that have blocking states (weapons with reload, etc.)
+	 *
+	 * @return true if aiming is allowed, false if blocked
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	bool CanAim() const;
+	virtual bool CanAim_Implementation() const { return true; }
+
+	// ============================================
+	// UNEQUIP VALIDATION
+	// ============================================
+
+	/**
+	 * Check if item can be unequipped/dropped right now
+	 * Returns false if item is busy (reloading, playing montage, etc.)
+	 *
+	 * Used by: FPSCharacter::DropPressed(), Server_DropItem()
+	 * Override in items that have blocking states (weapons with reload, etc.)
+	 *
+	 * @return true if item can be unequipped, false if blocked
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	bool CanBeUnequipped() const;
+	virtual bool CanBeUnequipped_Implementation() const { return true; }
 };

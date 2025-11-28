@@ -144,15 +144,9 @@ void AHKVP9::OnUnequipped_Implementation()
 	// Call base implementation (cancels reload, resets aiming)
 	Super::OnUnequipped_Implementation();
 
-	// VP9-specific: Reset state (slide goes forward)
-	bSlideLockedBack = false;
-
-	// Server: propagate state to AnimInstances immediately
-	// Clients receive state via OnRep which calls PropagateStateToAnimInstances
-	if (HasAuthority())
-	{
-		PropagateStateToAnimInstances();
-	}
+	// NOTE: bSlideLockedBack state is intentionally preserved across unequip/drop
+	// The slide should remain locked back if magazine is empty
+	// State is only reset in OnWeaponReloadComplete when a new magazine is inserted
 }
 
 // ============================================
