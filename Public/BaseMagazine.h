@@ -56,10 +56,6 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Magazine")
 	int32 MaxCapacity = 30;
 
-	// Transform for attaching magazine to player hand (offset and rotation correction)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Magazine")
-	FTransform MagazineHandTransform;
-
 	// ============================================
 	// SIMPLE API
 	// ============================================

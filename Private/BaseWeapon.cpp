@@ -39,7 +39,9 @@ ABaseWeapon::ABaseWeapon()
 	// NOTE: Do NOT disable tick - required for animations (montages) to play
 	// FPSMesh->PrimaryComponentTick.bCanEverTick = false;
 
-	BallisticsComponent = CreateDefaultSubobject<UBallisticsComponent>(TEXT("BallisticsComponent"));
+	// NOTE: BallisticsComponent is NOT created here - child classes create their own
+	// (e.g., SPAS12 creates UShotgunBallisticsComponent, others use UBallisticsComponent)
+	BallisticsComponent = nullptr;
 	FireComponent = nullptr;
 
 	// Single magazine component - attached to TPSMesh "magazine" socket

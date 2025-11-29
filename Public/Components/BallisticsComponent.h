@@ -101,9 +101,9 @@ public:
 	 * @param Direction - Shoot direction (normalized, spread already applied by FireComponent)
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Ballistics")
-	void Shoot(FVector Location, FVector Direction);
+	virtual void Shoot(FVector Location, FVector Direction);
 
-private:
+protected:
 	// Maximum trace distance in centimeters (1000 meters)
 	const float MaxTraceDistance = 100000.0f;
 	/**

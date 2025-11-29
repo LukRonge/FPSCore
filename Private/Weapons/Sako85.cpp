@@ -42,6 +42,9 @@ ASako85::ASako85()
 	// Assign to BaseWeapon's ReloadComponent pointer for interface compatibility
 	ReloadComponent = BoltActionReloadComponent;
 
+	// Ballistics Component (standard single-projectile)
+	BallisticsComponent = CreateDefaultSubobject<UBallisticsComponent>(TEXT("BallisticsComponent"));
+
 	// ============================================
 	// ATTACHMENT SOCKETS
 	// ============================================
@@ -101,11 +104,15 @@ void ASako85::OnUnequipped_Implementation()
 	// Call base implementation (cancels reload, resets aiming)
 	Super::OnUnequipped_Implementation();
 
-	// Sako85-specific: Reset bolt-action state
-	if (BoltActionFireComponent)
+	// SERVER ONLY: Reset Sako85-specific bolt-action state
+	// Clients receive state via component replication
+	if (HasAuthority())
 	{
-		// Reset chamber state on unequip
-		BoltActionFireComponent->ResetChamberState();
+		if (BoltActionFireComponent)
+		{
+			// Reset chamber state on unequip (internal component access)
+			BoltActionFireComponent->ResetChamberState();
+		}
 	}
 }
 

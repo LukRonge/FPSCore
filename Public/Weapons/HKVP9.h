@@ -148,4 +148,15 @@ protected:
 	// Box magazine reload component
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VP9|Components")
 	UBoxMagazineReloadComponent* BoxMagazineReloadComponent;
+
+	// ============================================
+	// HELPERS
+	// ============================================
+
+	/**
+	 * Play montage on weapon meshes (FPSMesh + TPSMesh)
+	 * Uses IHoldableInterface to access meshes (Golden Rule compliance)
+	 * Used for slide_shoot animation
+	 */
+	void PlayWeaponMontage(UAnimMontage* Montage);
 };

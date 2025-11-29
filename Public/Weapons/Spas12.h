@@ -41,7 +41,7 @@ class UPumpActionReloadComponent;
  * COMPONENTS (created in constructor):
  * - USemiAutoFireComponent: Semi-auto fire mode (one shot per click)
  * - UPumpActionReloadComponent: Shell-by-shell reload with pump-action when needed
- * - UBallisticsComponent: Inherited from BaseWeapon
+ * - UShotgunBallisticsComponent: Multi-pellet ballistics (9 pellets per shot)
  *
  * BLUEPRINT SETUP:
  * 1. Set skeletal meshes (FPSMesh, TPSMesh)

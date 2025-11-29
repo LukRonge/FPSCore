@@ -4,7 +4,7 @@
 #include "Core/AmmoCaliberTypes.h"
 #include "Components/SemiAutoFireComponent.h"
 #include "Components/PumpActionReloadComponent.h"
-#include "Components/BallisticsComponent.h"
+#include "Components/ShotgunBallisticsComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Interfaces/HoldableInterface.h"
 #include "Interfaces/AmmoConsumerInterface.h"
@@ -43,6 +43,15 @@ ASpas12::ASpas12()
 
 	// Assign to BaseWeapon's ReloadComponent pointer for interface compatibility
 	ReloadComponent = PumpActionReloadComponent;
+
+	// Shotgun Ballistics Component (multi-pellet with cone spread)
+	// Uses base class BallisticsComponent pointer - no separate UPROPERTY needed
+	UShotgunBallisticsComponent* ShotgunBallistics = CreateDefaultSubobject<UShotgunBallisticsComponent>(TEXT("BallisticsComponent"));
+	ShotgunBallistics->PelletCount = 9;           // 00 buckshot (9 pellets)
+	ShotgunBallistics->PelletSpreadAngle = 5.0f;  // 5 degree cone spread
+
+	// Assign to BaseWeapon's BallisticsComponent pointer for interface compatibility
+	BallisticsComponent = ShotgunBallistics;
 
 	// ============================================
 	// ATTACHMENT SOCKETS
@@ -157,19 +166,20 @@ void ASpas12::OnUnequipped_Implementation()
 	// Call base implementation (cancels reload, resets aiming)
 	Super::OnUnequipped_Implementation();
 
-	// SPAS-12-specific: Reset bolt carrier state
-	BoltCarrierOpen = false;
-
-	// Reset chamber state on unequip
-	if (PumpActionReloadComponent)
-	{
-		PumpActionReloadComponent->ResetChamberState();
-	}
-
-	// Server: propagate state to AnimInstances immediately
+	// SERVER ONLY: Reset SPAS-12 specific state
 	// Clients receive state via OnRep which calls PropagateStateToAnimInstances
 	if (HasAuthority())
 	{
+		// Reset bolt carrier state
+		BoltCarrierOpen = false;
+
+		// Reset chamber state on reload component (internal component access)
+		if (PumpActionReloadComponent)
+		{
+			PumpActionReloadComponent->ResetChamberState();
+		}
+
+		// Propagate state to AnimInstances immediately on server
 		PropagateStateToAnimInstances();
 	}
 }
@@ -183,13 +193,11 @@ void ASpas12::OnWeaponReloadComplete_Implementation()
 	// Call base implementation
 	Super::OnWeaponReloadComplete_Implementation();
 
-	// SPAS-12-specific: Reset bolt carrier state (bolt goes forward after reload)
-	BoltCarrierOpen = false;
-
-	// Server: propagate state to AnimInstances immediately
+	// SERVER ONLY: Reset bolt carrier state (bolt goes forward after reload)
 	// Clients receive state via OnRep which calls PropagateStateToAnimInstances
 	if (HasAuthority())
 	{
+		BoltCarrierOpen = false;
 		PropagateStateToAnimInstances();
 	}
 }
