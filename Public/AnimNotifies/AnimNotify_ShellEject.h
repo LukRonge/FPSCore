@@ -9,27 +9,31 @@
 /**
  * UAnimNotify_ShellEject
  *
- * Animation notify that triggers shell casing ejection during bolt-action cycling.
+ * Animation notify that triggers shell casing ejection during bolt-action or pump-action cycling.
  *
- * Timeline Position: Early in bolt-action animation (when bolt handle is pulled back)
+ * Timeline Position: Early in action animation (when bolt/pump handle is pulled back)
  *
  * Action:
- * - Called during bolt-action animation when shell should eject
- * - Navigates from AnimInstance → Character → ActiveItem → BoltActionFireComponent
- * - Calls BoltActionFireComponent->OnShellEject()
+ * - Called during bolt-action or pump-action animation when shell should eject
+ * - Navigates from AnimInstance → Character → ActiveItem → FireComponent
+ * - Calls BoltActionFireComponent->OnShellEject() or PumpActionFireComponent->OnShellEject()
  * - LOCAL operation (runs on all machines independently)
  *
  * Navigation Chain:
  * MeshComp → Owner (AFPSCharacter)
  *          → InventoryComponent
- *          → ActiveItem (check for BoltActionFireComponent)
- *          → BoltActionFireComponent
+ *          → ActiveItem (check for BoltActionFireComponent or PumpActionFireComponent)
+ *          → FireComponent
  *          → OnShellEject() (LOCAL)
  *
  * Usage in Animation:
- * - Add this notify to bolt-action animation montage
- * - Place at frame where bolt is fully retracted (shell ejection point)
+ * - Add this notify to bolt-action or pump-action animation montage
+ * - Place at frame where bolt/pump is fully retracted (shell ejection point)
  * - Triggers shell casing spawn VFX
+ *
+ * SUPPORTED COMPONENTS:
+ * - UBoltActionFireComponent (bolt-action rifles)
+ * - UPumpActionFireComponent (pump-action shotguns)
  */
 UCLASS()
 class FPSCORE_API UAnimNotify_ShellEject : public UAnimNotify

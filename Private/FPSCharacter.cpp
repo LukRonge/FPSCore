@@ -998,21 +998,21 @@ void AFPSCharacter::UpdateAimingState()
 		// START AIMING
 		// ============================================
 
-		// Get sight actor for aiming point calculation
-		AActor* SightActor = ISightInterface::Execute_GetSightActor(ActiveItem);
-		if (!SightActor)
+		// Get aim transform from active item (world space position where camera aligns)
+		FTransform AimTransform = ISightInterface::Execute_GetAimTransform(ActiveItem);
+
+		// Check if aiming is available (invalid transform has scale = 0)
+		if (AimTransform.GetScale3D().IsNearlyZero())
 		{
 			return;
 		}
 
 		// Calculate arms offset for aiming
-		// Goal: Align sight's AimingPoint with camera center (0,0,0) in camera space
-		FVector AimingPointLocal = ISightInterface::Execute_GetAimingPoint(ActiveItem);
+		// Goal: Align AimTransform location with camera center (0,0,0) in camera space
 		FVector CurrentArmsOffset = Arms->GetRelativeLocation();
 
-		// Transform AimingPoint: SightActor local space -> World space -> Camera local space
-		FVector AimingPointWorld = SightActor->GetActorTransform().TransformPosition(AimingPointLocal);
-		FVector AimingPointInCameraSpace = Camera->GetComponentTransform().InverseTransformPosition(AimingPointWorld);
+		// Transform aim point from world space to camera local space
+		FVector AimingPointInCameraSpace = Camera->GetComponentTransform().InverseTransformPosition(AimTransform.GetLocation());
 
 		// Calculate new Arms offset: Move Arms to align AimingPoint with camera center
 		AimArmsOffset = CurrentArmsOffset - AimingPointInCameraSpace;

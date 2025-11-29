@@ -642,49 +642,41 @@ TSubclassOf<UUserWidget> ABaseWeapon::GetCrossHair_Implementation() const
 	return CrossHair;
 }
 
-AActor* ABaseWeapon::GetCurrentSightActor() const
-{
-	// Use replicated CurrentSight pointer instead of SightComponent->GetChildActor()
-	// This ensures clients have correct sight reference even before component is ready
-	return CurrentSight;
-}
-
 TSubclassOf<UUserWidget> ABaseWeapon::GetAimingCrosshair_Implementation() const
 {
-	AActor* SightActor = GetCurrentSightActor();
-	if (SightActor && SightActor->Implements<USightInterface>())
+	if (CurrentSight && CurrentSight->Implements<USightInterface>())
 	{
-		return ISightInterface::Execute_GetAimingCrosshair(SightActor);
+		return ISightInterface::Execute_GetAimingCrosshair(CurrentSight);
 	}
 	return nullptr;
 }
 
-FVector ABaseWeapon::GetAimingPoint_Implementation() const
+FTransform ABaseWeapon::GetAimTransform_Implementation() const
 {
-	AActor* SightActor = GetCurrentSightActor();
-	if (SightActor && SightActor->Implements<USightInterface>())
+	// If sight is attached, delegate to sight's aim transform
+	if (CurrentSight && CurrentSight->Implements<USightInterface>())
 	{
-		return ISightInterface::Execute_GetAimingPoint(SightActor);
+		return ISightInterface::Execute_GetAimTransform(CurrentSight);
 	}
-	return DefaultAimPoint;
-}
 
-AActor* ABaseWeapon::GetSightActor_Implementation() const
-{
-	AActor* SightActor = GetCurrentSightActor();
-	if (SightActor && SightActor->Implements<USightInterface>())
+	// No sight attached - use FPSMesh "aim" socket as aiming point
+	// The "aim" socket represents the default iron sight aiming position
+	if (FPSMesh && FPSMesh->DoesSocketExist(FName("aim")))
 	{
-		return ISightInterface::Execute_GetSightActor(SightActor);
+		// Return world-space transform of the "aim" socket
+		return FPSMesh->GetSocketTransform(FName("aim"), ERelativeTransformSpace::RTS_World);
 	}
-	return nullptr;
+
+	// No sight and no "aim" socket - aiming not possible
+	// Return invalid transform (scale = 0) as marker
+	return FTransform(FQuat::Identity, FVector::ZeroVector, FVector::ZeroVector);
 }
 
 float ABaseWeapon::GetAimingFOV_Implementation() const
 {
-	AActor* SightActor = GetCurrentSightActor();
-	if (SightActor && SightActor->Implements<USightInterface>())
+	if (CurrentSight && CurrentSight->Implements<USightInterface>())
 	{
-		float SightFOV = ISightInterface::Execute_GetAimingFOV(SightActor);
+		float SightFOV = ISightInterface::Execute_GetAimingFOV(CurrentSight);
 		if (SightFOV > 0.0f)
 		{
 			return SightFOV;
@@ -695,40 +687,36 @@ float ABaseWeapon::GetAimingFOV_Implementation() const
 
 float ABaseWeapon::GetAimLookSpeed_Implementation() const
 {
-	AActor* SightActor = GetCurrentSightActor();
-	if (SightActor && SightActor->Implements<USightInterface>())
+	if (CurrentSight && CurrentSight->Implements<USightInterface>())
 	{
-		return ISightInterface::Execute_GetAimLookSpeed(SightActor);
+		return ISightInterface::Execute_GetAimLookSpeed(CurrentSight);
 	}
 	return AimLookSpeed;
 }
 
 float ABaseWeapon::GetAimLeaningScale_Implementation() const
 {
-	AActor* SightActor = GetCurrentSightActor();
-	if (SightActor && SightActor->Implements<USightInterface>())
+	if (CurrentSight && CurrentSight->Implements<USightInterface>())
 	{
-		return ISightInterface::Execute_GetAimLeaningScale(SightActor);
+		return ISightInterface::Execute_GetAimLeaningScale(CurrentSight);
 	}
 	return 1.0f;
 }
 
 float ABaseWeapon::GetAimBreathingScale_Implementation() const
 {
-	AActor* SightActor = GetCurrentSightActor();
-	if (SightActor && SightActor->Implements<USightInterface>())
+	if (CurrentSight && CurrentSight->Implements<USightInterface>())
 	{
-		return ISightInterface::Execute_GetAimBreathingScale(SightActor);
+		return ISightInterface::Execute_GetAimBreathingScale(CurrentSight);
 	}
 	return 0.3f;
 }
 
 bool ABaseWeapon::ShouldHideFPSMeshWhenAiming_Implementation() const
 {
-	AActor* SightActor = GetCurrentSightActor();
-	if (SightActor && SightActor->Implements<USightInterface>())
+	if (CurrentSight && CurrentSight->Implements<USightInterface>())
 	{
-		return ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(SightActor);
+		return ISightInterface::Execute_ShouldHideFPSMeshWhenAiming(CurrentSight);
 	}
 	return false;
 }

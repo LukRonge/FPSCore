@@ -19,14 +19,11 @@ void ABaseSight::BeginPlay()
 // SIGHT INTERFACE IMPLEMENTATIONS
 // ============================================
 
-FVector ABaseSight::GetAimingPoint_Implementation() const
+FTransform ABaseSight::GetAimTransform_Implementation() const
 {
-	return AimingPoint;
-}
-
-AActor* ABaseSight::GetSightActor_Implementation() const
-{
-	return const_cast<ABaseSight*>(this);
+	// Transform AimingPoint from sight-local space to world space
+	// AimingPoint is the offset relative to sight origin where camera should align
+	return FTransform(GetActorRotation(), GetActorTransform().TransformPosition(AimingPoint), FVector::OneVector);
 }
 
 TSubclassOf<UUserWidget> ABaseSight::GetAimingCrosshair_Implementation() const

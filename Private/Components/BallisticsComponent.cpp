@@ -24,6 +24,10 @@ UBallisticsComponent::UBallisticsComponent()
 	// 9x19mm Parabellum - VP9, Glock, MP5, UZI
 	TSoftObjectPtr<UAmmoTypeDataAsset> AmmoType_9mm(FSoftObjectPath(TEXT("/Script/FPSCore.AmmoTypeDataAsset'/FPSCore/Blueprints/Weapons/AmmoTypes/AmmoType_9mm.AmmoType_9mm'")));
 	CaliberDataMap.Add(EAmmoCaliberType::Parabellum_9x19mm, AmmoType_9mm);
+
+	// 12 Gauge Buckshot - SPAS-12, Remington 870, Benelli M4
+	TSoftObjectPtr<UAmmoTypeDataAsset> AmmoType_12Gauge(FSoftObjectPath(TEXT("/Script/FPSCore.AmmoTypeDataAsset'/FPSCore/Blueprints/Weapons/AmmoTypes/AmmoType_12_Gauge_Buckshot.AmmoType_12_Gauge_Buckshot'")));
+	CaliberDataMap.Add(EAmmoCaliberType::Gauge_12, AmmoType_12Gauge);
 }
 
 void UBallisticsComponent::BeginPlay()

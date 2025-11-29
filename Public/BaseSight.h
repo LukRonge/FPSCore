@@ -43,8 +43,12 @@ public:
 	// SIGHT INTERFACE (Aiming configuration)
 	// ============================================
 
-	virtual FVector GetAimingPoint_Implementation() const override;
-	virtual AActor* GetSightActor_Implementation() const override;
+	/**
+	 * Get aim transform in world space
+	 * Returns AimingPoint offset transformed by sight actor's world transform
+	 */
+	virtual FTransform GetAimTransform_Implementation() const override;
+
 	virtual TSubclassOf<UUserWidget> GetAimingCrosshair_Implementation() const override;
 	virtual bool ShouldHideFPSMeshWhenAiming_Implementation() const override;
 	virtual float GetAimingFOV_Implementation() const override;

@@ -41,22 +41,19 @@ public:
 	virtual TSubclassOf<UUserWidget> GetAimingCrosshair_Implementation() const { return nullptr; }
 
 	/**
-	 * Get aiming point offset relative to weapon mesh (where eye looks when aiming)
-	 * Used to position camera when ADS (Aim Down Sights)
-	 * Typically aligned with rear sight bone position
+	 * Get aim transform in WORLD SPACE (where camera aligns when aiming)
+	 * Returns the world-space transform of the aiming point
+	 *
+	 * INVALID MARKER: If aiming is not possible, returns transform with Scale = ZeroVector
+	 * Character should check: if (AimTransform.GetScale3D().IsNearlyZero()) → aiming not available
+	 *
+	 * Implementation:
+	 * - BaseSight: Returns sight's AimingPoint socket/offset transformed to world space
+	 * - BaseWeapon: Delegates to CurrentSight, or uses FPSMesh "aim" socket if no sight
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Sight")
-	FVector GetAimingPoint() const;
-	virtual FVector GetAimingPoint_Implementation() const { return FVector::ZeroVector; }
-
-	/**
-	 * Get sight actor for transform calculations
-	 * Returns the actual sight actor (BaseSight instance) for world-space transforms
-	 * Used in aiming calculations to convert AimingPoint to world space
-	 */
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Sight")
-	AActor* GetSightActor() const;
-	virtual AActor* GetSightActor_Implementation() const { return nullptr; }
+	FTransform GetAimTransform() const;
+	virtual FTransform GetAimTransform_Implementation() const { return FTransform(FVector::ZeroVector); }
 
 	/**
 	 * Check if sight should hide first-person mesh when aiming

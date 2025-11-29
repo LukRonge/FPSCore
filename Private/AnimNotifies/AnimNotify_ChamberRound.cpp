@@ -3,6 +3,7 @@
 #include "AnimNotifies/AnimNotify_ChamberRound.h"
 #include "Interfaces/ItemCollectorInterface.h"
 #include "Components/BoltActionFireComponent.h"
+#include "Components/PumpActionFireComponent.h"
 
 void UAnimNotify_ChamberRound::Notify(
 	USkeletalMeshComponent* MeshComp,
@@ -18,9 +19,19 @@ void UAnimNotify_ChamberRound::Notify(
 	AActor* ActiveItem = IItemCollectorInterface::Execute_GetActiveItem(Owner);
 	if (!ActiveItem) return;
 
-	// Find BoltActionFireComponent on the active item
+	// Try BoltActionFireComponent first (bolt-action rifles)
 	UBoltActionFireComponent* BoltComp = ActiveItem->FindComponentByClass<UBoltActionFireComponent>();
-	if (!BoltComp) return;
+	if (BoltComp)
+	{
+		BoltComp->OnChamberRound();
+		return;
+	}
 
-	BoltComp->OnChamberRound();
+	// Try PumpActionFireComponent (pump-action shotguns)
+	UPumpActionFireComponent* PumpComp = ActiveItem->FindComponentByClass<UPumpActionFireComponent>();
+	if (PumpComp)
+	{
+		PumpComp->OnChamberRound();
+		return;
+	}
 }

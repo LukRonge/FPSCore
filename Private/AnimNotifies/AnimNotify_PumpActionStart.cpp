@@ -1,11 +1,10 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "AnimNotifies/AnimNotify_ShellEject.h"
+#include "AnimNotifies/AnimNotify_PumpActionStart.h"
 #include "Interfaces/ItemCollectorInterface.h"
-#include "Components/BoltActionFireComponent.h"
 #include "Components/PumpActionFireComponent.h"
 
-void UAnimNotify_ShellEject::Notify(
+void UAnimNotify_PumpActionStart::Notify(
 	USkeletalMeshComponent* MeshComp,
 	UAnimSequenceBase* Animation,
 	const FAnimNotifyEventReference& EventReference)
@@ -19,19 +18,10 @@ void UAnimNotify_ShellEject::Notify(
 	AActor* ActiveItem = IItemCollectorInterface::Execute_GetActiveItem(Owner);
 	if (!ActiveItem) return;
 
-	// Try BoltActionFireComponent first (bolt-action rifles)
-	UBoltActionFireComponent* BoltComp = ActiveItem->FindComponentByClass<UBoltActionFireComponent>();
-	if (BoltComp)
-	{
-		BoltComp->OnShellEject();
-		return;
-	}
-
-	// Try PumpActionFireComponent (pump-action shotguns)
+	// Find PumpActionFireComponent on the active item
 	UPumpActionFireComponent* PumpComp = ActiveItem->FindComponentByClass<UPumpActionFireComponent>();
-	if (PumpComp)
-	{
-		PumpComp->OnShellEject();
-		return;
-	}
+	if (!PumpComp) return;
+
+	// Start weapon pump-action montage (synchronizes with character hand animation)
+	PumpComp->OnPumpActionStart();
 }

@@ -573,11 +573,12 @@ public:
 	// Get aiming crosshair from current sight
 	virtual TSubclassOf<UUserWidget> GetAimingCrosshair_Implementation() const override;
 
-	// Get aiming point from current sight or default
-	virtual FVector GetAimingPoint_Implementation() const override;
-
-	// Get sight actor for transform calculations
-	virtual AActor* GetSightActor_Implementation() const override;
+	/**
+	 * Get aim transform in world space
+	 * Delegates to CurrentSight if available, otherwise uses FPSMesh "aim" socket
+	 * Returns invalid transform (scale=0) if aiming not possible
+	 */
+	virtual FTransform GetAimTransform_Implementation() const override;
 
 	// Get aiming FOV from current sight or default weapon AimFOV
 	virtual float GetAimingFOV_Implementation() const override;
@@ -679,10 +680,6 @@ private:
 	// ============================================
 	// HELPER METHODS
 	// ============================================
-
-	// Get current sight actor from SightComponent
-	// Returns nullptr if no sight attached
-	AActor* GetCurrentSightActor() const;
 
 	/**
 	 * Propagate owner to all child actors (magazine, sights)
