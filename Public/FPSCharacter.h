@@ -96,6 +96,20 @@ protected:
 
 	void ReloadPressed();
 
+	// Item selection input handlers
+	void SelectItem1Pressed();
+	void SelectItem2Pressed();
+	void SelectItem3Pressed();
+	void SelectItem4Pressed();
+
+	/**
+	 * Select item from inventory by index
+	 * CLIENT: Validates locally, sends Server RPC
+	 * SERVER: Re-validates and updates ActiveItem (triggers OnRep on clients)
+	 * @param Index - Inventory slot index (0-based)
+	 */
+	void SelectItemByIndex(int32 Index);
+
 	// Movement speed control
 	void UpdateMovementSpeed(EFPSMovementMode NewMode);
 
@@ -499,6 +513,11 @@ public:
 	UFUNCTION(Server, Reliable)
 	void Server_DropItem(AActor* Item);
 
+	// Server RPC to select item from inventory by index
+	// Validates index, checks if item can be equipped, updates ActiveItem
+	UFUNCTION(Server, Reliable)
+	void Server_SelectItem(int32 Index);
+
 	// Multicast RPC for physical drop setup (runs on ALL clients)
 	// Detaches from character, enables physics, places in world
 	UFUNCTION(NetMulticast, Reliable)
@@ -677,6 +696,19 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	UInputAction* IA_Reload;
+
+	// Item selection input actions (inventory slots 1-4)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* IA_Item_1;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* IA_Item_2;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* IA_Item_3;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* IA_Item_4;
 
 	// Movement speeds
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Movement")

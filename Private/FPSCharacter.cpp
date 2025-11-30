@@ -433,6 +433,27 @@ void AFPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		{
 			EnhancedInputComponent->BindAction(IA_Reload, ETriggerEvent::Triggered, this, &AFPSCharacter::ReloadPressed);
 		}
+
+		// Item selection (inventory slots 1-4)
+		if (IA_Item_1)
+		{
+			EnhancedInputComponent->BindAction(IA_Item_1, ETriggerEvent::Started, this, &AFPSCharacter::SelectItem1Pressed);
+		}
+
+		if (IA_Item_2)
+		{
+			EnhancedInputComponent->BindAction(IA_Item_2, ETriggerEvent::Started, this, &AFPSCharacter::SelectItem2Pressed);
+		}
+
+		if (IA_Item_3)
+		{
+			EnhancedInputComponent->BindAction(IA_Item_3, ETriggerEvent::Started, this, &AFPSCharacter::SelectItem3Pressed);
+		}
+
+		if (IA_Item_4)
+		{
+			EnhancedInputComponent->BindAction(IA_Item_4, ETriggerEvent::Started, this, &AFPSCharacter::SelectItem4Pressed);
+		}
 	}
 }
 
@@ -1356,7 +1377,125 @@ void AFPSCharacter::Server_DropItem_Implementation(AActor* Item)
 	InventoryComp->RemoveItem(Item);
 }
 
+void AFPSCharacter::Server_SelectItem_Implementation(int32 Index)
+{
+	// SERVER VALIDATION (anti-cheat)
+	// Re-validate all conditions on server
 
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// Validate index bounds
+	AActor* NewItem = InventoryComp->GetItemAtIndex(Index);
+	if (!NewItem)
+	{
+		return;
+	}
+
+	// Don't switch to same item
+	if (NewItem == ActiveItem)
+	{
+		return;
+	}
+
+	// Check if new item is holdable
+	if (!NewItem->Implements<UHoldableInterface>())
+	{
+		return;
+	}
+
+	// Check if current item can be unequipped (not reloading, etc.)
+	if (ActiveItem && ActiveItem->Implements<UHoldableInterface>())
+	{
+		if (!IHoldableInterface::Execute_CanBeUnequipped(ActiveItem))
+		{
+			return;
+		}
+	}
+
+	// Store old item for OnRep pattern
+	AActor* OldActiveItem = ActiveItem;
+
+	// Update replicated property (triggers OnRep on clients)
+	ActiveItem = NewItem;
+
+	// Server executes immediately (OnRep pattern)
+	// Unequip old, equip new
+	if (OldActiveItem)
+	{
+		UnEquipItem(OldActiveItem);
+	}
+
+	EquipItem(ActiveItem);
+}
+
+// ============================================
+// ITEM SELECTION SYSTEM
+// ============================================
+
+void AFPSCharacter::SelectItem1Pressed()
+{
+	SelectItemByIndex(0);
+}
+
+void AFPSCharacter::SelectItem2Pressed()
+{
+	SelectItemByIndex(1);
+}
+
+void AFPSCharacter::SelectItem3Pressed()
+{
+	SelectItemByIndex(2);
+}
+
+void AFPSCharacter::SelectItem4Pressed()
+{
+	SelectItemByIndex(3);
+}
+
+void AFPSCharacter::SelectItemByIndex(int32 Index)
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	// LOCAL VALIDATION (responsive feedback)
+	// Server will re-validate, but local checks provide instant feedback
+
+	// Check index bounds locally
+	AActor* NewItem = InventoryComp->GetItemAtIndex(Index);
+	if (!NewItem)
+	{
+		return;
+	}
+
+	// Don't switch to same item
+	if (NewItem == ActiveItem)
+	{
+		return;
+	}
+
+	// Check if new item is holdable
+	if (!NewItem->Implements<UHoldableInterface>())
+	{
+		return;
+	}
+
+	// Check if current item can be unequipped (not reloading, etc.)
+	if (ActiveItem && ActiveItem->Implements<UHoldableInterface>())
+	{
+		if (!IHoldableInterface::Execute_CanBeUnequipped(ActiveItem))
+		{
+			return;
+		}
+	}
+
+	// Send Server RPC (server will update ActiveItem, triggering OnRep)
+	Server_SelectItem(Index);
+}
 
 // ============================================
 // IItemCollectorInterface Implementation
@@ -1416,6 +1555,38 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 {
 	if (!IsValid(Item)) return;
 	if (!Item->Implements<UHoldableInterface>()) return;
+
+	// ============================================
+	// PHYSICAL UNEQUIP (runs on ALL machines)
+	// Move item from weapon_r to spine_03 (holster) and hide
+	// ============================================
+
+	// Hide item
+	Item->SetActorHiddenInGame(true);
+
+	// Detach from weapon_r and attach to spine_03 (holster position)
+	static const FName HolsterSocket = TEXT("spine_03");
+
+	Item->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, HolsterSocket);
+	Item->SetActorRelativeTransform(FTransform::Identity);
+
+	// Also move TPS mesh to holster
+	if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
+	{
+		TPSMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, HolsterSocket);
+		TPSMesh->SetRelativeTransform(FTransform::Identity);
+	}
+
+	// Detach FPS mesh from Arms (will be reattached on equip)
+	if (UPrimitiveComponent* FPSMesh = IHoldableInterface::Execute_GetFPSMeshComponent(Item))
+	{
+		FPSMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, HolsterSocket);
+		FPSMesh->SetRelativeTransform(FTransform::Identity);
+	}
+
+	// ============================================
+	// LOGICAL UNEQUIP (animations, HUD)
+	// ============================================
 
 	// Reset animation layer (MUST run even if item detached - prevents leak)
 	UpdateItemAnimLayer(nullptr);
