@@ -164,6 +164,32 @@ public:
 	// Configure reload animations in ReloadComponent Blueprint defaults
 
 	// ============================================
+	// EQUIP/UNEQUIP ANIMATION
+	// ============================================
+
+	// Equip animation montage (draw weapon, unfold launcher, etc.)
+	// Played on character Body/Arms/Legs meshes when weapon is equipped
+	// Item is attached to weapon_r during montage, ready to use after completion
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Animation")
+	UAnimMontage* EquipMontage;
+
+	// Unequip animation montage (holster weapon, fold launcher, etc.)
+	// Played on character Body/Arms/Legs meshes when weapon is unequipped
+	// Item is moved to spine_03 and hidden after montage completion
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Animation")
+	UAnimMontage* UnequipMontage;
+
+	// Current equipping state (montage playing)
+	// NOT replicated - visual state only, derived from montage playback
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|State")
+	bool bIsEquipping = false;
+
+	// Current unequipping state (montage playing)
+	// NOT replicated - visual state only, derived from montage playback
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|State")
+	bool bIsUnequipping = false;
+
+	// ============================================
 	// HANDS / IK
 	// ============================================
 
@@ -539,10 +565,35 @@ public:
 	 * Checks:
 	 * - ReloadComponent->bIsReloading
 	 * - FPSMesh AnimInstance montage playing
+	 * - bIsEquipping or bIsUnequipping
 	 *
 	 * @return true if weapon can be unequipped, false if blocked
 	 */
 	virtual bool CanBeUnequipped_Implementation() const override;
+
+	// Get equip montage
+	virtual UAnimMontage* GetEquipMontage_Implementation() const override;
+
+	// Get unequip montage
+	virtual UAnimMontage* GetUnequipMontage_Implementation() const override;
+
+	// Check if currently equipping
+	virtual bool IsEquipping_Implementation() const override;
+
+	// Check if currently unequipping
+	virtual bool IsUnequipping_Implementation() const override;
+
+	// Set equipping state
+	virtual void SetEquippingState_Implementation(bool bEquipping) override;
+
+	// Set unequipping state
+	virtual void SetUnequippingState_Implementation(bool bUnequipping) override;
+
+	// Called when equip montage completes
+	virtual void OnEquipMontageComplete_Implementation(APawn* Owner) override;
+
+	// Called when unequip montage completes
+	virtual void OnUnequipMontageComplete_Implementation(APawn* Owner) override;
 
 	// ============================================
 	// AMMO CONSUMER INTERFACE

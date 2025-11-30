@@ -47,4 +47,17 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "ItemCollector")
 	AActor* GetActiveItem() const;
 	virtual AActor* GetActiveItem_Implementation() const { return nullptr; }
+
+	// ============================================
+	// EQUIP/UNEQUIP MONTAGE CALLBACKS
+	// ============================================
+
+	/**
+	 * Called when unequip montage finishes (from AnimNotify_UnequipFinished)
+	 * Handles holstering current item and starting pending equip if switching
+	 * LOCAL operation - runs on all machines independently
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "ItemCollector")
+	void OnUnequipMontageFinished();
+	virtual void OnUnequipMontageFinished_Implementation() { }
 };

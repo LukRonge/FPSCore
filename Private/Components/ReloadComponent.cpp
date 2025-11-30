@@ -3,6 +3,7 @@
 #include "Components/ReloadComponent.h"
 #include "Interfaces/AmmoConsumerInterface.h"
 #include "Interfaces/CharacterMeshProviderInterface.h"
+#include "Interfaces/HoldableInterface.h"
 #include "Animation/AnimInstance.h"
 #include "Net/UnrealNetwork.h"
 
@@ -29,6 +30,16 @@ bool UReloadComponent::CanReload_Internal() const
 	if (!OwnerActor) return false;
 	if (!OwnerActor->Implements<UAmmoConsumerInterface>()) return false;
 	if (bIsReloading) return false;
+
+	// Block reload during equip/unequip montages
+	if (OwnerActor->Implements<UHoldableInterface>())
+	{
+		if (IHoldableInterface::Execute_IsEquipping(OwnerActor) ||
+			IHoldableInterface::Execute_IsUnequipping(OwnerActor))
+		{
+			return false;
+		}
+	}
 
 	int32 CurrentAmmo = IAmmoConsumerInterface::Execute_GetClip(OwnerActor);
 	int32 MaxAmmo = IAmmoConsumerInterface::Execute_GetClipSize(OwnerActor);

@@ -62,6 +62,16 @@ bool UFireComponent::CanFire() const
 		return false;
 	}
 
+	// Block firing during equip/unequip montages
+	if (WeaponActor && WeaponActor->Implements<UHoldableInterface>())
+	{
+		if (IHoldableInterface::Execute_IsEquipping(WeaponActor) ||
+			IHoldableInterface::Execute_IsUnequipping(WeaponActor))
+		{
+			return false;
+		}
+	}
+
 	AActor* CharacterOwner = WeaponActor ? WeaponActor->GetOwner() : nullptr;
 	if (CharacterOwner && CharacterOwner->Implements<UCharacterMeshProviderInterface>())
 	{

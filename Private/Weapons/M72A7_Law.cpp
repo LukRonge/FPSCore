@@ -78,6 +78,12 @@ void AM72A7_Law::UseStart_Implementation(const FUseContext& Ctx)
 		return;
 	}
 
+	// Block firing during equip/unequip montages
+	if (bIsEquipping || bIsUnequipping)
+	{
+		return;
+	}
+
 	// Request server to fire
 	Server_Fire();
 }
@@ -163,6 +169,12 @@ void AM72A7_Law::Server_Fire_Implementation()
 {
 	// Validate state
 	if (bHasFired)
+	{
+		return;
+	}
+
+	// Block firing during equip/unequip montages (SERVER VALIDATION)
+	if (bIsEquipping || bIsUnequipping)
 	{
 		return;
 	}

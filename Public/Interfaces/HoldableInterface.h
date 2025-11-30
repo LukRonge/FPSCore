@@ -145,4 +145,80 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
 	bool CanBeUnequipped() const;
 	virtual bool CanBeUnequipped_Implementation() const { return true; }
+
+	// ============================================
+	// EQUIP/UNEQUIP MONTAGE SYSTEM
+	// ============================================
+
+	/**
+	 * Get equip animation montage for this item
+	 * Played on character meshes (Body/Arms/Legs) when equipping
+	 * @return Equip montage or nullptr if no animation needed
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	UAnimMontage* GetEquipMontage() const;
+	virtual UAnimMontage* GetEquipMontage_Implementation() const { return nullptr; }
+
+	/**
+	 * Get unequip animation montage for this item
+	 * Played on character meshes (Body/Arms/Legs) when unequipping/holstering
+	 * @return Unequip montage or nullptr if no animation needed
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	UAnimMontage* GetUnequipMontage() const;
+	virtual UAnimMontage* GetUnequipMontage_Implementation() const { return nullptr; }
+
+	/**
+	 * Check if item is currently in equipping state (montage playing)
+	 * Used to block actions during equip animation
+	 * @return true if equip montage is playing
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	bool IsEquipping() const;
+	virtual bool IsEquipping_Implementation() const { return false; }
+
+	/**
+	 * Check if item is currently in unequipping state (montage playing)
+	 * Used to block actions during unequip animation
+	 * @return true if unequip montage is playing
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	bool IsUnequipping() const;
+	virtual bool IsUnequipping_Implementation() const { return false; }
+
+	/**
+	 * Set equipping state on item
+	 * Called by character when starting equip montage
+	 * @param bEquipping - true when starting equip, false when complete
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	void SetEquippingState(bool bEquipping);
+	virtual void SetEquippingState_Implementation(bool bEquipping) { }
+
+	/**
+	 * Set unequipping state on item
+	 * Called by character when starting unequip montage
+	 * @param bUnequipping - true when starting unequip, false when complete
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	void SetUnequippingState(bool bUnequipping);
+	virtual void SetUnequippingState_Implementation(bool bUnequipping) { }
+
+	/**
+	 * Called when equip montage completes (from AnimNotify or montage end delegate)
+	 * Item should now be ready to use
+	 * @param Owner - Character that owns this item
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	void OnEquipMontageComplete(APawn* Owner);
+	virtual void OnEquipMontageComplete_Implementation(APawn* Owner) { }
+
+	/**
+	 * Called when unequip montage completes (from AnimNotify or montage end delegate)
+	 * Item should now be hidden/holstered
+	 * @param Owner - Character that owns this item
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	void OnUnequipMontageComplete(APawn* Owner);
+	virtual void OnUnequipMontageComplete_Implementation(APawn* Owner) { }
 };

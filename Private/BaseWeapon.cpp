@@ -743,6 +743,12 @@ bool ABaseWeapon::GetIsAiming_Implementation() const
 
 bool ABaseWeapon::CanBeUnequipped_Implementation() const
 {
+	// Block during equip/unequip montage
+	if (bIsEquipping || bIsUnequipping)
+	{
+		return false;
+	}
+
 	// Block during reload (delegate to component)
 	if (ReloadComponent && ReloadComponent->bIsReloading)
 	{
@@ -762,6 +768,52 @@ bool ABaseWeapon::CanBeUnequipped_Implementation() const
 	}
 
 	return true;
+}
+
+// ============================================
+// EQUIP/UNEQUIP MONTAGE INTERFACE
+// ============================================
+
+UAnimMontage* ABaseWeapon::GetEquipMontage_Implementation() const
+{
+	return EquipMontage;
+}
+
+UAnimMontage* ABaseWeapon::GetUnequipMontage_Implementation() const
+{
+	return UnequipMontage;
+}
+
+bool ABaseWeapon::IsEquipping_Implementation() const
+{
+	return bIsEquipping;
+}
+
+bool ABaseWeapon::IsUnequipping_Implementation() const
+{
+	return bIsUnequipping;
+}
+
+void ABaseWeapon::SetEquippingState_Implementation(bool bEquipping)
+{
+	bIsEquipping = bEquipping;
+}
+
+void ABaseWeapon::SetUnequippingState_Implementation(bool bUnequipping)
+{
+	bIsUnequipping = bUnequipping;
+}
+
+void ABaseWeapon::OnEquipMontageComplete_Implementation(APawn* OwningPawn)
+{
+	bIsEquipping = false;
+	// Weapon is now ready to use
+}
+
+void ABaseWeapon::OnUnequipMontageComplete_Implementation(APawn* OwningPawn)
+{
+	bIsUnequipping = false;
+	// Weapon is now holstered
 }
 
 bool ABaseWeapon::CanAim_Implementation() const

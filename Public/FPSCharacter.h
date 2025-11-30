@@ -39,6 +39,7 @@ public:
 	virtual void Pickup_Implementation(AActor* Item) override;
 	virtual void Drop_Implementation(AActor* Item) override;
 	virtual AActor* GetActiveItem_Implementation() const override;
+	virtual void OnUnequipMontageFinished_Implementation() override;
 
 	// IRecoilHandlerInterface implementation
 	virtual void ApplyRecoilKick_Implementation(float RecoilScale) override;
@@ -535,15 +536,59 @@ public:
 	// EQUIP/UNEQUIP SYSTEM
 	// ============================================
 
-	// Equip item from inventory (SERVER ONLY)
+	/**
+	 * Equip item from inventory
+	 * Starts equip montage if available, attaches item to weapon_r
+	 * LOCAL operation - runs on all machines (server calls immediately, clients via OnRep)
+	 * @param Item - Item to equip
+	 */
 	void EquipItem(AActor* Item);
 
-	// Unequip item (SERVER ONLY)
+	/**
+	 * Unequip item (start unequip sequence)
+	 * Starts unequip montage if available
+	 * LOCAL operation - runs on all machines
+	 * @param Item - Item to unequip
+	 */
 	void UnEquipItem(AActor* Item);
 
+	/**
+	 * Complete the holster operation after unequip montage finishes
+	 * Attaches item to spine_03, hides it
+	 * Called from AnimNotify_UnequipFinished or montage end delegate
+	 * @param Item - Item to holster
+	 */
+	void HolsterItem(AActor* Item);
+
+	// OnUnequipMontageFinished() is now in IItemCollectorInterface
+	// Implementation: OnUnequipMontageFinished_Implementation()
+
+	/**
+	 * Play equip/unequip montage on character meshes (Body/Arms/Legs)
+	 * @param Montage - Montage to play
+	 * @param bBindEndDelegate - If true, binds OnMontageEnded delegate for fallback
+	 */
+	void PlayEquipMontage(UAnimMontage* Montage, bool bBindEndDelegate = false);
+
 private:
+	// Item waiting to be equipped after current unequip completes (for weapon switching)
+	// Set when switching weapons - unequip plays, then this item gets equipped
+	UPROPERTY()
+	AActor* PendingEquipItem = nullptr;
+
+	// Item currently being unequipped (for AnimNotify to know which item to holster)
+	UPROPERTY()
+	AActor* UnequippingItem = nullptr;
+
 	// Setup active item local visual state (LOCAL operation - runs on ALL machines)
 	void SetupActiveItemLocal();
+
+	// Montage end delegate for equip/unequip fallback
+	UFUNCTION()
+	void OnEquipMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
+	UFUNCTION()
+	void OnUnequipMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 public:
 
