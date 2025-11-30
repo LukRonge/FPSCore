@@ -109,6 +109,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Disposable")
 	bool CanBeUnequipped() const;
 
+	/**
+	 * Check if item can be picked up
+	 * Returns false if item has been used (disposable items cannot be re-picked after use)
+	 */
+	UFUNCTION(BlueprintPure, Category = "Disposable")
+	bool CanBePickedUp() const;
+
 protected:
 	/**
 	 * Play montage on character meshes

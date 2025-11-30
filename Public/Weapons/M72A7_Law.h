@@ -171,6 +171,16 @@ public:
 	 */
 	virtual bool CanBeUnequipped_Implementation() const override;
 
+	// ============================================
+	// PICKUPABLE INTERFACE OVERRIDES
+	// ============================================
+
+	/**
+	 * Cannot be picked up after firing
+	 * Used disposable weapons are trash - no re-pickup allowed
+	 */
+	virtual bool CanBePicked_Implementation(const FInteractionContext& Ctx) const override;
+
 protected:
 	// ============================================
 	// COMPONENTS

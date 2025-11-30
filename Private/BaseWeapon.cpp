@@ -835,3 +835,63 @@ TSubclassOf<UUserWidget> ABaseWeapon::GetItemWidgetClass_Implementation() const
 {
 	return ItemWidgetClass;
 }
+
+// ============================================
+// HELPER METHODS FOR CHILD CLASSES
+// ============================================
+
+void ABaseWeapon::PlayWeaponMontage(UAnimMontage* Montage)
+{
+	if (!Montage) return;
+
+	// Use IHoldableInterface to access meshes (Golden Rule compliance)
+	if (!Implements<UHoldableInterface>()) return;
+
+	UPrimitiveComponent* FPSMeshComp = IHoldableInterface::Execute_GetFPSMeshComponent(const_cast<ABaseWeapon*>(this));
+	UPrimitiveComponent* TPSMeshComp = IHoldableInterface::Execute_GetTPSMeshComponent(const_cast<ABaseWeapon*>(this));
+
+	// Play on FPS mesh (visible to owner)
+	if (USkeletalMeshComponent* FPSSkeletalMesh = Cast<USkeletalMeshComponent>(FPSMeshComp))
+	{
+		if (UAnimInstance* FPSAnimInstance = FPSSkeletalMesh->GetAnimInstance())
+		{
+			FPSAnimInstance->Montage_Play(Montage);
+		}
+	}
+
+	// Play on TPS mesh (visible to others)
+	if (USkeletalMeshComponent* TPSSkeletalMesh = Cast<USkeletalMeshComponent>(TPSMeshComp))
+	{
+		if (UAnimInstance* TPSAnimInstance = TPSSkeletalMesh->GetAnimInstance())
+		{
+			TPSAnimInstance->Montage_Play(Montage);
+		}
+	}
+}
+
+void ABaseWeapon::ForceUpdateWeaponAnimInstances()
+{
+	// Use IHoldableInterface to access meshes (Golden Rule compliance)
+	if (!Implements<UHoldableInterface>()) return;
+
+	UPrimitiveComponent* FPSMeshComp = IHoldableInterface::Execute_GetFPSMeshComponent(const_cast<ABaseWeapon*>(this));
+	UPrimitiveComponent* TPSMeshComp = IHoldableInterface::Execute_GetTPSMeshComponent(const_cast<ABaseWeapon*>(this));
+
+	// Force update FPS mesh AnimInstance
+	if (USkeletalMeshComponent* FPSSkeletalMesh = Cast<USkeletalMeshComponent>(FPSMeshComp))
+	{
+		if (UAnimInstance* FPSAnimInstance = FPSSkeletalMesh->GetAnimInstance())
+		{
+			FPSAnimInstance->NativeUpdateAnimation(0.0f);
+		}
+	}
+
+	// Force update TPS mesh AnimInstance
+	if (USkeletalMeshComponent* TPSSkeletalMesh = Cast<USkeletalMeshComponent>(TPSMeshComp))
+	{
+		if (UAnimInstance* TPSAnimInstance = TPSSkeletalMesh->GetAnimInstance())
+		{
+			TPSAnimInstance->NativeUpdateAnimation(0.0f);
+		}
+	}
+}

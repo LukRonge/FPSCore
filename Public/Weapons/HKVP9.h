@@ -78,12 +78,7 @@ protected:
 	UFUNCTION()
 	void OnRep_SlideLockedBack();
 
-	/**
-	 * Propagate slide state to weapon mesh AnimInstances
-	 * Sets bSlideLockedBack on FPSMesh and TPSMesh AnimInstances
-	 * Called after state changes (server) and OnRep (clients)
-	 */
-	void PropagateStateToAnimInstances();
+	// NOTE: Uses BaseWeapon::ForceUpdateWeaponAnimInstances() for AnimInstance updates
 
 public:
 
@@ -149,14 +144,5 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VP9|Components")
 	UBoxMagazineReloadComponent* BoxMagazineReloadComponent;
 
-	// ============================================
-	// HELPERS
-	// ============================================
-
-	/**
-	 * Play montage on weapon meshes (FPSMesh + TPSMesh)
-	 * Uses IHoldableInterface to access meshes (Golden Rule compliance)
-	 * Used for slide_shoot animation
-	 */
-	void PlayWeaponMontage(UAnimMontage* Montage);
+	// NOTE: Uses BaseWeapon::PlayWeaponMontage() for weapon mesh animations
 };

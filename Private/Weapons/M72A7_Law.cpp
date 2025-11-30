@@ -140,6 +140,22 @@ bool AM72A7_Law::CanBeUnequipped_Implementation() const
 }
 
 // ============================================
+// PICKUPABLE INTERFACE OVERRIDES
+// ============================================
+
+bool AM72A7_Law::CanBePicked_Implementation(const FInteractionContext& Ctx) const
+{
+	// Delegate to DisposableComponent - used disposable items cannot be picked up
+	if (DisposableComponent && !DisposableComponent->CanBePickedUp())
+	{
+		return false;
+	}
+
+	// Also check base class (owner check, etc.)
+	return Super::CanBePicked_Implementation(Ctx);
+}
+
+// ============================================
 // SERVER RPC
 // ============================================
 
@@ -168,11 +184,7 @@ void AM72A7_Law::Server_Fire_Implementation()
 	}
 
 	// Spawn projectile (SERVER ONLY)
-	AActor* Projectile = SpawnProjectile();
-	if (!Projectile)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("M72A7_Law::Server_Fire - Failed to spawn projectile!"));
-	}
+	SpawnProjectile();
 
 	// Play effects on all clients (calls our overridden Multicast_PlayShootEffects_Implementation)
 	Multicast_PlayShootEffects();
@@ -184,24 +196,27 @@ void AM72A7_Law::Server_Fire_Implementation()
 
 void AM72A7_Law::Multicast_PlayShootEffects_Implementation()
 {
+	// M72A7 uses custom socket for muzzle flash (ProjectileSpawnSocket instead of "barrel")
+	// We need to spawn muzzle VFX BEFORE calling Super, because Super uses "barrel" socket
+	// Then call Super for character animations only
+
 	const bool bIsDedicatedServer = (GetNetMode() == NM_DedicatedServer);
 
-	AActor* WeaponOwner = GetOwner();
-	APawn* OwnerPawn = WeaponOwner ? Cast<APawn>(WeaponOwner) : nullptr;
-	const bool bIsLocallyControlled = OwnerPawn && OwnerPawn->IsLocallyControlled();
-
-	// ============================================
-	// MUZZLE FLASH VFX
-	// ============================================
+	// Skip muzzle VFX on dedicated server
 	if (!bIsDedicatedServer && MuzzleFlashNiagara)
 	{
+		AActor* WeaponOwner = GetOwner();
+		APawn* OwnerPawn = WeaponOwner ? Cast<APawn>(WeaponOwner) : nullptr;
+		const bool bIsLocallyControlled = OwnerPawn && OwnerPawn->IsLocallyControlled();
+
+		// Use FPSMesh for owner, TPSMesh for others
 		USkeletalMeshComponent* TargetMesh = bIsLocallyControlled ? FPSMesh : TPSMesh;
 		if (TargetMesh)
 		{
 			UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAttached(
 				MuzzleFlashNiagara,
 				TargetMesh,
-				ProjectileSpawnSocket,
+				ProjectileSpawnSocket,  // M72A7-specific socket
 				FVector::ZeroVector,
 				FRotator::ZeroRotator,
 				EAttachLocation::SnapToTarget,
@@ -224,46 +239,21 @@ void AM72A7_Law::Multicast_PlayShootEffects_Implementation()
 				}
 			}
 		}
-	}
 
-	// ============================================
-	// SHOOT MONTAGE ON CHARACTER MESHES
-	// ============================================
-	if (!ShootMontage || !WeaponOwner || !WeaponOwner->Implements<UCharacterMeshProviderInterface>())
-	{
-		return;
-	}
+		// Temporarily clear MuzzleFlashNiagara so Super doesn't spawn another one
+		UNiagaraSystem* OriginalMuzzleFlash = MuzzleFlashNiagara;
+		MuzzleFlashNiagara = nullptr;
 
-	// FPS Animation (Owning client only - Arms mesh)
-	if (bIsLocallyControlled)
-	{
-		USkeletalMeshComponent* ArmsMesh = ICharacterMeshProviderInterface::Execute_GetArmsMesh(WeaponOwner);
-		if (ArmsMesh)
-		{
-			if (UAnimInstance* AnimInst = ArmsMesh->GetAnimInstance())
-			{
-				AnimInst->Montage_Play(ShootMontage);
-			}
-		}
-	}
+		// Call base implementation for character animations
+		Super::Multicast_PlayShootEffects_Implementation();
 
-	// TPS Animation (All machines - Body/Legs meshes)
-	USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(WeaponOwner);
-	if (BodyMesh)
-	{
-		if (UAnimInstance* AnimInst = BodyMesh->GetAnimInstance())
-		{
-			AnimInst->Montage_Play(ShootMontage);
-		}
+		// Restore MuzzleFlashNiagara
+		MuzzleFlashNiagara = OriginalMuzzleFlash;
 	}
-
-	USkeletalMeshComponent* LegsMesh = ICharacterMeshProviderInterface::Execute_GetLegsMesh(WeaponOwner);
-	if (LegsMesh)
+	else
 	{
-		if (UAnimInstance* AnimInst = LegsMesh->GetAnimInstance())
-		{
-			AnimInst->Montage_Play(ShootMontage);
-		}
+		// Dedicated server or no muzzle flash - just call Super for animations
+		Super::Multicast_PlayShootEffects_Implementation();
 	}
 }
 

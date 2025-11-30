@@ -5,10 +5,7 @@
 #include "Components/SemiAutoFireComponent.h"
 #include "Components/BoxMagazineReloadComponent.h"
 #include "Components/BallisticsComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Interfaces/HoldableInterface.h"
 #include "Interfaces/AmmoConsumerInterface.h"
-#include "Animation/AnimInstance.h"
 #include "Net/UnrealNetwork.h"
 
 AHKVP9::AHKVP9()
@@ -75,36 +72,7 @@ void AHKVP9::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimePr
 
 void AHKVP9::OnRep_SlideLockedBack()
 {
-	PropagateStateToAnimInstances();
-}
-
-void AHKVP9::PropagateStateToAnimInstances()
-{
-	// Use IHoldableInterface to access meshes (Golden Rule compliance)
-	if (!Implements<UHoldableInterface>()) return;
-
-	UPrimitiveComponent* FPSMeshComp = IHoldableInterface::Execute_GetFPSMeshComponent(const_cast<AHKVP9*>(this));
-	UPrimitiveComponent* TPSMeshComp = IHoldableInterface::Execute_GetTPSMeshComponent(const_cast<AHKVP9*>(this));
-
-	// Propagate state to FPS mesh AnimInstance
-	if (USkeletalMeshComponent* FPSSkeletalMesh = Cast<USkeletalMeshComponent>(FPSMeshComp))
-	{
-		if (UAnimInstance* FPSAnimInstance = FPSSkeletalMesh->GetAnimInstance())
-		{
-			// AnimInstance reads BlueprintReadOnly properties directly from owner actor
-			// Force AnimInstance to update
-			FPSAnimInstance->NativeUpdateAnimation(0.0f);
-		}
-	}
-
-	// Propagate state to TPS mesh AnimInstance
-	if (USkeletalMeshComponent* TPSSkeletalMesh = Cast<USkeletalMeshComponent>(TPSMeshComp))
-	{
-		if (UAnimInstance* TPSAnimInstance = TPSSkeletalMesh->GetAnimInstance())
-		{
-			TPSAnimInstance->NativeUpdateAnimation(0.0f);
-		}
-	}
+	ForceUpdateWeaponAnimInstances();
 }
 
 // ============================================
@@ -119,35 +87,6 @@ void AHKVP9::Multicast_PlayShootEffects_Implementation()
 	// VP9-specific: Play slide shoot montage on weapon meshes
 	// This runs on ALL clients (server + remote clients)
 	PlayWeaponMontage(SlideShootMontage);
-}
-
-void AHKVP9::PlayWeaponMontage(UAnimMontage* Montage)
-{
-	if (!Montage) return;
-
-	// Use IHoldableInterface to access meshes (Golden Rule compliance)
-	if (!Implements<UHoldableInterface>()) return;
-
-	UPrimitiveComponent* FPSMeshComp = IHoldableInterface::Execute_GetFPSMeshComponent(const_cast<AHKVP9*>(this));
-	UPrimitiveComponent* TPSMeshComp = IHoldableInterface::Execute_GetTPSMeshComponent(const_cast<AHKVP9*>(this));
-
-	// Play on FPS mesh (visible to owner)
-	if (USkeletalMeshComponent* FPSSkeletalMesh = Cast<USkeletalMeshComponent>(FPSMeshComp))
-	{
-		if (UAnimInstance* FPSAnimInstance = FPSSkeletalMesh->GetAnimInstance())
-		{
-			FPSAnimInstance->Montage_Play(Montage);
-		}
-	}
-
-	// Play on TPS mesh (visible to others)
-	if (USkeletalMeshComponent* TPSSkeletalMesh = Cast<USkeletalMeshComponent>(TPSMeshComp))
-	{
-		if (UAnimInstance* TPSAnimInstance = TPSSkeletalMesh->GetAnimInstance())
-		{
-			TPSAnimInstance->Montage_Play(Montage);
-		}
-	}
 }
 
 void AHKVP9::HandleShotFired_Implementation(
@@ -169,7 +108,7 @@ void AHKVP9::HandleShotFired_Implementation(
 				bSlideLockedBack = true;
 				// bSlideLockedBack is REPLICATED, OnRep will update clients
 				// Server must also update locally since OnRep doesn't run on server
-				PropagateStateToAnimInstances();
+				ForceUpdateWeaponAnimInstances();
 			}
 		}
 	}
@@ -195,11 +134,11 @@ void AHKVP9::OnWeaponReloadComplete_Implementation()
 	Super::OnWeaponReloadComplete_Implementation();
 
 	// SERVER ONLY: Reset slide state (slide goes forward after reload)
-	// Clients receive state via OnRep which calls PropagateStateToAnimInstances
+	// Clients receive state via OnRep which calls ForceUpdateWeaponAnimInstances
 	if (HasAuthority())
 	{
 		bSlideLockedBack = false;
-		PropagateStateToAnimInstances();
+		ForceUpdateWeaponAnimInstances();
 	}
 }
 

@@ -5,10 +5,7 @@
 #include "Components/FullAutoFireComponent.h"
 #include "Components/BoxMagazineReloadComponent.h"
 #include "Components/BallisticsComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Interfaces/HoldableInterface.h"
 #include "Interfaces/AmmoConsumerInterface.h"
-#include "Animation/AnimInstance.h"
 #include "Net/UnrealNetwork.h"
 
 AM4A1::AM4A1()
@@ -77,41 +74,12 @@ void AM4A1::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimePro
 
 void AM4A1::OnRep_HasFiredOnce()
 {
-	PropagateStateToAnimInstances();
+	ForceUpdateWeaponAnimInstances();
 }
 
 void AM4A1::OnRep_BoltCarrierOpen()
 {
-	PropagateStateToAnimInstances();
-}
-
-void AM4A1::PropagateStateToAnimInstances()
-{
-	// Use IHoldableInterface to access meshes (Golden Rule compliance)
-	if (!Implements<UHoldableInterface>()) return;
-
-	UPrimitiveComponent* FPSMeshComp = IHoldableInterface::Execute_GetFPSMeshComponent(const_cast<AM4A1*>(this));
-	UPrimitiveComponent* TPSMeshComp = IHoldableInterface::Execute_GetTPSMeshComponent(const_cast<AM4A1*>(this));
-
-	// Propagate state to FPS mesh AnimInstance
-	if (USkeletalMeshComponent* FPSSkeletalMesh = Cast<USkeletalMeshComponent>(FPSMeshComp))
-	{
-		if (UAnimInstance* FPSAnimInstance = FPSSkeletalMesh->GetAnimInstance())
-		{
-			// AnimInstance reads BlueprintReadOnly properties directly from owner actor
-			// Force AnimInstance to update
-			FPSAnimInstance->NativeUpdateAnimation(0.0f);
-		}
-	}
-
-	// Propagate state to TPS mesh AnimInstance
-	if (USkeletalMeshComponent* TPSSkeletalMesh = Cast<USkeletalMeshComponent>(TPSMeshComp))
-	{
-		if (UAnimInstance* TPSAnimInstance = TPSSkeletalMesh->GetAnimInstance())
-		{
-			TPSAnimInstance->NativeUpdateAnimation(0.0f);
-		}
-	}
+	ForceUpdateWeaponAnimInstances();
 }
 
 // ============================================
@@ -159,10 +127,10 @@ void AM4A1::HandleShotFired_Implementation(
 		}
 
 		// Propagate state to AnimInstances immediately on server
-		// Clients receive state via OnRep which calls PropagateStateToAnimInstances
+		// Clients receive state via OnRep which calls ForceUpdateWeaponAnimInstances
 		if (bStateChanged)
 		{
-			PropagateStateToAnimInstances();
+			ForceUpdateWeaponAnimInstances();
 		}
 	}
 }
@@ -173,12 +141,12 @@ void AM4A1::OnUnequipped_Implementation()
 	Super::OnUnequipped_Implementation();
 
 	// SERVER ONLY: Reset M4A1 state (closes ejection port cover, resets bolt)
-	// Clients receive state via OnRep which calls PropagateStateToAnimInstances
+	// Clients receive state via OnRep which calls ForceUpdateWeaponAnimInstances
 	if (HasAuthority())
 	{
 		bHasFiredOnce = false;
 		bBoltCarrierOpen = false;
-		PropagateStateToAnimInstances();
+		ForceUpdateWeaponAnimInstances();
 	}
 }
 
@@ -192,43 +160,10 @@ void AM4A1::OnWeaponReloadComplete_Implementation()
 	Super::OnWeaponReloadComplete_Implementation();
 
 	// SERVER ONLY: Reset bolt carrier state (bolt goes forward after reload)
-	// Clients receive state via OnRep which calls PropagateStateToAnimInstances
+	// Clients receive state via OnRep which calls ForceUpdateWeaponAnimInstances
 	if (HasAuthority())
 	{
 		bBoltCarrierOpen = false;
-		PropagateStateToAnimInstances();
-	}
-}
-
-// ============================================
-// HELPERS
-// ============================================
-
-void AM4A1::PlayWeaponMontage(UAnimMontage* Montage)
-{
-	if (!Montage) return;
-
-	// Use IHoldableInterface to access meshes (Golden Rule compliance)
-	if (!Implements<UHoldableInterface>()) return;
-
-	UPrimitiveComponent* FPSMeshComp = IHoldableInterface::Execute_GetFPSMeshComponent(const_cast<AM4A1*>(this));
-	UPrimitiveComponent* TPSMeshComp = IHoldableInterface::Execute_GetTPSMeshComponent(const_cast<AM4A1*>(this));
-
-	// Play on FPS mesh (visible to owner)
-	if (USkeletalMeshComponent* FPSSkeletalMesh = Cast<USkeletalMeshComponent>(FPSMeshComp))
-	{
-		if (UAnimInstance* FPSAnimInstance = FPSSkeletalMesh->GetAnimInstance())
-		{
-			FPSAnimInstance->Montage_Play(Montage);
-		}
-	}
-
-	// Play on TPS mesh (visible to others)
-	if (USkeletalMeshComponent* TPSSkeletalMesh = Cast<USkeletalMeshComponent>(TPSMeshComp))
-	{
-		if (UAnimInstance* TPSAnimInstance = TPSSkeletalMesh->GetAnimInstance())
-		{
-			TPSAnimInstance->Montage_Play(Montage);
-		}
+		ForceUpdateWeaponAnimInstances();
 	}
 }

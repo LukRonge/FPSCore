@@ -676,9 +676,29 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Weapon|Mesh")
 	USkeletalMeshComponent* GetTPSMesh() const { return TPSMesh; }
 
+protected:
+	// ============================================
+	// HELPER METHODS FOR CHILD CLASSES
+	// ============================================
+
+	/**
+	 * Play montage on weapon meshes (FPSMesh + TPSMesh)
+	 * Uses IHoldableInterface to access meshes (Golden Rule compliance)
+	 * Used for weapon-specific animations (bolt carrier, slide, etc.)
+	 * @param Montage - Animation montage to play on both meshes
+	 */
+	void PlayWeaponMontage(UAnimMontage* Montage);
+
+	/**
+	 * Force update AnimInstances on weapon meshes
+	 * Call this after changing replicated state variables that AnimBP reads
+	 * Uses IHoldableInterface to access meshes (Golden Rule compliance)
+	 */
+	void ForceUpdateWeaponAnimInstances();
+
 private:
 	// ============================================
-	// HELPER METHODS
+	// PRIVATE HELPER METHODS
 	// ============================================
 
 	/**

@@ -1379,7 +1379,32 @@ void AFPSCharacter::Pickup_Implementation(AActor* Item)
 
 void AFPSCharacter::Drop_Implementation(AActor* Item)
 {
-	// TODO: Implement drop logic
+	// SERVER ONLY - Drop is authoritative
+	// Called from DisposableComponent::ExecuteDrop() which already checks HasAuthority()
+	// Also can be called from other sources that want to force-drop an item
+
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (!Item)
+	{
+		return;
+	}
+
+	// Check if item is in inventory
+	if (!InventoryComp->ContainsItem(Item))
+	{
+		return;
+	}
+
+	// Remove from inventory - this triggers OnInventoryItemRemoved() which handles:
+	// - Unequip if active item
+	// - Clear owner
+	// - Multicast_DropItem (physical drop on all clients)
+	// - Notify item via IPickupableInterface::OnDropped
+	InventoryComp->RemoveItem(Item);
 }
 
 AActor* AFPSCharacter::GetActiveItem_Implementation() const

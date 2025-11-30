@@ -95,12 +95,7 @@ protected:
 	UFUNCTION()
 	void OnRep_BoltCarrierOpen();
 
-	/**
-	 * Propagate bolt state to weapon mesh AnimInstances
-	 * Sets bHasFiredOnce and bBoltCarrierOpen on FPSMesh and TPSMesh AnimInstances
-	 * Called after state changes (server) and OnRep (clients)
-	 */
-	void PropagateStateToAnimInstances();
+	// NOTE: Uses BaseWeapon::ForceUpdateWeaponAnimInstances() for AnimInstance updates
 
 public:
 
@@ -168,13 +163,5 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "M4A1|Components")
 	UBoxMagazineReloadComponent* BoxMagazineReloadComponent;
 
-	// ============================================
-	// HELPERS
-	// ============================================
-
-	/**
-	 * Play montage on weapon meshes (FPSMesh + TPSMesh)
-	 * Used for bolt_carrier_shoot and other weapon-specific animations
-	 */
-	void PlayWeaponMontage(UAnimMontage* Montage);
+	// NOTE: Uses BaseWeapon::PlayWeaponMontage() for weapon mesh animations
 };

@@ -136,3 +136,9 @@ bool UDisposableComponent::CanBeUnequipped() const
 	// Block during drop sequence
 	return !bInDropSequence;
 }
+
+bool UDisposableComponent::CanBePickedUp() const
+{
+	// Used disposable items cannot be picked up again
+	return !bHasBeenUsed;
+}

@@ -87,13 +87,7 @@ protected:
 	UFUNCTION()
 	void OnRep_BoltCarrierOpen();
 
-	/**
-	 * Propagate bolt state to weapon mesh AnimInstances
-	 * Sets BoltCarrierOpen on FPSMesh and TPSMesh AnimInstances
-	 * Called after state changes (server) and OnRep (clients)
-	 * Uses IHoldableInterface to access meshes (Golden Rule compliance)
-	 */
-	void PropagateStateToAnimInstances();
+	// NOTE: Uses BaseWeapon::ForceUpdateWeaponAnimInstances() for AnimInstance updates
 
 public:
 	// ============================================
@@ -160,14 +154,5 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Spas12|Components")
 	UPumpActionReloadComponent* PumpActionReloadComponent;
 
-	// ============================================
-	// HELPERS
-	// ============================================
-
-	/**
-	 * Play montage on weapon meshes (FPSMesh + TPSMesh)
-	 * Uses IHoldableInterface to access meshes (Golden Rule compliance)
-	 * Used for bolt_carrier_shoot animation
-	 */
-	void PlayWeaponMontage(UAnimMontage* Montage);
+	// NOTE: Uses BaseWeapon::PlayWeaponMontage() for weapon mesh animations
 };
