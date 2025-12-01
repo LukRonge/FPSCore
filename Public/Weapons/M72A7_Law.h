@@ -74,6 +74,18 @@ public:
 	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_HasFired, Category = "M72A7|State")
 	bool bHasFired = false;
 
+	/**
+	 * Is launcher expanded (ready to fire)?
+	 * - false: Collapsed (stored/holstered state)
+	 * - true: Expanded (equipped and ready)
+	 * REPLICATED: For late-joiners and weapon AnimBP to see correct visual state
+	 *
+	 * Set to true by AnimNotify_ItemEquipStart during character equip montage
+	 * Weapon AnimBP reads this value and plays expand animation
+	 */
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_IsExpanded, Category = "M72A7|State")
+	bool bIsExpanded = false;
+
 protected:
 	// ============================================
 	// ONREP CALLBACKS
@@ -82,6 +94,10 @@ protected:
 	/** Called on clients when bHasFired replicates */
 	UFUNCTION()
 	void OnRep_HasFired();
+
+	/** Called on clients when bIsExpanded replicates (late-joiner support) */
+	UFUNCTION()
+	void OnRep_IsExpanded();
 
 public:
 	// ============================================
@@ -101,6 +117,28 @@ public:
 	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "M72A7|Projectile")
 	FName ProjectileSpawnSocket = FName("barrel");
+
+	// ============================================
+	// M72A7-SPECIFIC ANIMATION
+	// ============================================
+
+	/**
+	 * Item equip montage - plays on weapon meshes (FPS + TPS) during equip
+	 * M72A7: Launcher expand/unfold animation
+	 * Triggered by AnimNotify_ItemEquipStart in character equip montage
+	 * bIsExpanded is set BEFORE/WITH this montage so AnimBP can react
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "M72A7|Animation")
+	UAnimMontage* ItemEquipMontage;
+
+	/**
+	 * Item unequip montage - plays on weapon meshes (FPS + TPS) during unequip
+	 * M72A7: Launcher collapse/fold animation
+	 * Triggered by AnimNotify_ItemUnequipStart in character unequip montage
+	 * bIsExpanded is set to false BEFORE/WITH this montage so AnimBP can react
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "M72A7|Animation")
+	UAnimMontage* ItemUnequipMontage;
 
 	// ============================================
 	// USABLE INTERFACE OVERRIDES
@@ -171,6 +209,20 @@ public:
 	 */
 	virtual bool CanBeUnequipped_Implementation() const override;
 
+	/**
+	 * Set bIsExpanded = true when equipping
+	 * Called from AnimNotify_ItemEquipStart during character equip montage
+	 * Weapon AnimBP reads bIsExpanded and plays expand animation
+	 */
+	virtual void OnItemEquipAnimationStart_Implementation(APawn* OwnerPawn) override;
+
+	/**
+	 * Set bIsExpanded = false when unequipping
+	 * Called from AnimNotify_ItemUnequipStart during character unequip montage
+	 * Weapon AnimBP reads bIsExpanded and plays collapse animation
+	 */
+	virtual void OnItemUnequipAnimationStart_Implementation(APawn* OwnerPawn) override;
+
 	// ============================================
 	// PICKUPABLE INTERFACE OVERRIDES
 	// ============================================
@@ -180,6 +232,12 @@ public:
 	 * Used disposable weapons are trash - no re-pickup allowed
 	 */
 	virtual bool CanBePicked_Implementation(const FInteractionContext& Ctx) const override;
+
+	/**
+	 * Set bIsExpanded = false when dropped
+	 * Dropped M72A7 should be in collapsed state
+	 */
+	virtual void OnDropped_Implementation(const FInteractionContext& Ctx) override;
 
 protected:
 	// ============================================

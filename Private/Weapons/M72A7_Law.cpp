@@ -55,6 +55,7 @@ void AM72A7_Law::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifeti
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AM72A7_Law, bHasFired);
+	DOREPLIFETIME(AM72A7_Law, bIsExpanded);
 }
 
 void AM72A7_Law::OnRep_HasFired()
@@ -63,6 +64,26 @@ void AM72A7_Law::OnRep_HasFired()
 	if (DisposableComponent && bHasFired)
 	{
 		DisposableComponent->MarkAsUsed();
+	}
+}
+
+void AM72A7_Law::OnRep_IsExpanded()
+{
+	UE_LOG(LogTemp, Log, TEXT("M72A7_Law::OnRep_IsExpanded - bIsExpanded = %s, bIsEquipping = %s"),
+		bIsExpanded ? TEXT("true") : TEXT("false"),
+		bIsEquipping ? TEXT("true") : TEXT("false"));
+
+	// Skip if equip animation already playing (normal equip flow on listen server)
+	if (bIsEquipping)
+	{
+		return;
+	}
+
+	// Late-joiner: play expand montage at normal speed
+	if (bIsExpanded && ItemEquipMontage)
+	{
+		UE_LOG(LogTemp, Log, TEXT("M72A7_Law::OnRep_IsExpanded - Playing expand montage for late-joiner"));
+		PlayWeaponMontage(ItemEquipMontage);
 	}
 }
 
@@ -145,6 +166,44 @@ bool AM72A7_Law::CanBeUnequipped_Implementation() const
 	return Super::CanBeUnequipped_Implementation();
 }
 
+void AM72A7_Law::OnItemEquipAnimationStart_Implementation(APawn* OwnerPawn)
+{
+	// SERVER: Set expanded state FIRST (replicates to clients)
+	// This must happen before/with montage so AnimBP can react
+	if (HasAuthority())
+	{
+		UE_LOG(LogTemp, Log, TEXT("M72A7_Law::OnItemEquipAnimationStart - Setting bIsExpanded = true (SERVER)"));
+		bIsExpanded = true;
+	}
+
+	// Play expand montage on weapon meshes (FPS + TPS)
+	// LOCAL operation - each machine plays animation independently
+	if (ItemEquipMontage)
+	{
+		UE_LOG(LogTemp, Log, TEXT("M72A7_Law::OnItemEquipAnimationStart - Playing expand montage"));
+		PlayWeaponMontage(ItemEquipMontage);
+	}
+}
+
+void AM72A7_Law::OnItemUnequipAnimationStart_Implementation(APawn* OwnerPawn)
+{
+	// SERVER: Set collapsed state FIRST (replicates to clients)
+	// This must happen before/with montage so AnimBP can react
+	if (HasAuthority())
+	{
+		UE_LOG(LogTemp, Log, TEXT("M72A7_Law::OnItemUnequipAnimationStart - Setting bIsExpanded = false (SERVER)"));
+		bIsExpanded = false;
+	}
+
+	// Play collapse montage on weapon meshes (FPS + TPS)
+	// LOCAL operation - each machine plays animation independently
+	if (ItemUnequipMontage)
+	{
+		UE_LOG(LogTemp, Log, TEXT("M72A7_Law::OnItemUnequipAnimationStart - Playing collapse montage"));
+		PlayWeaponMontage(ItemUnequipMontage);
+	}
+}
+
 // ============================================
 // PICKUPABLE INTERFACE OVERRIDES
 // ============================================
@@ -159,6 +218,19 @@ bool AM72A7_Law::CanBePicked_Implementation(const FInteractionContext& Ctx) cons
 
 	// Also check base class (owner check, etc.)
 	return Super::CanBePicked_Implementation(Ctx);
+}
+
+void AM72A7_Law::OnDropped_Implementation(const FInteractionContext& Ctx)
+{
+	Super::OnDropped_Implementation(Ctx);
+
+	// Collapse the launcher when dropped, UNLESS it was already fired
+	// Fired M72A7 stays expanded (visual indicator that it's used/trash)
+	// Unfired M72A7 collapses to stored state
+	if (HasAuthority() && !bHasFired)
+	{
+		bIsExpanded = false;
+	}
 }
 
 // ============================================

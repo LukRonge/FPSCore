@@ -48,6 +48,15 @@ public:
 	AActor* GetActiveItem() const;
 	virtual AActor* GetActiveItem_Implementation() const { return nullptr; }
 
+	/**
+	 * Get item currently being unequipped (during unequip montage)
+	 * Used by AnimNotify_ItemUnequipStart to trigger item's collapse animation
+	 * @return Item being unequipped or nullptr if not in unequip state
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "ItemCollector")
+	AActor* GetUnequippingItem() const;
+	virtual AActor* GetUnequippingItem_Implementation() const { return nullptr; }
+
 	// ============================================
 	// EQUIP/UNEQUIP MONTAGE CALLBACKS
 	// ============================================

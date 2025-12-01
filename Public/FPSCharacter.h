@@ -39,6 +39,7 @@ public:
 	virtual void Pickup_Implementation(AActor* Item) override;
 	virtual void Drop_Implementation(AActor* Item) override;
 	virtual AActor* GetActiveItem_Implementation() const override;
+	virtual AActor* GetUnequippingItem_Implementation() const override;
 	virtual void OnUnequipMontageFinished_Implementation() override;
 
 	// IRecoilHandlerInterface implementation
@@ -577,8 +578,12 @@ private:
 	AActor* PendingEquipItem = nullptr;
 
 	// Item currently being unequipped (for AnimNotify to know which item to holster)
-	UPROPERTY()
+	// REPLICATED: Server sets this to trigger unequip flow on clients
+	UPROPERTY(ReplicatedUsing = OnRep_UnequippingItem)
 	AActor* UnequippingItem = nullptr;
+
+	UFUNCTION()
+	void OnRep_UnequippingItem();
 
 	// Setup active item local visual state (LOCAL operation - runs on ALL machines)
 	void SetupActiveItemLocal();

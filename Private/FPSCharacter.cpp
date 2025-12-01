@@ -270,6 +270,7 @@ void AFPSCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 
 	DOREPLIFETIME_CONDITION(AFPSCharacter, Pitch, COND_SkipOwner);
 	DOREPLIFETIME(AFPSCharacter, ActiveItem);
+	DOREPLIFETIME(AFPSCharacter, UnequippingItem);
 	DOREPLIFETIME(AFPSCharacter, CurrentMovementMode);
 	DOREPLIFETIME(AFPSCharacter, bIsAiming);
 	// Note: Health and bIsDeath moved to HealthComp
@@ -1221,37 +1222,79 @@ void AFPSCharacter::OnRep_ActiveItem(AActor* OldActiveItem)
 	// OnRep runs on CLIENTS when ActiveItem replicates from server
 	// Follows OnRep pattern: Clients execute SAME local logic as server
 
-	// Weapon switch with montages:
-	// If old item has unequip montage, set new item as pending
-	// Unequip montage plays → OnUnequipMontageFinished → equip pending item
+	// Check if old item is currently unequipping (montage playing locally)
+	bool bOldItemUnequipping = false;
+	if (OldActiveItem && OldActiveItem->Implements<UHoldableInterface>())
+	{
+		bOldItemUnequipping = IHoldableInterface::Execute_IsUnequipping(OldActiveItem);
+	}
 
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] OnRep_ActiveItem START - OldActiveItem=%s, ActiveItem=%s, UnequippingItem=%s, bOldItemUnequipping=%s, Frame=%lld"),
+		OldActiveItem ? *OldActiveItem->GetName() : TEXT("nullptr"),
+		ActiveItem ? *ActiveItem->GetName() : TEXT("nullptr"),
+		UnequippingItem ? *UnequippingItem->GetName() : TEXT("nullptr"),
+		bOldItemUnequipping ? TEXT("true") : TEXT("false"),
+		GFrameCounter);
+
+	// Log item hidden state
+	if (ActiveItem)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] OnRep_ActiveItem - ActiveItem IsHidden=%s, Location=%s"),
+			ActiveItem->IsHidden() ? TEXT("true") : TEXT("false"),
+			*ActiveItem->GetActorLocation().ToString());
+	}
+
+	// WEAPON SWITCH WITH UNEQUIP MONTAGE:
+	// If unequip is in progress (either via UnequippingItem or via item's bIsUnequipping state),
+	// OnRep_UnequippingItem already started the unequip montage.
+	// OnUnequipMontageFinished (triggered by AnimNotify) will handle equipping the new item.
+	// We just need to set PendingEquipItem here.
+	if ((UnequippingItem || bOldItemUnequipping) && ActiveItem)
+	{
+		UE_LOG(LogTemp, Log, TEXT("OnRep_ActiveItem - Unequip in progress, setting PendingEquipItem=%s"), *ActiveItem->GetName());
+
+		PendingEquipItem = ActiveItem;
+
+		// Mark pending item as equipping to block fire/reload during switch
+		if (PendingEquipItem->Implements<UHoldableInterface>())
+		{
+			IHoldableInterface::Execute_SetEquippingState(PendingEquipItem, true);
+		}
+		// EquipItem will be called from OnUnequipMontageFinished
+		return;
+	}
+
+	// WEAPON SWITCH WITHOUT UNEQUIP MONTAGE (or no unequip in progress):
 	if (OldActiveItem && ActiveItem)
 	{
-		// Weapon switch scenario
+		// Check if old item has unequip montage
 		UAnimMontage* UnequipMontage = nullptr;
 		if (OldActiveItem->Implements<UHoldableInterface>())
 		{
 			UnequipMontage = IHoldableInterface::Execute_GetUnequipMontage(OldActiveItem);
 		}
 
+		UE_LOG(LogTemp, Log, TEXT("OnRep_ActiveItem - Weapon switch, UnequipMontage=%s"),
+			UnequipMontage ? *UnequipMontage->GetName() : TEXT("nullptr"));
+
 		if (UnequipMontage)
 		{
-			// Set pending item - will be equipped after unequip montage finishes
+			// Has montage but UnequippingItem wasn't set - shouldn't happen normally
+			// Fall through to play unequip montage as fallback
 			PendingEquipItem = ActiveItem;
 
-			// CRITICAL: Mark pending item as equipping NOW to block fire/reload during switch
-			// bIsEquipping will remain true until equip montage completes
 			if (PendingEquipItem->Implements<UHoldableInterface>())
 			{
 				IHoldableInterface::Execute_SetEquippingState(PendingEquipItem, true);
 			}
 
+			UE_LOG(LogTemp, Log, TEXT("OnRep_ActiveItem - Fallback: calling UnEquipItem(%s)"), *OldActiveItem->GetName());
 			UnEquipItem(OldActiveItem);
-			// EquipItem will be called from OnUnequipMontageFinished
 		}
 		else
 		{
 			// No unequip montage - immediate switch
+			UE_LOG(LogTemp, Log, TEXT("OnRep_ActiveItem - No montage, immediate switch"));
 			UnEquipItem(OldActiveItem);
 			EquipItem(ActiveItem);
 		}
@@ -1305,9 +1348,41 @@ void AFPSCharacter::OnRep_ActiveItem(AActor* OldActiveItem)
 	}
 }
 
-
-
 // OnRep_IsDeath moved to UHealthComponent
+
+void AFPSCharacter::OnRep_UnequippingItem()
+{
+	// Called on CLIENTS when server sets UnequippingItem
+	// This triggers the unequip montage to play on remote clients
+
+	UE_LOG(LogTemp, Log, TEXT("OnRep_UnequippingItem - UnequippingItem=%s"),
+		UnequippingItem ? *UnequippingItem->GetName() : TEXT("nullptr"));
+
+	if (UnequippingItem)
+	{
+		// Unequip started - play unequip montage
+		if (UnequippingItem->Implements<UHoldableInterface>())
+		{
+			UAnimMontage* UnequipMontage = IHoldableInterface::Execute_GetUnequipMontage(UnequippingItem);
+
+			UE_LOG(LogTemp, Log, TEXT("OnRep_UnequippingItem - Playing unequip montage: %s"),
+				UnequipMontage ? *UnequipMontage->GetName() : TEXT("nullptr"));
+
+			if (UnequipMontage)
+			{
+				// Set unequipping state on item
+				IHoldableInterface::Execute_SetUnequippingState(UnequippingItem, true);
+
+				// Play unequip montage on character meshes
+				PlayEquipMontage(UnequipMontage, true);
+
+				// Notify item that unequip started
+				IHoldableInterface::Execute_OnUnequipped(UnequippingItem);
+			}
+		}
+	}
+	// Note: When UnequippingItem becomes nullptr, OnUnequipMontageFinished handles cleanup
+}
 
 void AFPSCharacter::OnRep_CurrentMovementMode()
 {
@@ -1474,44 +1549,50 @@ void AFPSCharacter::Server_SelectItem_Implementation(int32 Index)
 		}
 	}
 
-	// Store old item for OnRep pattern
+	// Store old item for later
 	AActor* OldActiveItem = ActiveItem;
 
-	// Update replicated property (triggers OnRep on clients)
-	ActiveItem = NewItem;
+	UE_LOG(LogTemp, Log, TEXT("Server_SelectItem - OldActiveItem=%s, NewItem=%s"),
+		OldActiveItem ? *OldActiveItem->GetName() : TEXT("nullptr"),
+		NewItem ? *NewItem->GetName() : TEXT("nullptr"));
 
-	// Server executes immediately (OnRep pattern)
-	// Weapon switch with montages: check for unequip montage
-	if (OldActiveItem && ActiveItem)
+	// Check if old item has unequip montage (weapon switch with animation)
+	UAnimMontage* UnequipMontage = nullptr;
+	if (OldActiveItem && OldActiveItem->Implements<UHoldableInterface>())
 	{
-		UAnimMontage* UnequipMontage = nullptr;
-		if (OldActiveItem->Implements<UHoldableInterface>())
-		{
-			UnequipMontage = IHoldableInterface::Execute_GetUnequipMontage(OldActiveItem);
-		}
+		UnequipMontage = IHoldableInterface::Execute_GetUnequipMontage(OldActiveItem);
+	}
 
-		if (UnequipMontage)
-		{
-			// Set pending item - will be equipped after unequip montage finishes
-			PendingEquipItem = ActiveItem;
+	UE_LOG(LogTemp, Log, TEXT("Server_SelectItem - UnequipMontage=%s"),
+		UnequipMontage ? *UnequipMontage->GetName() : TEXT("nullptr"));
 
-			// CRITICAL: Mark pending item as equipping NOW to block fire/reload during switch
-			// bIsEquipping will remain true until equip montage completes
-			IHoldableInterface::Execute_SetEquippingState(PendingEquipItem, true);
+	if (OldActiveItem && NewItem && UnequipMontage)
+	{
+		// WEAPON SWITCH WITH UNEQUIP MONTAGE:
+		// ActiveItem stays on OLD item during unequip montage
+		// This allows AnimNotify_ItemUnequipStart to call GetActiveItem() correctly
+		// ActiveItem changes to NewItem in OnUnequipMontageFinished AFTER montage completes
 
-			UnEquipItem(OldActiveItem);
-			// EquipItem will be called from OnUnequipMontageFinished
-		}
-		else
-		{
-			// No unequip montage - immediate switch
-			UnEquipItem(OldActiveItem);
-			EquipItem(ActiveItem);
-		}
+		UE_LOG(LogTemp, Log, TEXT("Server_SelectItem - Has unequip montage, ActiveItem stays as %s"), *OldActiveItem->GetName());
+
+		// Store new item as pending - will become ActiveItem after unequip montage
+		PendingEquipItem = NewItem;
+
+		// CRITICAL: Mark pending item as equipping NOW to block fire/reload during switch
+		// bIsEquipping will remain true until equip montage completes
+		IHoldableInterface::Execute_SetEquippingState(PendingEquipItem, true);
+
+		// Start unequip of current ActiveItem (NOT changing ActiveItem yet)
+		UnEquipItem(ActiveItem);
+		// ActiveItem will change and EquipItem will be called from OnUnequipMontageFinished
 	}
 	else
 	{
-		// Simple equip or unequip (not a switch)
+		// NO UNEQUIP MONTAGE - immediate switch
+		// Update replicated property immediately (triggers OnRep on clients)
+		UE_LOG(LogTemp, Log, TEXT("Server_SelectItem - No unequip montage, immediate switch to %s"), *NewItem->GetName());
+		ActiveItem = NewItem;
+
 		if (OldActiveItem)
 		{
 			UnEquipItem(OldActiveItem);
@@ -1644,8 +1725,17 @@ AActor* AFPSCharacter::GetActiveItem_Implementation() const
 	return ActiveItem;
 }
 
+AActor* AFPSCharacter::GetUnequippingItem_Implementation() const
+{
+	return UnequippingItem;
+}
+
 void AFPSCharacter::UnEquipItem(AActor* Item)
 {
+	UE_LOG(LogTemp, Log, TEXT("UnEquipItem - Item=%s, IsValid=%s"),
+		Item ? *Item->GetName() : TEXT("nullptr"),
+		IsValid(Item) ? TEXT("true") : TEXT("false"));
+
 	if (!IsValid(Item)) return;
 	if (!Item->Implements<UHoldableInterface>()) return;
 
@@ -1655,6 +1745,9 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 	// Get unequip montage from item
 	UAnimMontage* UnequipMontage = IHoldableInterface::Execute_GetUnequipMontage(Item);
 
+	UE_LOG(LogTemp, Log, TEXT("UnEquipItem - UnequipMontage=%s"),
+		UnequipMontage ? *UnequipMontage->GetName() : TEXT("nullptr"));
+
 	if (UnequipMontage)
 	{
 		// Set unequipping state on item via interface (Golden Rule compliance)
@@ -1662,6 +1755,7 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 
 		// Play unequip montage on character meshes
 		// AnimNotify_UnequipFinished will call OnUnequipMontageFinished()
+		UE_LOG(LogTemp, Log, TEXT("UnEquipItem - Playing unequip montage"));
 		PlayEquipMontage(UnequipMontage, true);
 
 		// Notify item that unequip started
@@ -1670,6 +1764,7 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 	else
 	{
 		// No montage - immediate holster
+		UE_LOG(LogTemp, Log, TEXT("UnEquipItem - No montage, immediate holster"));
 		HolsterItem(Item);
 		IHoldableInterface::Execute_OnUnequipped(Item);
 		UnequippingItem = nullptr;
@@ -1686,36 +1781,22 @@ void AFPSCharacter::UnEquipItem(AActor* Item)
 
 void AFPSCharacter::HolsterItem(AActor* Item)
 {
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] HolsterItem START - Item=%s, Location=%s, Frame=%lld"),
+		Item ? *Item->GetName() : TEXT("nullptr"),
+		Item ? *Item->GetActorLocation().ToString() : TEXT("N/A"),
+		GFrameCounter);
+
 	if (!IsValid(Item)) return;
 	if (!Item->Implements<UHoldableInterface>()) return;
 
 	// ============================================
-	// PHYSICAL HOLSTER (runs on ALL machines)
-	// Move item from weapon_r to spine_03 (holster) and hide
+	// HOLSTER: Only hide item, keep it attached to socket
+	// Item stays on CharacterAttachSocket (e.g. weapon_r)
+	// This avoids socket position issues during weapon switch
 	// ============================================
 
-	// Hide item
 	Item->SetActorHiddenInGame(true);
-
-	// Detach from weapon_r and attach to spine_03 (holster position)
-	static const FName HolsterSocket = TEXT("spine_03");
-
-	Item->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, HolsterSocket);
-	Item->SetActorRelativeTransform(FTransform::Identity);
-
-	// Also move TPS mesh to holster
-	if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
-	{
-		TPSMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, HolsterSocket);
-		TPSMesh->SetRelativeTransform(FTransform::Identity);
-	}
-
-	// Detach FPS mesh from Arms (will be reattached on equip)
-	if (UPrimitiveComponent* FPSMesh = IHoldableInterface::Execute_GetFPSMeshComponent(Item))
-	{
-		FPSMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, HolsterSocket);
-		FPSMesh->SetRelativeTransform(FTransform::Identity);
-	}
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] HolsterItem - Item HIDDEN (stays attached to socket), Frame=%lld"), GFrameCounter);
 
 	// ============================================
 	// LOGICAL CLEANUP (animations, HUD)
@@ -1741,13 +1822,20 @@ void AFPSCharacter::HolsterItem(AActor* Item)
 			HipBreathingScale = 1.0f;
 		}
 	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] HolsterItem END, Frame=%lld"), GFrameCounter);
 }
 
 void AFPSCharacter::OnUnequipMontageFinished_Implementation()
 {
+	UE_LOG(LogTemp, Log, TEXT("OnUnequipMontageFinished - UnequippingItem=%s, PendingEquipItem=%s"),
+		UnequippingItem ? *UnequippingItem->GetName() : TEXT("nullptr"),
+		PendingEquipItem ? *PendingEquipItem->GetName() : TEXT("nullptr"));
+
 	// Holster the item that was being unequipped
 	if (UnequippingItem)
 	{
+		UE_LOG(LogTemp, Log, TEXT("OnUnequipMontageFinished - Holstering UnequippingItem"));
 		// Clear unequipping state on item via interface
 		if (UnequippingItem->Implements<UHoldableInterface>())
 		{
@@ -1764,20 +1852,37 @@ void AFPSCharacter::OnUnequipMontageFinished_Implementation()
 	// If we have a pending item to equip (weapon switch), equip it now
 	if (PendingEquipItem)
 	{
+		UE_LOG(LogTemp, Log, TEXT("OnUnequipMontageFinished - Equipping PendingEquipItem"));
 		AActor* ItemToEquip = PendingEquipItem;
 		PendingEquipItem = nullptr;
+
+		// NOW update ActiveItem (SERVER: triggers OnRep on clients)
+		// This is the correct time to change ActiveItem - after unequip montage completes
+		// During unequip montage, ActiveItem was still the OLD item for AnimNotify access
+		if (HasAuthority())
+		{
+			UE_LOG(LogTemp, Log, TEXT("OnUnequipMontageFinished - Server setting ActiveItem=%s"), *ItemToEquip->GetName());
+			ActiveItem = ItemToEquip;
+		}
+
 		EquipItem(ItemToEquip);
 	}
+
+	UE_LOG(LogTemp, Log, TEXT("OnUnequipMontageFinished - DONE"));
 }
 
 void AFPSCharacter::PlayEquipMontage(UAnimMontage* Montage, bool bBindEndDelegate)
 {
 	if (!Montage) return;
 
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] PlayEquipMontage START - Montage=%s, Frame=%lld"),
+		*Montage->GetName(), GFrameCounter);
+
 	// Play on Body mesh (with optional end delegate for fallback)
 	if (GetMesh() && GetMesh()->GetAnimInstance())
 	{
 		GetMesh()->GetAnimInstance()->Montage_Play(Montage);
+		UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] PlayEquipMontage - Body montage started"));
 
 		if (bBindEndDelegate)
 		{
@@ -1791,6 +1896,7 @@ void AFPSCharacter::PlayEquipMontage(UAnimMontage* Montage, bool bBindEndDelegat
 	if (Arms && Arms->GetAnimInstance())
 	{
 		Arms->GetAnimInstance()->Montage_Play(Montage);
+		UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] PlayEquipMontage - Arms montage started"));
 	}
 
 	// Play on Legs mesh
@@ -1798,6 +1904,8 @@ void AFPSCharacter::PlayEquipMontage(UAnimMontage* Montage, bool bBindEndDelegat
 	{
 		Legs->GetAnimInstance()->Montage_Play(Montage);
 	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] PlayEquipMontage END - Frame=%lld"), GFrameCounter);
 }
 
 void AFPSCharacter::OnEquipMontageEnded(UAnimMontage* Montage, bool bInterrupted)
@@ -1825,42 +1933,42 @@ void AFPSCharacter::OnUnequipMontageEnded(UAnimMontage* Montage, bool bInterrupt
 
 void AFPSCharacter::EquipItem(AActor* Item)
 {
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem START - Item=%s, Location=%s, Frame=%lld, IsHidden=%s"),
+		Item ? *Item->GetName() : TEXT("nullptr"),
+		Item ? *Item->GetActorLocation().ToString() : TEXT("N/A"),
+		GFrameCounter,
+		Item ? (Item->IsHidden() ? TEXT("true") : TEXT("false")) : TEXT("N/A"));
+
 	if (!IsValid(Item)) return;
 	if (!Item->Implements<UHoldableInterface>()) return;
 
-	// If item is in world state (physics/visible), perform physical pickup first
+	// ============================================
+	// PHYSICAL EQUIP
+	// Item is already attached to socket from PerformPickup
+	// Only need to attach if item is in world state (physics/dropped)
+	// ============================================
+
 	if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
 	{
-		bool bItemInWorldState = TPSMesh->IsSimulatingPhysics() || !Item->IsHidden();
+		// Check if item is in world state (dropped/physics) - needs full attachment
+		bool bItemInWorldState = TPSMesh->IsSimulatingPhysics();
+
 		if (bItemInWorldState)
 		{
+			UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem - Item in world state, calling PerformPickup"));
 			PerformPickup(Item);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem - Item already attached to socket, skipping attachment"));
 		}
 	}
 
-	// ============================================
-	// PHYSICAL EQUIP - Attach to weapon socket
-	// ============================================
-
-	FName AttachSocket = IHoldableInterface::Execute_GetAttachSocket(Item);
-
-	Item->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
-	Item->SetActorRelativeTransform(FTransform::Identity);
-
-	if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
-	{
-		TPSMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
-		TPSMesh->SetRelativeTransform(FTransform::Identity);
-	}
-
-	if (UPrimitiveComponent* FPSMesh = IHoldableInterface::Execute_GetFPSMeshComponent(Item))
-	{
-		FPSMesh->AttachToComponent(Arms, FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
-		FPSMesh->SetRelativeTransform(FTransform::Identity);
-	}
-
-	// Show item
+	// Show item - it's already on correct socket from PerformPickup or previous equip
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem - SHOWING ITEM, Location=%s, Frame=%lld"),
+		*Item->GetActorLocation().ToString(), GFrameCounter);
 	Item->SetActorHiddenInGame(false);
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem - ITEM NOW VISIBLE, Frame=%lld"), GFrameCounter);
 
 	// ============================================
 	// ANIMATION LAYER & LOCAL SETUP
@@ -1898,15 +2006,22 @@ void AFPSCharacter::EquipItem(AActor* Item)
 
 	UAnimMontage* EquipMontage = IHoldableInterface::Execute_GetEquipMontage(Item);
 
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem - EquipMontage=%s, Frame=%lld"),
+		EquipMontage ? *EquipMontage->GetName() : TEXT("nullptr"), GFrameCounter);
+
 	if (EquipMontage)
 	{
 		// Set equipping state on item via interface (Golden Rule compliance)
 		// May already be true from weapon switch, but set anyway for direct equip case
 		IHoldableInterface::Execute_SetEquippingState(Item, true);
 
+		UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem - CALLING PlayEquipMontage, Frame=%lld"), GFrameCounter);
+
 		// Play equip montage on character meshes
 		// AnimNotify_EquipReady will call OnEquipMontageComplete on item
 		PlayEquipMontage(EquipMontage, false);
+
+		UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem - PlayEquipMontage RETURNED, Frame=%lld"), GFrameCounter);
 
 		// Bind end delegate as fallback for equip
 		if (GetMesh() && GetMesh()->GetAnimInstance())
@@ -1918,6 +2033,7 @@ void AFPSCharacter::EquipItem(AActor* Item)
 	}
 	else
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem - NO EQUIP MONTAGE, item ready immediately"));
 		// No equip montage - item ready immediately
 		// Clear equipping state (may have been set during weapon switch)
 		IHoldableInterface::Execute_SetEquippingState(Item, false);
@@ -1925,6 +2041,8 @@ void AFPSCharacter::EquipItem(AActor* Item)
 
 	// Notify item that it's being equipped
 	IHoldableInterface::Execute_OnEquipped(Item, this);
+
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem END - Frame=%lld"), GFrameCounter);
 }
 
 
@@ -1939,17 +2057,26 @@ void AFPSCharacter::OnInventoryItemAdded(AActor* Item)
 		return;
 	}
 
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] OnInventoryItemAdded START (SERVER) - Item=%s, ItemCount=%d, Frame=%lld"),
+		Item ? *Item->GetName() : TEXT("nullptr"),
+		InventoryComp ? InventoryComp->GetItemCount() : -1,
+		GFrameCounter);
+
 	Item->SetOwner(this);
+
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] OnInventoryItemAdded - Calling Multicast_PickupItem, Frame=%lld"), GFrameCounter);
 	Multicast_PickupItem(Item);
 
 	// Auto-equip if first item
 	if (InventoryComp->GetItemCount() == 1)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] OnInventoryItemAdded - First item, setting ActiveItem (will trigger OnRep on clients), Frame=%lld"), GFrameCounter);
 		ActiveItem = Item;  // Replicated property change (triggers OnRep on clients)
 
 		// Server executes equip immediately (OnRep pattern)
 		if (HasAuthority() && ActiveItem)
 		{
+			UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] OnInventoryItemAdded - Server calling EquipItem, Frame=%lld"), GFrameCounter);
 			EquipItem(ActiveItem);
 		}
 	}
@@ -1964,45 +2091,66 @@ void AFPSCharacter::OnInventoryItemAdded(AActor* Item)
 
 		IPickupableInterface::Execute_OnPicked(Item, this, Ctx);
 	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] OnInventoryItemAdded END (SERVER), Frame=%lld"), GFrameCounter);
 }
 
 void AFPSCharacter::Multicast_PickupItem_Implementation(AActor* Item)
 {
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] Multicast_PickupItem - Item=%s, Frame=%lld"),
+		Item ? *Item->GetName() : TEXT("nullptr"), GFrameCounter);
 	PerformPickup(Item);
 }
 
 void AFPSCharacter::PerformPickup(AActor* Item)
 {
-	// Physical pickup: Disable physics, attach to body, hide
+	// Physical pickup: Disable physics, attach to character socket, hide
 	// Runs on ALL machines via Multicast RPC
-	// Logical operations (animation, hands) handled by EquipItem()
+	// Item attaches to its CharacterAttachSocket (e.g. weapon_r) and stays there
+	// Equip/Unequip only changes visibility, no reattachment needed
+
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] PerformPickup START - Item=%s, IsHidden=%s, Location=%s, Frame=%lld"),
+		Item ? *Item->GetName() : TEXT("nullptr"),
+		Item ? (Item->IsHidden() ? TEXT("true") : TEXT("false")) : TEXT("N/A"),
+		Item ? *Item->GetActorLocation().ToString() : TEXT("N/A"),
+		GFrameCounter);
 
 	if (!IsValid(Item)) return;
+	if (!Item->Implements<UHoldableInterface>()) return;
+
+	// Get attachment socket from item
+	FName AttachSocket = IHoldableInterface::Execute_GetAttachSocket(Item);
 
 	// Disable physics BEFORE attaching (prevents warning)
-	if (Item->Implements<UHoldableInterface>())
+	if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
 	{
-		if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
-		{
-			TPSMesh->SetSimulatePhysics(false);
-			TPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			TPSMesh->SetRelativeTransform(FTransform::Identity);
-		}
-
-		if (UPrimitiveComponent* FPSMesh = IHoldableInterface::Execute_GetFPSMeshComponent(Item))
-		{
-			FPSMesh->SetRelativeTransform(FTransform::Identity);
-		}
+		TPSMesh->SetSimulatePhysics(false);
+		TPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 
-	FAttachmentTransformRules AttachRules(
-		EAttachmentRule::SnapToTarget,
-		EAttachmentRule::SnapToTarget,
-		EAttachmentRule::KeepWorld,
-		false
-	);
-	Item->AttachToComponent(GetMesh(), AttachRules);
+	// Attach Actor and TPSMesh to Body mesh socket
+	Item->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
+	Item->SetActorRelativeTransform(FTransform::Identity);
+
+	if (UPrimitiveComponent* TPSMesh = IHoldableInterface::Execute_GetTPSMeshComponent(Item))
+	{
+		TPSMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
+		TPSMesh->SetRelativeTransform(FTransform::Identity);
+	}
+
+	// Attach FPSMesh to Arms mesh socket
+	if (UPrimitiveComponent* FPSMesh = IHoldableInterface::Execute_GetFPSMeshComponent(Item))
+	{
+		FPSMesh->AttachToComponent(Arms, FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
+		FPSMesh->SetRelativeTransform(FTransform::Identity);
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] PerformPickup - Attached to socket %s, Location=%s"),
+		*AttachSocket.ToString(), *Item->GetActorLocation().ToString());
+
+	// Hide item - will be shown when equipped
 	Item->SetActorHiddenInGame(true);
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] PerformPickup END - Item HIDDEN, Frame=%lld"), GFrameCounter);
 }
 
 void AFPSCharacter::OnInventoryItemRemoved(AActor* Item)
