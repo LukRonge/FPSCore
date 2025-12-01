@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Interfaces/InteractableInterface.h"
 #include "Interfaces/HoldableInterface.h"
 #include "Interfaces/UsableInterface.h"
 #include "Interfaces/PickupableInterface.h"
@@ -41,6 +42,7 @@
  */
 UCLASS(Abstract, Blueprintable)
 class FPSCORE_API ABaseGrenade : public AActor,
+	public IInteractableInterface,
 	public IHoldableInterface,
 	public IUsableInterface,
 	public IPickupableInterface,
@@ -289,4 +291,13 @@ public:
 	virtual bool CanBePicked_Implementation(const FInteractionContext& Ctx) const override;
 	virtual void OnPicked_Implementation(APawn* Picker, const FInteractionContext& Ctx) override;
 	virtual void OnDropped_Implementation(const FInteractionContext& Ctx) override;
+
+	// ============================================
+	// IInteractableInterface Implementation
+	// ============================================
+
+	virtual void GetVerbs_Implementation(TArray<FGameplayTag>& OutVerbs, const FInteractionContext& Ctx) const override;
+	virtual bool CanInteract_Implementation(FGameplayTag Verb, const FInteractionContext& Ctx) const override;
+	virtual void Interact_Implementation(FGameplayTag Verb, const FInteractionContext& Ctx) override;
+	virtual FText GetInteractionText_Implementation(FGameplayTag Verb, const FInteractionContext& Ctx) const override;
 };

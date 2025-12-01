@@ -26,12 +26,15 @@ void UAnimNotify_ItemUnequipStart::Notify(
 		}
 	}
 
-	// Navigate to active item via interface
+	// Navigate to unequipping item via interface
+	// NOTE: Use GetUnequippingItem, NOT GetActiveItem!
+	// During weapon switch, ActiveItem may already be set to the NEW weapon,
+	// but we need to trigger collapse animation on the OLD weapon being unequipped.
 	if (!Owner->Implements<UItemCollectorInterface>()) return;
 
-	AActor* ActiveItem = IItemCollectorInterface::Execute_GetActiveItem(Owner);
-	if (!ActiveItem) return;
-	if (!ActiveItem->Implements<UHoldableInterface>()) return;
+	AActor* UnequippingItem = IItemCollectorInterface::Execute_GetUnequippingItem(Owner);
+	if (!UnequippingItem) return;
+	if (!UnequippingItem->Implements<UHoldableInterface>()) return;
 
 	// On Listen Server, both Authority and SimulatedProxy items exist
 	// Only trigger on Authority item to avoid double-fire
@@ -39,12 +42,12 @@ void UAnimNotify_ItemUnequipStart::Notify(
 	if (OwnerPawn && OwnerPawn->IsLocallyControlled())
 	{
 		// Local player: use Authority item only
-		if (ActiveItem->GetLocalRole() == ROLE_SimulatedProxy)
+		if (UnequippingItem->GetLocalRole() == ROLE_SimulatedProxy)
 		{
 			return;
 		}
 	}
 
 	// Trigger item's own unequip/collapse animation
-	IHoldableInterface::Execute_OnItemUnequipAnimationStart(ActiveItem, OwnerPawn);
+	IHoldableInterface::Execute_OnItemUnequipAnimationStart(UnequippingItem, OwnerPawn);
 }

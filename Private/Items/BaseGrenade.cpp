@@ -3,6 +3,9 @@
 #include "Items/BaseGrenade.h"
 #include "Interfaces/ViewPointProviderInterface.h"
 #include "Interfaces/ProjectileInterface.h"
+#include "Interfaces/ItemCollectorInterface.h"
+#include "Interfaces/CharacterMeshProviderInterface.h"
+#include "Core/FPSGameplayTags.h"
 #include "Net/UnrealNetwork.h"
 
 ABaseGrenade::ABaseGrenade()
@@ -33,7 +36,10 @@ ABaseGrenade::ABaseGrenade()
 	TPSMesh->SetOwnerNoSee(true);
 	TPSMesh->SetCastShadow(true);
 	TPSMesh->bReceivesDecals = true;
-	TPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	TPSMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	TPSMesh->SetSimulatePhysics(true);
+	TPSMesh->SetIsReplicated(true);
+	TPSMesh->bReplicatePhysicsToAutonomousProxy = true;
 }
 
 void ABaseGrenade::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -149,14 +155,19 @@ bool ABaseGrenade::CanUse_Implementation(const FUseContext& Ctx) const
 
 void ABaseGrenade::UseStart_Implementation(const FUseContext& Ctx)
 {
+	UE_LOG(LogTemp, Log, TEXT("ABaseGrenade::UseStart - bHasThrown=%d, bIsThrowing=%d"), bHasThrown, bIsThrowing);
+
 	// Validate state
 	if (bHasThrown || bIsThrowing)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("ABaseGrenade::UseStart - Already thrown or throwing, aborting"));
 		return;
 	}
 
 	// Mark as throwing
 	bIsThrowing = true;
+
+	UE_LOG(LogTemp, Log, TEXT("ABaseGrenade::UseStart - Calling Multicast_PlayThrowEffects"));
 
 	// Play throw animation on all clients
 	Multicast_PlayThrowEffects();
@@ -198,6 +209,9 @@ void ABaseGrenade::OnDropped_Implementation(const FInteractionContext& Ctx)
 
 void ABaseGrenade::OnThrowRelease_Implementation()
 {
+	UE_LOG(LogTemp, Log, TEXT("ABaseGrenade::OnThrowRelease - Called, OwningPawn=%s, bHasThrown=%d"),
+		OwningPawn ? *OwningPawn->GetName() : TEXT("NULL"), bHasThrown);
+
 	// Called from AnimNotify_ThrowRelease via IThrowableInterface
 	if (!OwningPawn)
 	{
@@ -216,12 +230,15 @@ void ABaseGrenade::OnThrowRelease_Implementation()
 	if (FPSMesh && FPSMesh->DoesSocketExist(ProjectileSpawnSocket))
 	{
 		SpawnLocation = FPSMesh->GetSocketLocation(ProjectileSpawnSocket);
+		UE_LOG(LogTemp, Log, TEXT("ABaseGrenade::OnThrowRelease - SpawnLocation from socket %s: %s"),
+			*ProjectileSpawnSocket.ToString(), *SpawnLocation.ToString());
 	}
 	else
 	{
 		// Fallback to actor location
 		SpawnLocation = GetActorLocation();
-		UE_LOG(LogTemp, Warning, TEXT("ABaseGrenade::OnThrowRelease - Socket %s not found, using actor location"), *ProjectileSpawnSocket.ToString());
+		UE_LOG(LogTemp, Warning, TEXT("ABaseGrenade::OnThrowRelease - Socket %s not found, using actor location: %s"),
+			*ProjectileSpawnSocket.ToString(), *SpawnLocation.ToString());
 	}
 
 	// Get throw direction from camera via IViewPointProviderInterface
@@ -232,13 +249,17 @@ void ABaseGrenade::OnThrowRelease_Implementation()
 		FRotator CameraRotation;
 		IViewPointProviderInterface::Execute_GetShootingViewPoint(OwningPawn, CameraLocation, CameraRotation);
 		ThrowDirection = CameraRotation.Vector();
+		UE_LOG(LogTemp, Log, TEXT("ABaseGrenade::OnThrowRelease - ThrowDirection from camera: %s"), *ThrowDirection.ToString());
 	}
 	else
 	{
 		// Fallback to pawn forward
 		ThrowDirection = OwningPawn->GetActorForwardVector();
-		UE_LOG(LogTemp, Warning, TEXT("ABaseGrenade::OnThrowRelease - Pawn doesn't implement ViewPointProviderInterface"));
+		UE_LOG(LogTemp, Warning, TEXT("ABaseGrenade::OnThrowRelease - Pawn doesn't implement ViewPointProviderInterface, using forward: %s"),
+			*ThrowDirection.ToString());
 	}
+
+	UE_LOG(LogTemp, Log, TEXT("ABaseGrenade::OnThrowRelease - Calling Server_ExecuteThrow"));
 
 	// Request server to execute throw
 	Server_ExecuteThrow(SpawnLocation, ThrowDirection);
@@ -263,9 +284,13 @@ bool ABaseGrenade::CanThrow_Implementation() const
 
 void ABaseGrenade::Server_ExecuteThrow_Implementation(FVector SpawnLocation, FVector ThrowDirection)
 {
+	UE_LOG(LogTemp, Log, TEXT("ABaseGrenade::Server_ExecuteThrow - SpawnLocation=%s, ThrowDirection=%s, HasAuthority=%d"),
+		*SpawnLocation.ToString(), *ThrowDirection.ToString(), HasAuthority());
+
 	// SERVER ONLY
 	if (!HasAuthority())
 	{
+		UE_LOG(LogTemp, Warning, TEXT("ABaseGrenade::Server_ExecuteThrow - Not authority, aborting"));
 		return;
 	}
 
@@ -276,6 +301,9 @@ void ABaseGrenade::Server_ExecuteThrow_Implementation(FVector SpawnLocation, FVe
 		return;
 	}
 
+	UE_LOG(LogTemp, Log, TEXT("ABaseGrenade::Server_ExecuteThrow - Calling SpawnProjectile, ProjectileClass=%s"),
+		ProjectileClass ? *ProjectileClass->GetName() : TEXT("NULL"));
+
 	// Spawn projectile via interface
 	AActor* Projectile = SpawnProjectile(SpawnLocation, ThrowDirection);
 
@@ -284,7 +312,7 @@ void ABaseGrenade::Server_ExecuteThrow_Implementation(FVector SpawnLocation, FVe
 		// Set replicated state - triggers OnRep on clients
 		bHasThrown = true;
 
-		UE_LOG(LogTemp, Log, TEXT("ABaseGrenade::Server_ExecuteThrow - Projectile spawned successfully"));
+		UE_LOG(LogTemp, Log, TEXT("ABaseGrenade::Server_ExecuteThrow - Projectile spawned: %s, destroying grenade"), *Projectile->GetName());
 
 		// Destroy grenade actor after successful throw (server handles replication)
 		Destroy();
@@ -343,14 +371,56 @@ AActor* ABaseGrenade::SpawnProjectile(FVector SpawnLocation, FVector ThrowDirect
 
 void ABaseGrenade::Multicast_PlayThrowEffects_Implementation()
 {
-	// Play throw montage on owning character
-	// The character's animation system will handle montage playback
-	// This is just to sync the throw state across clients
+	UE_LOG(LogTemp, Log, TEXT("ABaseGrenade::Multicast_PlayThrowEffects - OwningPawn=%s, ThrowMontage=%s"),
+		OwningPawn ? *OwningPawn->GetName() : TEXT("NULL"),
+		ThrowMontage ? *ThrowMontage->GetName() : TEXT("NULL"));
 
 	bIsThrowing = true;
 
-	// Note: Actual montage playback is handled by the character's equip system
-	// The ThrowMontage is played via the character mesh animation instance
+	// Play throw montage on character meshes via ICharacterMeshProviderInterface
+	if (!OwningPawn)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ABaseGrenade::Multicast_PlayThrowEffects - No OwningPawn"));
+		return;
+	}
+
+	if (!ThrowMontage)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ABaseGrenade::Multicast_PlayThrowEffects - No ThrowMontage set"));
+		return;
+	}
+
+	if (!OwningPawn->Implements<UCharacterMeshProviderInterface>())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ABaseGrenade::Multicast_PlayThrowEffects - Pawn doesn't implement CharacterMeshProviderInterface"));
+		return;
+	}
+
+	// Get character meshes
+	USkeletalMeshComponent* ArmsMesh = ICharacterMeshProviderInterface::Execute_GetArmsMesh(OwningPawn);
+	USkeletalMeshComponent* BodyMesh = ICharacterMeshProviderInterface::Execute_GetBodyMesh(OwningPawn);
+	USkeletalMeshComponent* LegsMesh = ICharacterMeshProviderInterface::Execute_GetLegsMesh(OwningPawn);
+
+	// Play montage on Arms
+	if (ArmsMesh && ArmsMesh->GetAnimInstance())
+	{
+		ArmsMesh->GetAnimInstance()->Montage_Play(ThrowMontage);
+		UE_LOG(LogTemp, Log, TEXT("ABaseGrenade::Multicast_PlayThrowEffects - Playing on Arms"));
+	}
+
+	// Play montage on Body
+	if (BodyMesh && BodyMesh->GetAnimInstance())
+	{
+		BodyMesh->GetAnimInstance()->Montage_Play(ThrowMontage);
+		UE_LOG(LogTemp, Log, TEXT("ABaseGrenade::Multicast_PlayThrowEffects - Playing on Body"));
+	}
+
+	// Play montage on Legs
+	if (LegsMesh && LegsMesh->GetAnimInstance())
+	{
+		LegsMesh->GetAnimInstance()->Montage_Play(ThrowMontage);
+		UE_LOG(LogTemp, Log, TEXT("ABaseGrenade::Multicast_PlayThrowEffects - Playing on Legs"));
+	}
 }
 
 // ============================================
@@ -407,4 +477,42 @@ void ABaseGrenade::ResetVisibilityForWorld()
 
 	// Reset flag so visibility will be reapplied on next pickup
 	bVisibilityInitialized = false;
+}
+
+// ============================================
+// IInteractableInterface Implementation
+// ============================================
+
+void ABaseGrenade::GetVerbs_Implementation(TArray<FGameplayTag>& OutVerbs, const FInteractionContext& Ctx) const
+{
+	OutVerbs.Add(FPSGameplayTags::Interact_Pickup);
+}
+
+bool ABaseGrenade::CanInteract_Implementation(FGameplayTag Verb, const FInteractionContext& Ctx) const
+{
+	if (Verb == FPSGameplayTags::Interact_Pickup)
+	{
+		return GetOwner() == nullptr && !bHasThrown;
+	}
+	return false;
+}
+
+void ABaseGrenade::Interact_Implementation(FGameplayTag Verb, const FInteractionContext& Ctx)
+{
+	if (Verb == FPSGameplayTags::Interact_Pickup && IPickupableInterface::Execute_CanBePicked(this, Ctx))
+	{
+		if (GetOwner() == nullptr && Ctx.Pawn && Ctx.Pawn->Implements<UItemCollectorInterface>())
+		{
+			IItemCollectorInterface::Execute_Pickup(Ctx.Pawn, this);
+		}
+	}
+}
+
+FText ABaseGrenade::GetInteractionText_Implementation(FGameplayTag Verb, const FInteractionContext& Ctx) const
+{
+	if (Verb == FPSGameplayTags::Interact_Pickup)
+	{
+		return FText::Format(FText::FromString("Pickup {0}"), Name);
+	}
+	return FText::GetEmpty();
 }
