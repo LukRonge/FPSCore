@@ -83,7 +83,7 @@ public:
 	FName GetReloadAttachSocket() const;
 	virtual FName GetReloadAttachSocket_Implementation() const { return FName("weapon_r"); }
 
-	// Get animation layer class for this item (weapon-specific animations)
+	// Get animation layer class for this item (item-specific animations)
 	// Linked to Body, Legs, and Arms meshes when item is equipped
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
 	TSubclassOf<UAnimInstance> GetAnimLayer() const;
@@ -111,7 +111,7 @@ public:
 	virtual void SetAiming_Implementation(bool bAiming) { }
 
 	// Get current aiming state
-	// Used by FireComponent to check if weapon is in ADS
+	// Used by FireComponent to check if item is in ADS
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
 	bool GetIsAiming() const;
 	virtual bool GetIsAiming_Implementation() const { return false; }
@@ -221,4 +221,60 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
 	void OnUnequipMontageComplete(APawn* Owner);
 	virtual void OnUnequipMontageComplete_Implementation(APawn* Owner) { }
+
+	// ============================================
+	// ITEM-SPECIFIC EQUIP ANIMATION
+	// ============================================
+
+	/**
+	 * Called from AnimNotify during character equip montage to trigger item's own equip animation
+	 *
+	 * Used for items that have their own equip animation that must play synchronized
+	 * with character's equip animation. Examples:
+	 * - M72A7 LAW: Launcher expands/unfolds during equip
+	 * - Folding stock weapons: Stock unfolds
+	 * - Multi-tools: Components extend
+	 *
+	 * DEFAULT: No-op (most items don't need separate equip animation)
+	 *
+	 * Timeline:
+	 * 1. Character starts equip montage (drawing item)
+	 * 2. AnimNotify_ItemEquipStart fires at specific frame
+	 * 3. This method is called → item plays its own montage
+	 * 4. Both animations complete together
+	 * 5. AnimNotify_EquipReady fires → item ready
+	 *
+	 * LOCAL operation - each machine plays animation independently
+	 *
+	 * @param Owner - Character that owns this item
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	void OnItemEquipAnimationStart(APawn* Owner);
+	virtual void OnItemEquipAnimationStart_Implementation(APawn* Owner) { }
+
+	/**
+	 * Called from AnimNotify during character unequip montage to trigger item's own unequip animation
+	 *
+	 * Used for items that have their own unequip animation that must play synchronized
+	 * with character's unequip animation. Examples:
+	 * - M72A7 LAW: Launcher collapses/folds during unequip
+	 * - Folding stock weapons: Stock folds
+	 * - Multi-tools: Components retract
+	 *
+	 * DEFAULT: No-op (most items don't need separate unequip animation)
+	 *
+	 * Timeline:
+	 * 1. Character starts unequip montage (holstering item)
+	 * 2. AnimNotify_ItemUnequipStart fires at specific frame
+	 * 3. This method is called → item plays its own collapse montage
+	 * 4. Both animations complete together
+	 * 5. AnimNotify_UnequipFinished fires → item holstered
+	 *
+	 * LOCAL operation - each machine plays animation independently
+	 *
+	 * @param Owner - Character that owns this item
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Holdable")
+	void OnItemUnequipAnimationStart(APawn* Owner);
+	virtual void OnItemUnequipAnimationStart_Implementation(APawn* Owner) { }
 };
