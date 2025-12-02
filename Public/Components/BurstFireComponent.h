@@ -32,17 +32,17 @@ class FPSCORE_API UBurstFireComponent : public UFireComponent
 
 public:
 	// ============================================
-	// BURST PROPERTIES
+	// DESIGNER DEFAULTS - BURST
 	// ============================================
 
 	// Number of rounds per burst
-	// Example: 3 for M16A4, 2 for AN-94 hyperburst
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Burst")
+	// M16A4: 3, AN-94 hyperburst: 2
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Burst")
 	int32 BurstCount = 3;
 
 	// Delay between shots within burst (seconds)
-	// Example: 0.1s = 600 RPM burst rate
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Burst")
+	// 0.1s = 600 RPM burst rate
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Burst")
 	float BurstDelay = 0.1f;
 
 	// ============================================
@@ -66,14 +66,14 @@ protected:
 	virtual void Fire() override;
 
 	// ============================================
-	// BURST STATE
+	// RUNTIME STATE
 	// ============================================
 
 	// Current shot within burst (0 to BurstCount-1)
-	UPROPERTY(BlueprintReadOnly, Category = "Fire|Burst")
+	UPROPERTY(BlueprintReadOnly, Category = "Fire|Runtime")
 	int32 CurrentBurstShot = 0;
 
 	// Is burst currently active?
-	UPROPERTY(BlueprintReadOnly, Category = "Fire|Burst")
+	UPROPERTY(BlueprintReadOnly, Category = "Fire|Runtime")
 	bool bBurstActive = false;
 };

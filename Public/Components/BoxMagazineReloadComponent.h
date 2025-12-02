@@ -37,24 +37,17 @@ class FPSCORE_API UBoxMagazineReloadComponent : public UReloadComponent
 
 public:
 	// ============================================
-	// CONFIGURATION
+	// DESIGNER DEFAULTS - SOCKETS
 	// ============================================
 
-	/**
-	 * Character bone for magazine attachment during reload
-	 * Default: "weapon_l" (left hand socket)
-	 * Magazine attaches here when detached from weapon
-	 * M4A1 reload: Left hand grabs magazine from weapon and holds it
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Reload|Magazine")
+	// Character socket for magazine during reload (left hand grabs magazine)
+	// Default: "weapon_l" (left hand socket)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Sockets")
 	FName MagazineOutSocketName = "weapon_l";
 
-	/**
-	 * Weapon bone for magazine attachment when equipped
-	 * Default: "magazine" (magazine socket on weapon mesh)
-	 * Magazine re-attaches here when reload completes
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Reload|Magazine")
+	// Weapon socket for magazine when equipped
+	// Default: "magazine" (magazine socket on weapon mesh)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Sockets")
 	FName MagazineInSocketName = "magazine";
 
 	// ============================================

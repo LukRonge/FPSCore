@@ -48,29 +48,22 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	// ============================================
-	// REPLICATED STATE
+	// DESIGNER DEFAULTS - ANIMATION
 	// ============================================
 
-	/**
-	 * Is reload currently in progress? (REPLICATED)
-	 * Server sets this to true when reload starts
-	 * Clients react via OnRep_IsReloading to play animations
-	 */
-	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_IsReloading, Category = "Reload")
-	bool bIsReloading = false;
-
-	// ============================================
-	// CONFIGURATION
-	// ============================================
-
-	/**
-	 * Reload animation montage (shared by Body, Arms, Legs)
-	 * IMPORTANT: Reload montages use slot "DefaultGroup.UpperBody"
-	 * This same montage will be played on all three character meshes
-	 * Set this in Blueprint for specific weapon types
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Reload|Animation")
+	// Reload animation montage (shared by Body, Arms, Legs)
+	// Uses slot "DefaultGroup.UpperBody"
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Animation")
 	UAnimMontage* ReloadMontage = nullptr;
+
+	// ============================================
+	// RUNTIME STATE (REPLICATED)
+	// ============================================
+
+	// Is reload currently in progress? (REPLICATED)
+	// Server sets true when reload starts, clients react via OnRep
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_IsReloading, Category = "Reload|Runtime")
+	bool bIsReloading = false;
 
 	// ============================================
 	// PUBLIC API (Called by BaseWeapon via IReloadableInterface)

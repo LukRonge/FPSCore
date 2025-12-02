@@ -38,23 +38,18 @@ public:
 	UShotgunBallisticsComponent();
 
 	// ============================================
-	// SHOTGUN CONFIGURATION
+	// DESIGNER DEFAULTS - SHOTGUN
 	// ============================================
 
-	/**
-	 * Number of pellets per shot
-	 * Default: 9 (standard 00 buckshot)
-	 * Each pellet performs independent line trace and damage
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Shotgun", meta = (ClampMin = "1", ClampMax = "20"))
+	// Number of pellets per shot
+	// 00 Buckshot: 9, #4 Buckshot: 27, Slug: 1
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Shotgun", meta = (ClampMin = "1", ClampMax = "20"))
 	int32 PelletCount = 9;
 
-	/**
-	 * Pellet spread cone angle in degrees
-	 * Each pellet is randomly distributed within this cone
-	 * Default: 5.0 degrees (realistic shotgun spread at close range)
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Shotgun", meta = (ClampMin = "0.0", ClampMax = "30.0"))
+	// Pellet spread cone angle (degrees)
+	// Each pellet randomly distributed within this cone
+	// Close range: 5.0, Wide spread: 10.0+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Shotgun", meta = (ClampMin = "0.0", ClampMax = "30.0"))
 	float PelletSpreadAngle = 5.0f;
 
 	// ============================================

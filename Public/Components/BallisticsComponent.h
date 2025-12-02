@@ -49,21 +49,25 @@ protected:
 
 public:
 	// ============================================
-	// CALIBER DATA (Ballistic properties only)
+	// DESIGNER DEFAULTS - CALIBER DATA
 	// ============================================
 
 	// Ammo type data asset (contains ballistic properties, damage, effects)
-	// This defines: Mass, Velocity, Drag, Penetration, Damage, Impact VFX
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Ballistics")
+	// Defines: Mass, Velocity, Drag, Penetration, Damage, Impact VFX
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Caliber")
 	TSoftObjectPtr<UAmmoTypeDataAsset> CaliberDataAsset;
 
-	// Hash map of caliber types to ammo data assets (read-only lookup)
+	// Hash map of caliber types to ammo data assets
 	// Allows quick lookup of ammo properties by caliber type
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ballistics")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Caliber")
 	TMap<EAmmoCaliberType, TSoftObjectPtr<UAmmoTypeDataAsset>> CaliberDataMap;
 
+	// ============================================
+	// RUNTIME STATE
+	// ============================================
+
 	// Currently active ammo type (set via InitAmmoType)
-	UPROPERTY(BlueprintReadOnly, Category = "Ballistics")
+	UPROPERTY(BlueprintReadOnly, Category = "Ballistics|Runtime")
 	UAmmoTypeDataAsset* CurrentAmmoType;
 
 	// ============================================

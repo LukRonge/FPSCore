@@ -55,23 +55,39 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	// ============================================
-	// PUMP-ACTION STATE (Replicated)
+	// DESIGNER DEFAULTS - FIRE MODE
 	// ============================================
 
-	/**
-	 * Is pump currently being cycled? (REPLICATED)
-	 * True from shot fired until pump-action montage completes
-	 * Blocks firing when true
-	 */
-	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_IsPumping, Category = "PumpAction|State")
+	// Enable full-auto trigger mode
+	// false = one shot per trigger pull (traditional pump-action)
+	// true = continuous fire while trigger held (fires as fast as pump cycles)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Fire")
+	bool bFullAutoTrigger = false;
+
+	// ============================================
+	// DESIGNER DEFAULTS - ANIMATION
+	// ============================================
+
+	// Pump-action montage for character (Body/Arms/Legs)
+	// Played after each shot
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Animation")
+	UAnimMontage* PumpActionMontage = nullptr;
+
+	// Pump-action montage for weapon mesh (FPS + TPS)
+	// Shows pump handle movement, shell ejection
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Animation")
+	UAnimMontage* WeaponPumpActionMontage = nullptr;
+
+	// ============================================
+	// RUNTIME STATE (REPLICATED)
+	// ============================================
+
+	// Is pump currently cycling? (REPLICATED) - blocks firing
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_IsPumping, Category = "PumpAction|Runtime")
 	bool bIsPumping = false;
 
-	/**
-	 * Is chamber empty? (needs reload) (REPLICATED)
-	 * True when magazine empty and pump cycled (no round to chamber)
-	 * Reset to false after successful reload
-	 */
-	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_ChamberEmpty, Category = "PumpAction|State")
+	// Is chamber empty? (REPLICATED) - needs reload
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_ChamberEmpty, Category = "PumpAction|Runtime")
 	bool bChamberEmpty = false;
 
 protected:
@@ -88,39 +104,6 @@ protected:
 	void PropagateStateToAnimInstances();
 
 public:
-	// ============================================
-	// PUMP-ACTION CONFIGURATION
-	// ============================================
-
-	/**
-	 * Enable full-auto trigger mode
-	 * If true, holding trigger will fire continuously (as fast as pump cycles)
-	 * If false, one shot per trigger pull (must release and press again)
-	 * Default: false (traditional pump-action)
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "PumpAction|Config")
-	bool bFullAutoTrigger = false;
-
-	// ============================================
-	// PUMP-ACTION ANIMATION
-	// ============================================
-
-	/**
-	 * Pump-action animation montage
-	 * Played on character Body/Arms/Legs meshes after each shot
-	 * Contains AnimNotify_PumpActionStart, AnimNotify_ShellEject, AnimNotify_ChamberRound
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PumpAction|Animation")
-	UAnimMontage* PumpActionMontage = nullptr;
-
-	/**
-	 * Pump-action animation montage for weapon mesh
-	 * Played on FPSMesh and TPSMesh simultaneously with character montage
-	 * Shows pump handle movement, shell ejection, etc.
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PumpAction|Animation")
-	UAnimMontage* WeaponPumpActionMontage = nullptr;
-
 	// ============================================
 	// FIRE CONTROL OVERRIDE
 	// ============================================

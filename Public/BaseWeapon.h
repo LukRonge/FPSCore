@@ -130,131 +130,155 @@ protected:
 public:
 
 	// ============================================
-	// ITEM INFO
+	// DESIGNER DEFAULTS - WEAPON INFO
 	// ============================================
 
 	// Weapon display name
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Info")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Info")
 	FText Name;
 
 	// Weapon description
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Info", meta = (MultiLine = true))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Info", meta = (MultiLine = true))
 	FText Description;
 
 	// Additional item information
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Info", meta = (MultiLine = true))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Info", meta = (MultiLine = true))
 	FText ItemInfo;
 
 	// ============================================
-	// ANIMATION
+	// DESIGNER DEFAULTS - AIMING
 	// ============================================
 
-	// Animation layer class for weapon-specific animations
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Animation")
-	TSubclassOf<UAnimInstance> AnimLayer;
-
-	// Shooting animation montage
-	// IMPORTANT: Shoot montages use slot "DefaultGroup.Shoot"
-	// This allows shooting and reloading to coexist (Reload uses "DefaultGroup.UpperBody")
-	// Played on Body, Arms, and Legs meshes via Multicast_PlayMuzzleFlash()
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Animation")
-	UAnimMontage* ShootMontage;
-
-	// NOTE: Reload montages moved to ReloadComponent (Body/Arms/Legs separation)
-	// Configure reload animations in ReloadComponent Blueprint defaults
-
-	// ============================================
-	// EQUIP/UNEQUIP ANIMATION
-	// ============================================
-
-	// Equip animation montage (draw weapon, unfold launcher, etc.)
-	// Played on character Body/Arms/Legs meshes when weapon is equipped
-	// Item is attached to weapon_r during montage, ready to use after completion
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Animation")
-	UAnimMontage* EquipMontage;
-
-	// Unequip animation montage (holster weapon, fold launcher, etc.)
-	// Played on character Body/Arms/Legs meshes when weapon is unequipped
-	// Item is moved to spine_03 and hidden after montage completion
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Animation")
-	UAnimMontage* UnequipMontage;
-
-	// Current equipping state (montage playing)
-	// NOT replicated - visual state only, derived from montage playback
-	UPROPERTY(BlueprintReadOnly, Category = "Weapon|State")
-	bool bIsEquipping = false;
-
-	// Current unequipping state (montage playing)
-	// NOT replicated - visual state only, derived from montage playback
-	UPROPERTY(BlueprintReadOnly, Category = "Weapon|State")
-	bool bIsUnequipping = false;
-
-	// ============================================
-	// HANDS / IK
-	// ============================================
-
-	// Arms offset for weapon holding (location correction)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Arms")
-	FVector ArmsOffset = FVector::ZeroVector;
-
-	// ============================================
-	// SHOOTING
-	// ============================================
-	// NOTE: FireRate, Spread, RecoilScale, and AcceptedCaliberType are now in BallisticsComponent
-	// Configure these properties in Blueprint defaults of BallisticsComponent
-
-	// ============================================
-	// BREATHING / SWAY
-	// ============================================
-
-	// Breathing sway intensity (hip-fire idle)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Breathing")
-	float BreathingScale = 1.0f;
-
-	// ============================================
-	// AIMING
-	// ============================================
-
-	// Field of view when aiming
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Aiming")
+	// Field of view when aiming (degrees)
+	// Rifle: 50, Pistol: 60, Shotgun: 55, Sniper: 30, Launcher: 55
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Aiming")
 	float AimFOV = 50.0f;
 
-	// Look sensitivity multiplier when aiming
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Aiming")
+	// Look sensitivity multiplier when aiming (1.0 = normal, lower = slower)
+	// Rifle: 0.5, Pistol: 0.7, Shotgun: 0.6, Sniper: 0.3
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Aiming")
 	float AimLookSpeed = 0.5f;
 
 	// Leaning scale multiplier when holding this weapon (1.0 = normal scale)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Movement")
+	// Rifle: 1.0, Pistol: 0.8, Sniper: 0.5
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Aiming")
 	float LeaningScale = 1.0f;
 
-	// Is player currently aiming (runtime state, NOT replicated)
-	UPROPERTY(BlueprintReadWrite, Category = "Weapon|Aiming")
-	bool IsAiming = false;
+	// Breathing sway intensity (hip-fire idle)
+	// Rifle: 1.0, Pistol: 0.6, Sniper: 1.5, Launcher: 1.2
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Aiming")
+	float BreathingScale = 1.0f;
 
 	// Default aiming point for camera positioning when aiming
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Aiming")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Aiming")
 	FVector DefaultAimPoint = FVector::ZeroVector;
 
 	// Default sight class (iron sights, red dot, scope, etc.)
-	// Set in Blueprint Class Defaults
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Aiming")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Aiming")
 	TSubclassOf<ABaseSight> DefaultSightClass;
 
-	// Current attached sight actor reference (REPLICATED)
-	// SERVER: Set in InitSightComponents() after child actor creation
-	// CLIENT: Receives via replication, OnRep handles attachment
-	UPROPERTY(BlueprintReadWrite, Category = "Weapon|Aiming", ReplicatedUsing = OnRep_CurrentSight)
-	ABaseSight* CurrentSight = nullptr;
+	// ============================================
+	// DESIGNER DEFAULTS - MAGAZINE
+	// ============================================
+
+	// Default magazine class (set in Blueprint Class Defaults)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Magazine")
+	TSubclassOf<ABaseMagazine> DefaultMagazineClass;
+
+	// Accepted caliber type (for magazine compatibility checks)
+	// NATO_556x45mm, Parabellum_9x19mm, Gauge_12, NATO_762x51mm
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Magazine")
+	EAmmoCaliberType AcceptedCaliberType = EAmmoCaliberType::NATO_556x45mm;
+
+	// ============================================
+	// DESIGNER DEFAULTS - ANIMATION
+	// ============================================
+
+	// Animation layer class for weapon-specific animations
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Animation")
+	TSubclassOf<UAnimInstance> AnimLayer;
+
+	// Shooting animation montage (uses slot "DefaultGroup.Shoot")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Animation")
+	UAnimMontage* ShootMontage;
+
+	// Equip animation montage (draw weapon, unfold launcher, etc.)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Animation")
+	UAnimMontage* EquipMontage;
+
+	// Unequip animation montage (holster weapon, fold launcher, etc.)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Animation")
+	UAnimMontage* UnequipMontage;
+
+	// ============================================
+	// DESIGNER DEFAULTS - VFX
+	// ============================================
+
+	// Muzzle flash Niagara system
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|VFX")
+	UNiagaraSystem* MuzzleFlashNiagara;
+
+	// ============================================
+	// DESIGNER DEFAULTS - UI
+	// ============================================
 
 	// Hip-fire crosshair widget class (shown when not aiming)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|UI")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|UI")
 	TSubclassOf<UUserWidget> CrossHair;
 
 	// Item widget class for HUD display (bottom-right corner)
-	// Widget shows weapon info: ammo count, magazine capacity
-	// Widget pulls data from weapon via IAmmoConsumerInterface
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|UI")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|UI")
 	TSubclassOf<UUserWidget> ItemWidgetClass;
+
+	// ============================================
+	// DESIGNER DEFAULTS - ATTACHMENT SOCKETS
+	// ============================================
+
+	// Socket name on CHARACTER where weapon mesh attaches when equipped
+	// Common values: "weapon_r", "hand_r", "weapon_socket"
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Sockets")
+	FName CharacterAttachSocket = FName("weapon_r");
+
+	// Socket name on CHARACTER where weapon mesh attaches during reload
+	// Used by bolt-action rifles, shotguns that require hand repositioning
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Sockets")
+	FName ReloadAttachSocket = FName("weapon_r");
+
+	// ============================================
+	// DESIGNER DEFAULTS - HANDLING
+	// ============================================
+
+	// Arms offset for weapon holding (location correction)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Handling")
+	FVector ArmsOffset = FVector::ZeroVector;
+
+	// Throw impulse strength when dropping weapon
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Handling")
+	float DropImpulseStrength = 200.0f;
+
+	// ============================================
+	// RUNTIME STATE
+	// ============================================
+
+	// Current equipping state (montage playing) - NOT replicated
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Runtime")
+	bool bIsEquipping = false;
+
+	// Current unequipping state (montage playing) - NOT replicated
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Runtime")
+	bool bIsUnequipping = false;
+
+	// Is player currently aiming - NOT replicated
+	UPROPERTY(BlueprintReadWrite, Category = "Weapon|Runtime")
+	bool IsAiming = false;
+
+	// Current attached sight actor reference (REPLICATED)
+	UPROPERTY(BlueprintReadWrite, Category = "Weapon|Runtime", ReplicatedUsing = OnRep_CurrentSight)
+	ABaseSight* CurrentSight = nullptr;
+
+	// Current attached magazine reference (REPLICATED)
+	UPROPERTY(BlueprintReadWrite, Category = "Weapon|Runtime", ReplicatedUsing = OnRep_CurrentMagazine)
+	ABaseMagazine* CurrentMagazine = nullptr;
 
 protected:
 	/**
@@ -284,57 +308,6 @@ public:
 	 */
 	void AttachSightMeshes();
 
-	// ============================================
-	// EFFECTS
-	// ============================================
-
-	// Muzzle flash Niagara system
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Effects")
-	UNiagaraSystem* MuzzleFlashNiagara;
-
-	// ============================================
-	// ATTACHMENT
-	// ============================================
-
-	// Socket name on CHARACTER where weapon mesh attaches when equipped (default position)
-	// Weapon root mesh attaches to character mesh (Arms for FPS, Body for TPS) at this socket
-	// Common values: "weapon_r", "hand_r", "weapon_socket"
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Attachment")
-	FName CharacterAttachSocket = FName("weapon_r");
-
-	// Socket name on CHARACTER where weapon mesh attaches during reload/bolt-action operations
-	// Used by bolt-action rifles, shotguns, and other weapons that require hand repositioning
-	// The weapon re-attaches to this socket during reload, then back to CharacterAttachSocket after
-	// Common values: "weapon_r" (same as equip), "weapon_l" (left hand for bolt-action)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Attachment")
-	FName ReloadAttachSocket = FName("weapon_r");
-
-	// ============================================
-	// PICKUP / DROP
-	// ============================================
-
-	// Throw impulse strength when dropping weapon (applied to root mesh)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Pickup")
-	float DropImpulseStrength = 200.0f;
-
-	// ============================================
-	// STATE
-	// ============================================
-
-	// NOTE: Reload state moved to ReloadComponent->bIsReloading (REPLICATED)
-	// Use IReloadableInterface::IsReloading() to check reload state
-
-	// ============================================
-	// MAGAZINE SYSTEM
-	// ============================================
-
-	// Current attached magazine reference (REPLICATED)
-	// Auto-assigned in BeginPlay() from MagazineComponent
-	// This is the authoritative magazine reference for multiplayer
-	// BallisticsComponent->CurrentMagazine references this same magazine
-	UPROPERTY(BlueprintReadWrite, Category = "Weapon|Magazine", ReplicatedUsing = OnRep_CurrentMagazine)
-	ABaseMagazine* CurrentMagazine = nullptr;
-
 protected:
 	/**
 	 * Called on CLIENTS when CurrentMagazine is replicated from server
@@ -342,16 +315,6 @@ protected:
 	 */
 	UFUNCTION()
 	void OnRep_CurrentMagazine();
-
-public:
-
-	// Default magazine class (set in Blueprint Class Defaults)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Magazine")
-	TSubclassOf<ABaseMagazine> DefaultMagazineClass;
-
-	// Accepted caliber type (for magazine compatibility checks)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Magazine")
-	EAmmoCaliberType AcceptedCaliberType = EAmmoCaliberType::NATO_556x45mm;
 
 public:
 	/**

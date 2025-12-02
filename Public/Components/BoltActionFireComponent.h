@@ -52,23 +52,29 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	// ============================================
-	// BOLT-ACTION STATE (Replicated)
+	// DESIGNER DEFAULTS - ANIMATION
 	// ============================================
 
-	/**
-	 * Is bolt currently being cycled? (REPLICATED)
-	 * True from shot fired until bolt-action montage completes
-	 * Blocks firing when true
-	 */
-	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_IsCyclingBolt, Category = "BoltAction|State")
+	// Bolt-action montage for character (Body/Arms/Legs)
+	// Played after each shot, contains AnimNotify_ShellEject and AnimNotify_ChamberRound
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Animation")
+	UAnimMontage* BoltActionMontage = nullptr;
+
+	// Bolt-action montage for weapon mesh (FPS + TPS)
+	// Shows bolt handle movement, shell ejection port opening
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Animation")
+	UAnimMontage* WeaponBoltActionMontage = nullptr;
+
+	// ============================================
+	// RUNTIME STATE (REPLICATED)
+	// ============================================
+
+	// Is bolt currently cycling? (REPLICATED) - blocks firing
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_IsCyclingBolt, Category = "BoltAction|Runtime")
 	bool bIsCyclingBolt = false;
 
-	/**
-	 * Is chamber empty? (needs reload) (REPLICATED)
-	 * True when magazine empty and bolt cycled (no round to chamber)
-	 * Reset to false after successful reload + bolt-action
-	 */
-	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_ChamberEmpty, Category = "BoltAction|State")
+	// Is chamber empty? (REPLICATED) - needs reload
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_ChamberEmpty, Category = "BoltAction|Runtime")
 	bool bChamberEmpty = false;
 
 protected:
@@ -85,26 +91,6 @@ protected:
 	void PropagateStateToAnimInstances();
 
 public:
-	// ============================================
-	// BOLT-ACTION ANIMATION
-	// ============================================
-
-	/**
-	 * Bolt-action animation montage
-	 * Played on character Body/Arms/Legs meshes after each shot
-	 * Contains AnimNotify_ShellEject and AnimNotify_ChamberRound
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BoltAction|Animation")
-	UAnimMontage* BoltActionMontage = nullptr;
-
-	/**
-	 * Bolt-action animation montage for weapon mesh
-	 * Played on FPSMesh and TPSMesh simultaneously with character montage
-	 * Shows bolt handle movement, shell ejection port opening, etc.
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BoltAction|Animation")
-	UAnimMontage* WeaponBoltActionMontage = nullptr;
-
 	// ============================================
 	// FIRE CONTROL OVERRIDE
 	// ============================================

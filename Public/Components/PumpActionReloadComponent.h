@@ -62,72 +62,48 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	// ============================================
-	// CONFIGURATION
+	// DESIGNER DEFAULTS - RELOAD BEHAVIOR
 	// ============================================
 
-	/**
-	 * Should weapon re-attach to ReloadAttachSocket during reload?
-	 * If true, weapon moves from CharacterAttachSocket to ReloadAttachSocket
-	 * at reload start, and back to CharacterAttachSocket after reload completes
-	 * Default: true (shotguns typically need hand repositioning)
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "PumpAction|Reload")
+	// Should weapon re-attach to ReloadAttachSocket during reload?
+	// true = weapon moves to ReloadAttachSocket (shotguns need hand repositioning)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Reload")
 	bool bReattachDuringReload = true;
 
-	/**
-	 * Socket name on character mesh where shell (magazine) attaches during grab
-	 * Shell is grabbed by hand, then inserted into weapon
-	 * Default: "magazine_l" (left hand magazine socket, same as box magazine reload)
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "PumpAction|Shell")
+	// Socket on character mesh where shell attaches during grab
+	// Default: "magazine_l" (left hand magazine socket)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Sockets")
 	FName ShellGrabSocketName = FName("magazine_l");
 
 	// ============================================
-	// PUMP-ACTION ANIMATION (for reload pump)
+	// DESIGNER DEFAULTS - ANIMATION
 	// ============================================
 
-	/**
-	 * Pump-action animation montage
-	 * Played on character Body/Arms/Legs meshes after first shell if chamber was empty
-	 * Contains AnimNotify_PumpActionStart for weapon sync
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PumpAction|Animation")
+	// Pump-action montage for character (Body/Arms/Legs)
+	// Played after first shell if chamber was empty
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Animation")
 	UAnimMontage* PumpActionMontage = nullptr;
 
-	/**
-	 * Pump-action animation montage for weapon mesh
-	 * Played on FPSMesh and TPSMesh simultaneously with character montage
-	 * Shows pump handle movement
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PumpAction|Animation")
+	// Pump-action montage for weapon mesh (FPS + TPS)
+	// Shows pump handle movement, synced with character montage
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "1 - Defaults|Animation")
 	UAnimMontage* WeaponPumpActionMontage = nullptr;
 
 	// ============================================
-	// REPLICATED STATE
+	// RUNTIME STATE (REPLICATED)
 	// ============================================
 
-	/**
-	 * Is chamber empty? (needs reload + pump-action) (REPLICATED)
-	 * True when magazine empty and last round fired
-	 * Reset to false after pump-action chambers a round
-	 */
-	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_ChamberEmpty, Category = "PumpAction|State")
+	// Is chamber empty? (REPLICATED) - needs reload + pump-action
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_ChamberEmpty, Category = "PumpAction|Runtime")
 	bool bChamberEmpty = false;
 
-	/**
-	 * Is pump currently being cycled? (REPLICATED)
-	 * True during pump-action montage after reload
-	 * Blocks firing and reloading when true
-	 */
-	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_IsPumping, Category = "PumpAction|State")
+	// Is pump currently cycling? (REPLICATED) - blocks firing/reloading
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_IsPumping, Category = "PumpAction|Runtime")
 	bool bIsPumping = false;
 
-	/**
-	 * Was chamber empty when reload started? (REPLICATED)
-	 * If true, first shell insertion will trigger pump-action to chamber round
-	 * Reset to false after pump-action completes
-	 */
-	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_NeedsPumpAfterReload, Category = "PumpAction|State")
+	// Was chamber empty when reload started? (REPLICATED)
+	// If true, first shell triggers pump-action to chamber round
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_NeedsPumpAfterReload, Category = "PumpAction|Runtime")
 	bool bNeedsPumpAfterReload = false;
 
 protected:

@@ -47,16 +47,12 @@ public:
 	UBoltActionReloadComponent();
 
 	// ============================================
-	// CONFIGURATION
+	// DESIGNER DEFAULTS - RELOAD BEHAVIOR
 	// ============================================
 
-	/**
-	 * Should weapon re-attach to ReloadAttachSocket during reload?
-	 * If true, weapon moves from CharacterAttachSocket to ReloadAttachSocket
-	 * at reload start, and back to CharacterAttachSocket after bolt-action completes
-	 * Default: true (bolt-action rifles typically need hand repositioning)
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "BoltAction|Reload")
+	// Should weapon re-attach to ReloadAttachSocket during reload?
+	// true = weapon moves to ReloadAttachSocket (bolt-action rifles need hand repositioning)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Reload")
 	bool bReattachDuringReload = true;
 
 	// ============================================

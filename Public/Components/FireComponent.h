@@ -52,31 +52,30 @@ protected:
 
 public:
 	// ============================================
-	// FIRE MECHANICS PROPERTIES
+	// DESIGNER DEFAULTS - FIRE MECHANICS
 	// ============================================
 
 	// Fire rate in rounds per minute (RPM)
-	// Example: 600 RPM = 10 rounds/sec = 0.1s per shot
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
+	// Assault Rifle: 800, SMG: 900, Pistol: 450, Shotgun: 300, Bolt-Action: 40
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Fire")
 	float FireRate = 600.0f;
 
-	// Spread scale multiplier (0.0 = no spread, 1.0 = normal spread, 2.0 = double spread)
-	// Applied to base spread cone angle (hardcoded base value + random variation + movement penalty)
-	// Example: 0.5 = very accurate, 1.0 = normal accuracy, 2.0 = inaccurate
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
+	// Spread scale multiplier (0.0 = laser, 1.0 = normal, 2.0 = inaccurate)
+	// Rifle: 1.0, Pistol: 0.8, Shotgun: 1.5, Sniper: 0.3
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Fire")
 	float SpreadScale = 1.0f;
 
-	// Recoil intensity multiplier (0.0 = no recoil, 1.0 = normal recoil, 2.0 = double recoil)
-	// Applied to base recoil value (hardcoded)
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire|Mechanics")
+	// Recoil intensity multiplier (0.0 = no recoil, 1.0 = normal, 2.0 = heavy)
+	// Rifle: 1.0, Pistol: 0.7, Shotgun: 2.0, Sniper: 1.5
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "1 - Defaults|Fire")
 	float RecoilScale = 1.0f;
 
 	// ============================================
-	// REFERENCES (Set by BaseWeapon)
+	// RUNTIME REFERENCES
 	// ============================================
 
-	// Ballistics component reference (sibling component)
-	UPROPERTY(BlueprintReadWrite, Category = "Fire|References")
+	// Ballistics component reference (sibling component, set by BaseWeapon)
+	UPROPERTY(BlueprintReadWrite, Category = "Fire|Runtime")
 	UBallisticsComponent* BallisticsComponent = nullptr;
 
 	// ============================================
@@ -162,11 +161,11 @@ protected:
 	void ApplyRecoil();
 
 	// ============================================
-	// STATE
+	// RUNTIME STATE
 	// ============================================
 
 	// Is trigger currently held down?
-	UPROPERTY(BlueprintReadOnly, Category = "Fire|State")
+	UPROPERTY(BlueprintReadOnly, Category = "Fire|Runtime")
 	bool bTriggerHeld = false;
 
 	// Timer handle for fire rate timing
