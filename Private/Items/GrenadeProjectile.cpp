@@ -7,7 +7,10 @@
 #include "Kismet/GameplayStatics.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
+#include "NiagaraComponent.h"
 #include "Net/UnrealNetwork.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogGrenadeProjectile, Log, All);
 
 AGrenadeProjectile::AGrenadeProjectile()
 {
@@ -20,7 +23,11 @@ AGrenadeProjectile::AGrenadeProjectile()
 	// Create collision component (root)
 	CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("CollisionComponent"));
 	CollisionComponent->InitSphereRadius(5.0f);
-	CollisionComponent->SetCollisionProfileName(TEXT("Projectile"));
+	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	CollisionComponent->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
+	CollisionComponent->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+	CollisionComponent->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Ignore);
+	CollisionComponent->SetGenerateOverlapEvents(true);
 	CollisionComponent->SetSimulatePhysics(false); // Controlled by ProjectileMovement
 	RootComponent = CollisionComponent;
 
@@ -79,10 +86,29 @@ void AGrenadeProjectile::OnRep_HasExploded()
 
 void AGrenadeProjectile::InitializeProjectile_Implementation(APawn* InInstigator)
 {
+	UE_LOG(LogGrenadeProjectile, Log, TEXT("InitializeProjectile - %s - Instigator=%s, Location=%s, Rotation=%s, HasAuthority=%d"),
+		*GetName(),
+		InInstigator ? *InInstigator->GetName() : TEXT("NULL"),
+		*GetActorLocation().ToString(),
+		*GetActorRotation().ToString(),
+		HasAuthority());
+
 	// Store instigator for damage attribution
 	InstigatorPawn = InInstigator;
 
-	// ProjectileMovementComponent automatically uses InitialSpeed and actor's forward direction
+	// Log ProjectileMovement state
+	if (ProjectileMovement)
+	{
+		UE_LOG(LogGrenadeProjectile, Log, TEXT("InitializeProjectile - ProjectileMovement: InitialSpeed=%.1f, MaxSpeed=%.1f, Velocity=%s, bShouldBounce=%d"),
+			ProjectileMovement->InitialSpeed,
+			ProjectileMovement->MaxSpeed,
+			*ProjectileMovement->Velocity.ToString(),
+			ProjectileMovement->bShouldBounce);
+	}
+	else
+	{
+		UE_LOG(LogGrenadeProjectile, Error, TEXT("InitializeProjectile - ProjectileMovement is NULL!"));
+	}
 
 	// Start fuse timer (SERVER ONLY)
 	if (HasAuthority())
@@ -95,25 +121,30 @@ void AGrenadeProjectile::InitializeProjectile_Implementation(APawn* InInstigator
 			false // No loop
 		);
 
-		UE_LOG(LogTemp, Log, TEXT("AGrenadeProjectile::InitializeProjectile - Fuse started, %.1fs until explosion"), FuseTime);
+		UE_LOG(LogGrenadeProjectile, Log, TEXT("InitializeProjectile - Fuse started, %.1fs until explosion"), FuseTime);
 	}
 }
 
 void AGrenadeProjectile::OnFuseExpired()
 {
+	UE_LOG(LogGrenadeProjectile, Log, TEXT("OnFuseExpired - %s - Location=%s, HasAuthority=%d, bHasExploded=%d"),
+		*GetName(), *GetActorLocation().ToString(), HasAuthority(), bHasExploded);
+
 	// SERVER ONLY
 	if (!HasAuthority())
 	{
+		UE_LOG(LogGrenadeProjectile, Warning, TEXT("OnFuseExpired - Not authority, skipping"));
 		return;
 	}
 
 	// Prevent double explosion
 	if (bHasExploded)
 	{
+		UE_LOG(LogGrenadeProjectile, Warning, TEXT("OnFuseExpired - Already exploded, skipping"));
 		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("AGrenadeProjectile::OnFuseExpired - Exploding at %s"), *GetActorLocation().ToString());
+	UE_LOG(LogGrenadeProjectile, Log, TEXT("OnFuseExpired - Exploding at %s"), *GetActorLocation().ToString());
 
 	// Apply damage (server authoritative)
 	ApplyExplosionDamage();
@@ -122,6 +153,7 @@ void AGrenadeProjectile::OnFuseExpired()
 	bHasExploded = true;
 
 	// Play effects on all clients
+	UE_LOG(LogGrenadeProjectile, Log, TEXT("OnFuseExpired - Calling Multicast_PlayExplosionEffects"));
 	Multicast_PlayExplosionEffects();
 
 	// Start destroy timer
@@ -158,7 +190,7 @@ void AGrenadeProjectile::ApplyExplosionDamage()
 		ExplosionInnerRadius,      // DamageInnerRadius (full damage)
 		ExplosionRadius,           // DamageOuterRadius (falloff to min)
 		DamageFalloff,             // DamageFalloff exponent
-		DamageTypeClass,           // DamageTypeClass
+		nullptr,                   // DamageTypeClass (uses default)
 		TArray<AActor*>(),         // IgnoreActors (none)
 		this,                      // DamageCauser
 		InstigatorController,      // InstigatorController
@@ -170,10 +202,14 @@ void AGrenadeProjectile::ApplyExplosionDamage()
 
 void AGrenadeProjectile::Multicast_PlayExplosionEffects_Implementation()
 {
+	UE_LOG(LogGrenadeProjectile, Log, TEXT("Multicast_PlayExplosionEffects - %s - Location=%s, ExplosionVFX=%s"),
+		*GetName(), *GetActorLocation().ToString(),
+		ExplosionVFX ? *ExplosionVFX->GetName() : TEXT("NULL"));
+
 	// Play VFX
 	if (ExplosionVFX)
 	{
-		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+		UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 			GetWorld(),
 			ExplosionVFX,
 			GetActorLocation(),
@@ -184,20 +220,12 @@ void AGrenadeProjectile::Multicast_PlayExplosionEffects_Implementation()
 			ENCPoolMethod::None, // Pooling
 			true                 // bPreCullCheck
 		);
+		UE_LOG(LogGrenadeProjectile, Log, TEXT("Multicast_PlayExplosionEffects - Spawned VFX: %s"),
+			NiagaraComp ? TEXT("SUCCESS") : TEXT("FAILED"));
 	}
-
-	// Play sound
-	if (ExplosionSound)
+	else
 	{
-		UGameplayStatics::PlaySoundAtLocation(
-			GetWorld(),
-			ExplosionSound,
-			GetActorLocation(),
-			1.0f,   // VolumeMultiplier
-			1.0f,   // PitchMultiplier
-			0.0f,   // StartTime
-			nullptr // Attenuation
-		);
+		UE_LOG(LogGrenadeProjectile, Warning, TEXT("Multicast_PlayExplosionEffects - No ExplosionVFX set!"));
 	}
 
 	// Hide mesh after explosion

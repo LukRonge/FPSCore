@@ -99,10 +99,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Grenade|Explosion")
 	float MinDamageMultiplier = 0.1f;
 
-	/** Damage type class */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Grenade|Explosion")
-	TSubclassOf<UDamageType> DamageTypeClass;
-
 	/** Delay after explosion before destroying actor (seconds) */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Grenade|Explosion")
 	float DestroyDelay = 10.0f;
@@ -114,10 +110,6 @@ protected:
 	/** Explosion particle effect */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Grenade|Effects")
 	TObjectPtr<UNiagaraSystem> ExplosionVFX;
-
-	/** Explosion sound */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Grenade|Effects")
-	TObjectPtr<USoundBase> ExplosionSound;
 
 	// ============================================
 	// CONFIGURATION - Physics

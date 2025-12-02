@@ -36,6 +36,8 @@
 #include "Kismet/KismetMaterialLibrary.h"
 #include "Engine/DamageEvents.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogFPSCore, Log, All);
+
 AFPSCharacter::AFPSCharacter()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -901,23 +903,38 @@ void AFPSCharacter::DropPressed()
 
 void AFPSCharacter::UseStarted()
 {
+	UE_LOG(LogFPSCore, Log, TEXT("AFPSCharacter::UseStarted - IsLocallyControlled=%d, ActiveItem=%s"),
+		IsLocallyControlled(),
+		ActiveItem ? *ActiveItem->GetName() : TEXT("NULL"));
+
 	if (!IsLocallyControlled())
 	{
+		UE_LOG(LogFPSCore, Warning, TEXT("AFPSCharacter::UseStarted - Not locally controlled, aborting"));
 		return;
 	}
 
 	// Block fire if actively sprinting (moving forward)
 	if (CurrentMovementMode == EFPSMovementMode::Sprint && IsActivelyMoving())
 	{
+		UE_LOG(LogFPSCore, Log, TEXT("AFPSCharacter::UseStarted - Blocked by sprint"));
 		return;
 	}
 
 	if (!ActiveItem || !ActiveItem->Implements<UUsableInterface>())
 	{
+		UE_LOG(LogFPSCore, Warning, TEXT("AFPSCharacter::UseStarted - No ActiveItem or doesn't implement IUsableInterface"));
 		return;
 	}
 
+	// Check CanUse before calling UseStart
 	FUseContext Ctx;
+	if (!IUsableInterface::Execute_CanUse(ActiveItem, Ctx))
+	{
+		UE_LOG(LogFPSCore, Warning, TEXT("AFPSCharacter::UseStarted - CanUse returned false"));
+		return;
+	}
+
+	UE_LOG(LogFPSCore, Log, TEXT("AFPSCharacter::UseStarted - Calling UseStart on %s"), *ActiveItem->GetName());
 	IUsableInterface::Execute_UseStart(ActiveItem, Ctx);
 }
 

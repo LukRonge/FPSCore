@@ -69,10 +69,6 @@ void AM72A7_Law::OnRep_HasFired()
 
 void AM72A7_Law::OnRep_IsExpanded()
 {
-	UE_LOG(LogTemp, Log, TEXT("M72A7_Law::OnRep_IsExpanded - bIsExpanded = %s, bIsEquipping = %s"),
-		bIsExpanded ? TEXT("true") : TEXT("false"),
-		bIsEquipping ? TEXT("true") : TEXT("false"));
-
 	// Skip if equip animation already playing (normal equip flow on listen server)
 	if (bIsEquipping)
 	{
@@ -82,7 +78,6 @@ void AM72A7_Law::OnRep_IsExpanded()
 	// Late-joiner: play expand montage at normal speed
 	if (bIsExpanded && ItemEquipMontage)
 	{
-		UE_LOG(LogTemp, Log, TEXT("M72A7_Law::OnRep_IsExpanded - Playing expand montage for late-joiner"));
 		PlayWeaponMontage(ItemEquipMontage);
 	}
 }
@@ -172,7 +167,6 @@ void AM72A7_Law::OnItemEquipAnimationStart_Implementation(APawn* OwnerPawn)
 	// This must happen before/with montage so AnimBP can react
 	if (HasAuthority())
 	{
-		UE_LOG(LogTemp, Log, TEXT("M72A7_Law::OnItemEquipAnimationStart - Setting bIsExpanded = true (SERVER)"));
 		bIsExpanded = true;
 	}
 
@@ -180,7 +174,6 @@ void AM72A7_Law::OnItemEquipAnimationStart_Implementation(APawn* OwnerPawn)
 	// LOCAL operation - each machine plays animation independently
 	if (ItemEquipMontage)
 	{
-		UE_LOG(LogTemp, Log, TEXT("M72A7_Law::OnItemEquipAnimationStart - Playing expand montage"));
 		PlayWeaponMontage(ItemEquipMontage);
 	}
 }
@@ -191,7 +184,6 @@ void AM72A7_Law::OnItemUnequipAnimationStart_Implementation(APawn* OwnerPawn)
 	// This must happen before/with montage so AnimBP can react
 	if (HasAuthority())
 	{
-		UE_LOG(LogTemp, Log, TEXT("M72A7_Law::OnItemUnequipAnimationStart - Setting bIsExpanded = false (SERVER)"));
 		bIsExpanded = false;
 	}
 
@@ -199,7 +191,6 @@ void AM72A7_Law::OnItemUnequipAnimationStart_Implementation(APawn* OwnerPawn)
 	// LOCAL operation - each machine plays animation independently
 	if (ItemUnequipMontage)
 	{
-		UE_LOG(LogTemp, Log, TEXT("M72A7_Law::OnItemUnequipAnimationStart - Playing collapse montage"));
 		PlayWeaponMontage(ItemUnequipMontage);
 	}
 }

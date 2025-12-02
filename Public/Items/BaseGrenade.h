@@ -174,6 +174,14 @@ protected:
 	// ============================================
 
 	/**
+	 * Server RPC to start throw action
+	 * CLIENT calls this from UseStart → SERVER validates and triggers Multicast_PlayThrowEffects
+	 * This follows the same pattern as BaseWeapon::Server_Shoot
+	 */
+	UFUNCTION(Server, Reliable)
+	void Server_StartThrow();
+
+	/**
 	 * Server RPC to execute throw
 	 * Called from OnThrowRelease when AnimNotify fires
 	 *
@@ -188,8 +196,9 @@ protected:
 	// ============================================
 
 	/**
-	 * Multicast RPC to play throw effects
-	 * Called from UseStart to sync animation across clients
+	 * Multicast RPC to play throw effects (animation)
+	 * Called from SERVER (Server_StartThrow) to sync animation across all clients
+	 * Pattern matches BaseWeapon::Multicast_PlayShootEffects
 	 */
 	UFUNCTION(NetMulticast, Unreliable)
 	void Multicast_PlayThrowEffects();
