@@ -7,6 +7,8 @@
 #include "Animation/AnimInstance.h"
 #include "Net/UnrealNetwork.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogFPSCore, Log, All);
+
 UReloadComponent::UReloadComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
@@ -27,16 +29,35 @@ void UReloadComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 bool UReloadComponent::CanReload_Internal() const
 {
 	AActor* OwnerActor = GetOwner();
-	if (!OwnerActor) return false;
-	if (!OwnerActor->Implements<UAmmoConsumerInterface>()) return false;
-	if (bIsReloading) return false;
+	if (!OwnerActor)
+	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[ReloadComponent] CanReload - BLOCKED: No owner"));
+		return false;
+	}
+
+	if (!OwnerActor->Implements<UAmmoConsumerInterface>())
+	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] CanReload - BLOCKED: No IAmmoConsumerInterface"),
+			*OwnerActor->GetName());
+		return false;
+	}
+
+	if (bIsReloading)
+	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] CanReload - BLOCKED: bIsReloading=true"),
+			*OwnerActor->GetName());
+		return false;
+	}
 
 	// Block reload during equip/unequip montages
 	if (OwnerActor->Implements<UHoldableInterface>())
 	{
-		if (IHoldableInterface::Execute_IsEquipping(OwnerActor) ||
-			IHoldableInterface::Execute_IsUnequipping(OwnerActor))
+		bool bEquipping = IHoldableInterface::Execute_IsEquipping(OwnerActor);
+		bool bUnequipping = IHoldableInterface::Execute_IsUnequipping(OwnerActor);
+		if (bEquipping || bUnequipping)
 		{
+			UE_LOG(LogFPSCore, Warning, TEXT("[%s] CanReload - BLOCKED: bIsEquipping=%d, bIsUnequipping=%d"),
+				*OwnerActor->GetName(), bEquipping, bUnequipping);
 			return false;
 		}
 	}
@@ -44,7 +65,14 @@ bool UReloadComponent::CanReload_Internal() const
 	int32 CurrentAmmo = IAmmoConsumerInterface::Execute_GetClip(OwnerActor);
 	int32 MaxAmmo = IAmmoConsumerInterface::Execute_GetClipSize(OwnerActor);
 
-	return CurrentAmmo < MaxAmmo;
+	if (CurrentAmmo >= MaxAmmo)
+	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] CanReload - BLOCKED: Magazine full (%d/%d)"),
+			*OwnerActor->GetName(), CurrentAmmo, MaxAmmo);
+		return false;
+	}
+
+	return true;
 }
 
 void UReloadComponent::Server_StartReload_Implementation(const FUseContext& Ctx)

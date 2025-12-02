@@ -582,6 +582,11 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_UnequippingItem)
 	AActor* UnequippingItem = nullptr;
 
+	// CLIENT ONLY: Tracks previous UnequippingItem to reset bIsUnequipping when OnRep receives nullptr
+	// Fixes timing issue where server sends nullptr before client montage finishes
+	UPROPERTY()
+	AActor* PreviousUnequippingItem = nullptr;
+
 	UFUNCTION()
 	void OnRep_UnequippingItem();
 

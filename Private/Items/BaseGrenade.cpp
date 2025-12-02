@@ -18,6 +18,10 @@ ABaseGrenade::ABaseGrenade()
 	bReplicates = true;
 	bAlwaysRelevant = false;
 
+	// Network optimization
+	SetNetUpdateFrequency(30.0f);
+	SetMinNetUpdateFrequency(2.0f);
+
 	// Create scene root
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	RootComponent = SceneRoot;
@@ -32,6 +36,9 @@ ABaseGrenade::ABaseGrenade()
 	FPSMesh->bReceivesDecals = false;
 	FPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FPSMesh->SetSimulatePhysics(false);
+	// Performance optimizations
+	FPSMesh->bComponentUseFixedSkelBounds = true;
+	FPSMesh->SetGenerateOverlapEvents(false);
 
 	// Create TPS mesh (visible to other players - third person/world view)
 	TPSMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("TPSMesh"));
@@ -45,6 +52,17 @@ ABaseGrenade::ABaseGrenade()
 	TPSMesh->SetSimulatePhysics(true);
 	TPSMesh->SetIsReplicated(true);
 	TPSMesh->bReplicatePhysicsToAutonomousProxy = true;
+	// Collision setup - ignore characters, allow world collision for physics
+	TPSMesh->SetCollisionObjectType(ECC_PhysicsBody);
+	TPSMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	TPSMesh->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+	TPSMesh->SetCollisionResponseToChannel(ECC_Vehicle, ECR_Ignore);
+	TPSMesh->SetCollisionResponseToChannel(ECC_Destructible, ECR_Ignore);
+	TPSMesh->CanCharacterStepUpOn = ECB_No;
+	TPSMesh->SetGenerateOverlapEvents(false);
+	// Performance optimizations
+	TPSMesh->bEnableUpdateRateOptimizations = true;
+	TPSMesh->bComponentUseFixedSkelBounds = true;
 }
 
 void ABaseGrenade::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

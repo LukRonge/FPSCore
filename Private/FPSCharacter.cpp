@@ -53,6 +53,10 @@ AFPSCharacter::AFPSCharacter()
 	GetCapsuleComponent()->InitCapsuleSize(34.0f, 88.0f);
 	// Capsule should IGNORE projectiles - only skeletal mesh should detect bullet hits for bone damage
 	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Ignore);
+	// Capsule should IGNORE PhysicsBody - don't collide with dropped weapons/items on ground
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Ignore);
+	// Performance optimization
+	GetCapsuleComponent()->SetGenerateOverlapEvents(false);
 
 	CMC = GetCharacterMovement();
 	CMC->MaxWalkSpeedCrouched = 150.0f;  // Same as WalkSpeed
@@ -65,6 +69,9 @@ AFPSCharacter::AFPSCharacter()
 	GetMesh()->SetOwnerNoSee(true);
 	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 	GetMesh()->SetComponentTickEnabled(true);
+	// Performance optimizations
+	GetMesh()->bEnableUpdateRateOptimizations = true;
+	GetMesh()->SetGenerateOverlapEvents(false);
 
 	Spine_03 = CreateDefaultSubobject<USceneComponent>(TEXT("spine_03"));
 	Spine_03->SetupAttachment(GetMesh());
@@ -87,6 +94,9 @@ AFPSCharacter::AFPSCharacter()
 	Arms->SetOnlyOwnerSee(true);
 	Arms->CastShadow = true;
 	Arms->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	// Performance optimizations (NO bComponentUseFixedSkelBounds - causes disappearing)
+	Arms->SetSimulatePhysics(false);
+	Arms->SetGenerateOverlapEvents(false);
 
 	// First person legs - owner only
 	Legs = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Legs"));
@@ -95,6 +105,9 @@ AFPSCharacter::AFPSCharacter()
 	Legs->SetOnlyOwnerSee(true);
 	Legs->CastShadow = true;
 	Legs->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	// Performance optimizations (NO bComponentUseFixedSkelBounds - causes disappearing)
+	Legs->SetSimulatePhysics(false);
+	Legs->SetGenerateOverlapEvents(false);
 
 	InventoryComp = CreateDefaultSubobject<UInventoryComponent>(TEXT("InventoryComponent"));
 	HealthComp = CreateDefaultSubobject<UHealthComponent>(TEXT("HealthComponent"));
@@ -283,6 +296,42 @@ void AFPSCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	// ============================================
+	// PERFORMANCE TRACKING
+	// ============================================
+	static float PerformanceLogTimer = 0.0f;
+	static float MaxTickTime = 0.0f;
+	static int32 TickCount = 0;
+	static float TotalTickTime = 0.0f;
+
+	TotalTickTime += DeltaTime;
+	TickCount++;
+	MaxTickTime = FMath::Max(MaxTickTime, DeltaTime);
+
+	PerformanceLogTimer += DeltaTime;
+	if (PerformanceLogTimer >= 5.0f)  // Log every 5 seconds
+	{
+		float AvgTickTime = TotalTickTime / TickCount;
+		float FPS = 1.0f / AvgTickTime;
+		float MaxFPS = 1.0f / MaxTickTime;
+
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] PERFORMANCE - Role=%s, NetMode=%d, IsLocallyControlled=%d, FPS=%.1f, MaxTickTime=%.3fms, AvgTickTime=%.3fms, ActiveItem=%s"),
+			*GetName(),
+			*UEnum::GetValueAsString(GetLocalRole()),
+			(int32)GetNetMode(),
+			IsLocallyControlled(),
+			FPS,
+			MaxTickTime * 1000.0f,
+			AvgTickTime * 1000.0f,
+			ActiveItem ? *ActiveItem->GetName() : TEXT("NULL"));
+
+		// Reset counters
+		PerformanceLogTimer = 0.0f;
+		MaxTickTime = 0.0f;
+		TickCount = 0;
+		TotalTickTime = 0.0f;
+	}
+
 	DeltaSeconds = DeltaTime;
 
 	// ============================================
@@ -362,10 +411,17 @@ void AFPSCharacter::Tick(float DeltaTime)
 
 void AFPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] SetupPlayerInputComponent - Role=%s, IsLocallyControlled=%d, NetMode=%d"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
+		IsLocallyControlled(),
+		(int32)GetNetMode());
+
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
 	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] SetupPlayerInputComponent - EnhancedInputComponent is valid, binding actions"), *GetName());
 		EnhancedInputComponent->ClearBindingsForObject(this);
 
 		if (IA_Look_Yaw)
@@ -881,12 +937,24 @@ void AFPSCharacter::InteractPressed()
 
 void AFPSCharacter::DropPressed()
 {
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] DropPressed - Role=%s, IsLocallyControlled=%d, ActiveItem=%s, NetMode=%d"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
+		IsLocallyControlled(),
+		ActiveItem ? *ActiveItem->GetName() : TEXT("NULL"),
+		(int32)GetNetMode());
+
 	if (!IsLocallyControlled())
 	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] DropPressed - Not locally controlled, aborting"), *GetName());
 		return;
 	}
 
-	if (!ActiveItem) return;
+	if (!ActiveItem)
+	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] DropPressed - No active item"), *GetName());
+		return;
+	}
 
 	// Check if item can be unequipped via interface (no direct cast)
 	// Blocks drop during reload, montage playing, etc.
@@ -894,18 +962,25 @@ void AFPSCharacter::DropPressed()
 	{
 		if (!IHoldableInterface::Execute_CanBeUnequipped(ActiveItem))
 		{
+			UE_LOG(LogFPSCore, Warning, TEXT("[%s] DropPressed - Item %s cannot be unequipped (busy state)"),
+				*GetName(), *ActiveItem->GetName());
 			return;
 		}
 	}
 
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] DropPressed - Calling Server_DropItem for %s"),
+		*GetName(), *ActiveItem->GetName());
 	Server_DropItem(ActiveItem);
 }
 
 void AFPSCharacter::UseStarted()
 {
-	UE_LOG(LogFPSCore, Log, TEXT("AFPSCharacter::UseStarted - IsLocallyControlled=%d, ActiveItem=%s"),
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] UseStarted - Role=%s, IsLocallyControlled=%d, ActiveItem=%s, NetMode=%d"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
 		IsLocallyControlled(),
-		ActiveItem ? *ActiveItem->GetName() : TEXT("NULL"));
+		ActiveItem ? *ActiveItem->GetName() : TEXT("NULL"),
+		(int32)GetNetMode());
 
 	if (!IsLocallyControlled())
 	{
@@ -928,13 +1003,16 @@ void AFPSCharacter::UseStarted()
 
 	// Check CanUse before calling UseStart
 	FUseContext Ctx;
+	Ctx.Controller = GetController();
+	Ctx.Pawn = this;
+
 	if (!IUsableInterface::Execute_CanUse(ActiveItem, Ctx))
 	{
-		UE_LOG(LogFPSCore, Warning, TEXT("AFPSCharacter::UseStarted - CanUse returned false"));
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] UseStarted - CanUse returned false for %s"), *GetName(), *ActiveItem->GetName());
 		return;
 	}
 
-	UE_LOG(LogFPSCore, Log, TEXT("AFPSCharacter::UseStarted - Calling UseStart on %s"), *ActiveItem->GetName());
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] UseStarted - Calling UseStart on %s"), *GetName(), *ActiveItem->GetName());
 	IUsableInterface::Execute_UseStart(ActiveItem, Ctx);
 }
 
@@ -1105,13 +1183,43 @@ void AFPSCharacter::UpdateAimingState()
 
 void AFPSCharacter::ReloadPressed()
 {
-	if (!IsLocallyControlled()) return;
-	if (!ActiveItem) return;
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] ReloadPressed - Role=%s, IsLocallyControlled=%d, ActiveItem=%s, NetMode=%d"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
+		IsLocallyControlled(),
+		ActiveItem ? *ActiveItem->GetName() : TEXT("NULL"),
+		(int32)GetNetMode());
+
+	if (!IsLocallyControlled())
+	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] ReloadPressed - Not locally controlled, aborting"), *GetName());
+		return;
+	}
+
+	if (!ActiveItem)
+	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] ReloadPressed - No active item"), *GetName());
+		return;
+	}
 
 	AActor* Item = ActiveItem;
 
-	if (!Item->Implements<UReloadableInterface>()) return;
-	if (!IReloadableInterface::Execute_CanReload(Item)) return;
+	if (!Item->Implements<UReloadableInterface>())
+	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] ReloadPressed - Item %s does not implement IReloadableInterface"),
+			*GetName(), *Item->GetName());
+		return;
+	}
+
+	if (!IReloadableInterface::Execute_CanReload(Item))
+	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] ReloadPressed - Item %s CanReload returned false"),
+			*GetName(), *Item->GetName());
+		return;
+	}
+
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] ReloadPressed - Calling Reload on %s"),
+		*GetName(), *Item->GetName());
 
 	FUseContext Ctx;
 	Ctx.Controller = GetController();
@@ -1236,6 +1344,13 @@ void AFPSCharacter::OnRep_Pitch()
 
 void AFPSCharacter::OnRep_ActiveItem(AActor* OldActiveItem)
 {
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] OnRep_ActiveItem - Role=%s, NetMode=%d, IsLocallyControlled=%d, Frame=%lld"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
+		(int32)GetNetMode(),
+		IsLocallyControlled(),
+		GFrameCounter);
+
 	// OnRep runs on CLIENTS when ActiveItem replicates from server
 	// Follows OnRep pattern: Clients execute SAME local logic as server
 
@@ -1246,7 +1361,7 @@ void AFPSCharacter::OnRep_ActiveItem(AActor* OldActiveItem)
 		bOldItemUnequipping = IHoldableInterface::Execute_IsUnequipping(OldActiveItem);
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] OnRep_ActiveItem START - OldActiveItem=%s, ActiveItem=%s, UnequippingItem=%s, bOldItemUnequipping=%s, Frame=%lld"),
+	UE_LOG(LogFPSCore, Warning, TEXT("[EQUIP_FLOW] OnRep_ActiveItem START - OldActiveItem=%s, ActiveItem=%s, UnequippingItem=%s, bOldItemUnequipping=%s, Frame=%lld"),
 		OldActiveItem ? *OldActiveItem->GetName() : TEXT("nullptr"),
 		ActiveItem ? *ActiveItem->GetName() : TEXT("nullptr"),
 		UnequippingItem ? *UnequippingItem->GetName() : TEXT("nullptr"),
@@ -1256,7 +1371,7 @@ void AFPSCharacter::OnRep_ActiveItem(AActor* OldActiveItem)
 	// Log item hidden state
 	if (ActiveItem)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] OnRep_ActiveItem - ActiveItem IsHidden=%s, Location=%s"),
+		UE_LOG(LogFPSCore, Warning, TEXT("[EQUIP_FLOW] OnRep_ActiveItem - ActiveItem IsHidden=%s, Location=%s"),
 			ActiveItem->IsHidden() ? TEXT("true") : TEXT("false"),
 			*ActiveItem->GetActorLocation().ToString());
 	}
@@ -1372,17 +1487,24 @@ void AFPSCharacter::OnRep_UnequippingItem()
 	// Called on CLIENTS when server sets UnequippingItem
 	// This triggers the unequip montage to play on remote clients
 
-	UE_LOG(LogTemp, Log, TEXT("OnRep_UnequippingItem - UnequippingItem=%s"),
-		UnequippingItem ? *UnequippingItem->GetName() : TEXT("nullptr"));
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] OnRep_UnequippingItem - UnequippingItem=%s, PreviousUnequippingItem=%s"),
+		*GetName(),
+		UnequippingItem ? *UnequippingItem->GetName() : TEXT("nullptr"),
+		PreviousUnequippingItem ? *PreviousUnequippingItem->GetName() : TEXT("nullptr"));
 
 	if (UnequippingItem)
 	{
+		// Store reference before it potentially becomes nullptr
+		// This fixes timing issue where server sends nullptr before client montage finishes
+		PreviousUnequippingItem = UnequippingItem;
+
 		// Unequip started - play unequip montage
 		if (UnequippingItem->Implements<UHoldableInterface>())
 		{
 			UAnimMontage* UnequipMontage = IHoldableInterface::Execute_GetUnequipMontage(UnequippingItem);
 
-			UE_LOG(LogTemp, Log, TEXT("OnRep_UnequippingItem - Playing unequip montage: %s"),
+			UE_LOG(LogFPSCore, Warning, TEXT("[%s] OnRep_UnequippingItem - Playing unequip montage: %s"),
+				*GetName(),
 				UnequipMontage ? *UnequipMontage->GetName() : TEXT("nullptr"));
 
 			if (UnequipMontage)
@@ -1398,7 +1520,20 @@ void AFPSCharacter::OnRep_UnequippingItem()
 			}
 		}
 	}
-	// Note: When UnequippingItem becomes nullptr, OnUnequipMontageFinished handles cleanup
+	else
+	{
+		// CRITICAL FIX: Server finished unequip and sent nullptr
+		// But client montage may still be playing - we need to clear bIsUnequipping
+		// on the previous item NOW, because OnUnequipMontageFinished won't have the reference
+		if (IsValid(PreviousUnequippingItem) && PreviousUnequippingItem->Implements<UHoldableInterface>())
+		{
+			UE_LOG(LogFPSCore, Warning, TEXT("[%s] OnRep_UnequippingItem - Clearing bIsUnequipping on %s (server finished before client montage)"),
+				*GetName(), *PreviousUnequippingItem->GetName());
+
+			IHoldableInterface::Execute_SetUnequippingState(PreviousUnequippingItem, false);
+		}
+		PreviousUnequippingItem = nullptr;
+	}
 }
 
 void AFPSCharacter::OnRep_CurrentMovementMode()
@@ -1517,15 +1652,26 @@ void AFPSCharacter::Server_PickupItem_Implementation(AActor* Item)
 
 void AFPSCharacter::Server_DropItem_Implementation(AActor* Item)
 {
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_DropItem_Implementation - Role=%s, Item=%s, HasAuthority=%d"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
+		Item ? *Item->GetName() : TEXT("NULL"),
+		HasAuthority());
+
 	// SERVER VALIDATION (anti-cheat)
 	// Client already has local checks, but server MUST re-validate
 
 	if (!Item || !HasAuthority())
 	{
+		UE_LOG(LogFPSCore, Error, TEXT("[%s] Server_DropItem - Invalid Item or no authority"), *GetName());
 		return;
 	}
 
-	if (!InventoryComp->ContainsItem(Item)) return;
+	if (!InventoryComp->ContainsItem(Item))
+	{
+		UE_LOG(LogFPSCore, Error, TEXT("[%s] Server_DropItem - Item %s not in inventory"), *GetName(), *Item->GetName());
+		return;
+	}
 
 	// Server re-validates busy state (anti-cheat)
 	// Blocks drop during reload, montage playing, etc.
@@ -1533,35 +1679,65 @@ void AFPSCharacter::Server_DropItem_Implementation(AActor* Item)
 	{
 		if (!IHoldableInterface::Execute_CanBeUnequipped(Item))
 		{
+			UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_DropItem - Item %s cannot be unequipped (server validation failed)"),
+				*GetName(), *Item->GetName());
 			return;
 		}
 	}
 
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_DropItem - Calling InventoryComp->RemoveItem for %s"),
+		*GetName(), *Item->GetName());
 	InventoryComp->RemoveItem(Item);
 }
 
 void AFPSCharacter::Server_SelectItem_Implementation(int32 Index)
 {
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_SelectItem_Implementation - Role=%s, Index=%d, ActiveItem=%s, HasAuthority=%d"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
+		Index,
+		ActiveItem ? *ActiveItem->GetName() : TEXT("NULL"),
+		HasAuthority());
+
 	// SERVER VALIDATION (anti-cheat)
 	// Re-validate all conditions on server
 
-	if (!HasAuthority()) return;
+	if (!HasAuthority())
+	{
+		UE_LOG(LogFPSCore, Error, TEXT("[%s] Server_SelectItem - No authority"), *GetName());
+		return;
+	}
 
 	// Validate index bounds
 	AActor* NewItem = InventoryComp->GetItemAtIndex(Index);
-	if (!NewItem) return;
+	if (!NewItem)
+	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_SelectItem - Invalid index %d, no item found"), *GetName(), Index);
+		return;
+	}
 
 	// Don't switch to same item
-	if (NewItem == ActiveItem) return;
+	if (NewItem == ActiveItem)
+	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_SelectItem - NewItem %s is already active"), *GetName(), *NewItem->GetName());
+		return;
+	}
 
 	// Check if new item is holdable
-	if (!NewItem->Implements<UHoldableInterface>()) return;
+	if (!NewItem->Implements<UHoldableInterface>())
+	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_SelectItem - NewItem %s does not implement IHoldableInterface"),
+			*GetName(), *NewItem->GetName());
+		return;
+	}
 
 	// Check if current item can be unequipped (not reloading, etc.)
 	if (ActiveItem && ActiveItem->Implements<UHoldableInterface>())
 	{
 		if (!IHoldableInterface::Execute_CanBeUnequipped(ActiveItem))
 		{
+			UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_SelectItem - ActiveItem %s cannot be unequipped (busy state)"),
+				*GetName(), *ActiveItem->GetName());
 			return;
 		}
 	}
@@ -1569,7 +1745,8 @@ void AFPSCharacter::Server_SelectItem_Implementation(int32 Index)
 	// Store old item for later
 	AActor* OldActiveItem = ActiveItem;
 
-	UE_LOG(LogTemp, Log, TEXT("Server_SelectItem - OldActiveItem=%s, NewItem=%s"),
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_SelectItem - OldActiveItem=%s, NewItem=%s"),
+		*GetName(),
 		OldActiveItem ? *OldActiveItem->GetName() : TEXT("nullptr"),
 		NewItem ? *NewItem->GetName() : TEXT("nullptr"));
 
@@ -1648,8 +1825,16 @@ void AFPSCharacter::SelectItem4Pressed()
 
 void AFPSCharacter::SelectItemByIndex(int32 Index)
 {
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] SelectItemByIndex - Role=%s, Index=%d, IsLocallyControlled=%d, ActiveItem=%s"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
+		Index,
+		IsLocallyControlled(),
+		ActiveItem ? *ActiveItem->GetName() : TEXT("NULL"));
+
 	if (!IsLocallyControlled())
 	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] SelectItemByIndex - Not locally controlled, aborting"), *GetName());
 		return;
 	}
 
@@ -1660,18 +1845,22 @@ void AFPSCharacter::SelectItemByIndex(int32 Index)
 	AActor* NewItem = InventoryComp->GetItemAtIndex(Index);
 	if (!NewItem)
 	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] SelectItemByIndex - Invalid index %d"), *GetName(), Index);
 		return;
 	}
 
 	// Don't switch to same item
 	if (NewItem == ActiveItem)
 	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] SelectItemByIndex - NewItem %s is already active"), *GetName(), *NewItem->GetName());
 		return;
 	}
 
 	// Check if new item is holdable
 	if (!NewItem->Implements<UHoldableInterface>())
 	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] SelectItemByIndex - NewItem %s does not implement IHoldableInterface"),
+			*GetName(), *NewItem->GetName());
 		return;
 	}
 
@@ -2968,6 +3157,7 @@ void AFPSCharacter::DisableRagdoll()
 		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		GetCapsuleComponent()->SetCollisionProfileName(FName("Pawn"), true);
 		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Ignore);
+		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Ignore);
 	}
 
 	if (DefaultAnimLayer)

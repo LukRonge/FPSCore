@@ -16,10 +16,16 @@
 #include "Interfaces/SightMeshProviderInterface.h"
 #include "NiagaraComponent.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogFPSCore, Log, All);
+
 ABaseWeapon::ABaseWeapon()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
+
+	// Network optimization
+	SetNetUpdateFrequency(60.0f);
+	SetMinNetUpdateFrequency(2.0f);
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	RootComponent = SceneRoot;
@@ -31,12 +37,26 @@ ABaseWeapon::ABaseWeapon()
 	TPSMesh->SetSimulatePhysics(true);
 	TPSMesh->SetIsReplicated(true);
 	TPSMesh->bReplicatePhysicsToAutonomousProxy = true;
+	// Collision setup - ignore characters, allow world collision for physics
+	TPSMesh->SetCollisionObjectType(ECC_PhysicsBody);
+	TPSMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	TPSMesh->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+	TPSMesh->SetCollisionResponseToChannel(ECC_Vehicle, ECR_Ignore);
+	TPSMesh->SetCollisionResponseToChannel(ECC_Destructible, ECR_Ignore);
+	TPSMesh->CanCharacterStepUpOn = ECB_No;
+	TPSMesh->SetGenerateOverlapEvents(false);
+	// Performance optimizations
+	TPSMesh->bEnableUpdateRateOptimizations = true;
+	TPSMesh->bComponentUseFixedSkelBounds = true;
 
 	FPSMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FPSMesh"));
 	FPSMesh->SetupAttachment(SceneRoot);
 	FPSMesh->SetOnlyOwnerSee(true);
 	FPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FPSMesh->SetSimulatePhysics(false);
+	// Performance optimizations
+	FPSMesh->bComponentUseFixedSkelBounds = true;
+	FPSMesh->SetGenerateOverlapEvents(false);
 
 	// NOTE: BallisticsComponent is NOT created here - child classes create their own
 	// (e.g., SPAS12 creates UShotgunBallisticsComponent, others use UBallisticsComponent)
@@ -148,6 +168,11 @@ void ABaseWeapon::PropagateOwnerToChildActors(AActor* NewOwner)
 
 void ABaseWeapon::UseStart_Implementation(const FUseContext& Ctx)
 {
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] UseStart_Implementation - Role=%s, Owner=%s, NetMode=%d"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
+		GetOwner() ? *GetOwner()->GetName() : TEXT("NULL"),
+		(int32)GetNetMode());
 	Server_Shoot(true);
 }
 
@@ -157,19 +182,37 @@ void ABaseWeapon::UseTick_Implementation(const FUseContext& Ctx)
 
 void ABaseWeapon::UseStop_Implementation(const FUseContext& Ctx)
 {
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] UseStop_Implementation - Role=%s, Owner=%s, NetMode=%d"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
+		GetOwner() ? *GetOwner()->GetName() : TEXT("NULL"),
+		(int32)GetNetMode());
 	Server_Shoot(false);
 }
 
 void ABaseWeapon::Server_Shoot_Implementation(bool bPressed)
 {
-	if (!FireComponent) return;
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_Shoot_Implementation - Role=%s, bPressed=%d, FireComponent=%s, HasAuthority=%d"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
+		bPressed,
+		FireComponent ? TEXT("Valid") : TEXT("NULL"),
+		HasAuthority());
+
+	if (!FireComponent)
+	{
+		UE_LOG(LogFPSCore, Error, TEXT("[%s] Server_Shoot - No FireComponent!"), *GetName());
+		return;
+	}
 
 	if (bPressed)
 	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_Shoot - Calling FireComponent->TriggerPulled()"), *GetName());
 		FireComponent->TriggerPulled();
 	}
 	else
 	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_Shoot - Calling FireComponent->TriggerReleased()"), *GetName());
 		FireComponent->TriggerReleased();
 	}
 }
@@ -758,12 +801,16 @@ bool ABaseWeapon::CanBeUnequipped_Implementation() const
 	// Block during equip/unequip montage
 	if (bIsEquipping || bIsUnequipping)
 	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] CanBeUnequipped - BLOCKED: bIsEquipping=%d, bIsUnequipping=%d"),
+			*GetName(), bIsEquipping, bIsUnequipping);
 		return false;
 	}
 
 	// Block during reload (delegate to component)
 	if (ReloadComponent && ReloadComponent->bIsReloading)
 	{
+		UE_LOG(LogFPSCore, Warning, TEXT("[%s] CanBeUnequipped - BLOCKED: ReloadComponent->bIsReloading=true"),
+			*GetName());
 		return false;
 	}
 
@@ -774,6 +821,8 @@ bool ABaseWeapon::CanBeUnequipped_Implementation() const
 		{
 			if (AnimInst->IsAnyMontagePlaying())
 			{
+				UE_LOG(LogFPSCore, Warning, TEXT("[%s] CanBeUnequipped - BLOCKED: FPSMesh montage playing"),
+					*GetName());
 				return false;
 			}
 		}
@@ -847,7 +896,19 @@ bool ABaseWeapon::CanReload_Implementation() const
 
 void ABaseWeapon::Reload_Implementation(const FUseContext& Ctx)
 {
-	if (!ReloadComponent) return;
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] Reload_Implementation - Role=%s, ReloadComponent=%s, Owner=%s"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
+		ReloadComponent ? TEXT("Valid") : TEXT("NULL"),
+		GetOwner() ? *GetOwner()->GetName() : TEXT("NULL"));
+
+	if (!ReloadComponent)
+	{
+		UE_LOG(LogFPSCore, Error, TEXT("[%s] Reload_Implementation - No ReloadComponent!"), *GetName());
+		return;
+	}
+
+	UE_LOG(LogFPSCore, Warning, TEXT("[%s] Reload_Implementation - Calling ReloadComponent->Server_StartReload()"), *GetName());
 	ReloadComponent->Server_StartReload(Ctx);
 }
 
