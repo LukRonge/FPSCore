@@ -28,11 +28,28 @@ UBallisticsComponent::UBallisticsComponent()
 	// 12 Gauge Buckshot - SPAS-12, Remington 870, Benelli M4
 	TSoftObjectPtr<UAmmoTypeDataAsset> AmmoType_12Gauge(FSoftObjectPath(TEXT("/Script/FPSCore.AmmoTypeDataAsset'/FPSCore/Blueprints/Weapons/AmmoTypes/AmmoType_12_Gauge_Buckshot.AmmoType_12_Gauge_Buckshot'")));
 	CaliberDataMap.Add(EAmmoCaliberType::Gauge_12, AmmoType_12Gauge);
+
+	// Pre-load all ammo types into cache (small data assets, safe to sync load in constructor)
+	PreloadAmmoTypes();
 }
 
 void UBallisticsComponent::BeginPlay()
 {
 	Super::BeginPlay();
+}
+
+void UBallisticsComponent::PreloadAmmoTypes()
+{
+	for (auto& Pair : CaliberDataMap)
+	{
+		if (!Pair.Value.IsNull())
+		{
+			if (UAmmoTypeDataAsset* LoadedAsset = Pair.Value.LoadSynchronous())
+			{
+				LoadedAmmoTypes.Add(Pair.Key, LoadedAsset);
+			}
+		}
+	}
 }
 
 void UBallisticsComponent::Shoot(FVector Location, FVector Direction)
@@ -269,15 +286,14 @@ bool UBallisticsComponent::ApplyPenetrationLoss(
 
 float UBallisticsComponent::CalculateBulletDrop(float Distance) const
 {
-	UAmmoTypeDataAsset* CaliberData = CaliberDataAsset.LoadSynchronous();
-	if (!CaliberData)
+	if (!CurrentAmmoType)
 	{
 		return 0.0f;
 	}
 
 	const float Gravity = 980.0f;
-	const float Velocity = CaliberData->MuzzleVelocity * 100.0f;
-	const float Drag = CaliberData->DragCoefficient;
+	const float Velocity = CurrentAmmoType->MuzzleVelocity * 100.0f;
+	const float Drag = CurrentAmmoType->DragCoefficient;
 
 	float Drop = (Gravity * Distance * Distance) / (2.0f * Velocity * Velocity);
 	Drop *= Drag;
@@ -287,23 +303,23 @@ float UBallisticsComponent::CalculateBulletDrop(float Distance) const
 
 float UBallisticsComponent::CalculateKineticEnergy() const
 {
-	UAmmoTypeDataAsset* CaliberData = CaliberDataAsset.LoadSynchronous();
-	if (!CaliberData)
+	if (!CurrentAmmoType)
 	{
 		return 0.0f;
 	}
 
-	float Mass = CaliberData->ProjectileMass / 1000.0f;
-	float Velocity = CaliberData->MuzzleVelocity;
+	float Mass = CurrentAmmoType->ProjectileMass / 1000.0f;
+	float Velocity = CurrentAmmoType->MuzzleVelocity;
 
 	return 0.5f * Mass * Velocity * Velocity;
 }
 
 bool UBallisticsComponent::InitAmmoType(EAmmoCaliberType CaliberType)
 {
-	if (const TSoftObjectPtr<UAmmoTypeDataAsset>* FoundAsset = CaliberDataMap.Find(CaliberType))
+	// O(1) lookup from pre-loaded cache
+	if (UAmmoTypeDataAsset** CachedAsset = LoadedAmmoTypes.Find(CaliberType))
 	{
-		CurrentAmmoType = FoundAsset->LoadSynchronous();
+		CurrentAmmoType = *CachedAsset;
 		return CurrentAmmoType != nullptr;
 	}
 
@@ -313,9 +329,10 @@ bool UBallisticsComponent::InitAmmoType(EAmmoCaliberType CaliberType)
 
 UAmmoTypeDataAsset* UBallisticsComponent::GetAmmoDataForCaliber(EAmmoCaliberType CaliberType) const
 {
-	if (const TSoftObjectPtr<UAmmoTypeDataAsset>* FoundAsset = CaliberDataMap.Find(CaliberType))
+	// O(1) lookup from pre-loaded cache
+	if (const UAmmoTypeDataAsset* const* CachedAsset = LoadedAmmoTypes.Find(CaliberType))
 	{
-		return FoundAsset->LoadSynchronous();
+		return const_cast<UAmmoTypeDataAsset*>(*CachedAsset);
 	}
 
 	return nullptr;

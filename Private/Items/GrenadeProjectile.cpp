@@ -214,11 +214,10 @@ void AGrenadeProjectile::Multicast_PlayExplosionEffects_Implementation()
 			ExplosionVFX,
 			GetActorLocation(),
 			FRotator::ZeroRotator,
-			FVector(1.0f),       // Scale
-			true,                // bAutoDestroy
-			true,                // bAutoActivate
-			ENCPoolMethod::None, // Pooling
-			true                 // bPreCullCheck
+			FVector(1.0f),             // Scale
+			true,                      // bAutoDestroy
+			true,                      // bAutoActivate
+			ENCPoolMethod::AutoRelease // Pooling
 		);
 		UE_LOG(LogGrenadeProjectile, Log, TEXT("Multicast_PlayExplosionEffects - Spawned VFX: %s"),
 			NiagaraComp ? TEXT("SUCCESS") : TEXT("FAILED"));

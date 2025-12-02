@@ -297,7 +297,7 @@ void AM72A7_Law::Multicast_PlayShootEffects_Implementation()
 				EAttachLocation::SnapToTarget,
 				true,
 				true,
-				ENCPoolMethod::None
+				ENCPoolMethod::AutoRelease
 			);
 
 			if (NiagaraComp)

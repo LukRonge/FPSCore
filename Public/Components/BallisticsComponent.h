@@ -232,4 +232,16 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Ballistics|Debug")
 	void DebugPrintCaliberData() const;
+
+protected:
+	// ============================================
+	// AMMO TYPE CACHE
+	// ============================================
+
+	/** Pre-loaded ammo type cache (loaded in constructor for CDO, inherited by instances) */
+	UPROPERTY()
+	TMap<EAmmoCaliberType, UAmmoTypeDataAsset*> LoadedAmmoTypes;
+
+	/** Load all ammo types from CaliberDataMap into cache */
+	void PreloadAmmoTypes();
 };

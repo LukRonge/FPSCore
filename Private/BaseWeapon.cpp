@@ -36,8 +36,7 @@ ABaseWeapon::ABaseWeapon()
 	FPSMesh->SetupAttachment(SceneRoot);
 	FPSMesh->SetOnlyOwnerSee(true);
 	FPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	// NOTE: Do NOT disable tick - required for animations (montages) to play
-	// FPSMesh->PrimaryComponentTick.bCanEverTick = false;
+	FPSMesh->SetSimulatePhysics(false);
 
 	// NOTE: BallisticsComponent is NOT created here - child classes create their own
 	// (e.g., SPAS12 creates UShotgunBallisticsComponent, others use UBallisticsComponent)
@@ -225,11 +224,24 @@ bool ABaseWeapon::CanBePicked_Implementation(const FInteractionContext& Ctx) con
 
 void ABaseWeapon::OnPicked_Implementation(APawn* Picker, const FInteractionContext& Ctx)
 {
+	// Disable TPS mesh physics when picked up (will be attached to character)
+	if (TPSMesh)
+	{
+		TPSMesh->SetSimulatePhysics(false);
+		TPSMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
 }
 
 void ABaseWeapon::OnDropped_Implementation(const FInteractionContext& Ctx)
 {
 	SetReplicateMovement(true);
+
+	// Re-enable TPS mesh physics for world pickup
+	if (TPSMesh)
+	{
+		TPSMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		TPSMesh->SetSimulatePhysics(true);
+	}
 }
 
 void ABaseWeapon::OnEquipped_Implementation(APawn* OwnerPawn)
@@ -331,7 +343,7 @@ void ABaseWeapon::SpawnMuzzleFlashOnMesh(USkeletalMeshComponent* Mesh, bool bIsF
 		EAttachLocation::SnapToTarget,
 		true,
 		true,
-		ENCPoolMethod::None
+		ENCPoolMethod::AutoRelease
 	);
 
 	// CRITICAL: Niagara components do NOT inherit visibility from parent mesh
@@ -458,7 +470,7 @@ void ABaseWeapon::Multicast_SpawnImpactEffect_Implementation(
 			FVector(1.0f),
 			true,
 			true,
-			ENCPoolMethod::None
+			ENCPoolMethod::AutoRelease
 		);
 	}
 }
