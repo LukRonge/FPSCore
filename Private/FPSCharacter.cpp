@@ -1964,11 +1964,18 @@ void AFPSCharacter::EquipItem(AActor* Item)
 		}
 	}
 
-	// Show item - it's already on correct socket from PerformPickup or previous equip
-	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem - SHOWING ITEM, Location=%s, Frame=%lld"),
+	// ============================================
+	// VISIBILITY - Delayed via AnimNotify_ShowEquippedItem
+	// ============================================
+	// Item visibility is NOT set here anymore to prevent visual lag.
+	// Problem: Socket position depends on AnimInstance pose. If we show item immediately,
+	// it appears at wrong position for 1-2 frames until AnimInstance processes the montage.
+	// Solution: AnimNotify_ShowEquippedItem (placed at frame 1-2 of equip montage) will
+	// show the item after AnimInstance has updated bone transforms.
+	// For items without equip montage, we show immediately below.
+
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem - Item visibility will be set by AnimNotify, Location=%s, Frame=%lld"),
 		*Item->GetActorLocation().ToString(), GFrameCounter);
-	Item->SetActorHiddenInGame(false);
-	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem - ITEM NOW VISIBLE, Frame=%lld"), GFrameCounter);
 
 	// ============================================
 	// ANIMATION LAYER & LOCAL SETUP
@@ -2033,10 +2040,13 @@ void AFPSCharacter::EquipItem(AActor* Item)
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem - NO EQUIP MONTAGE, item ready immediately"));
-		// No equip montage - item ready immediately
+		UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] EquipItem - NO EQUIP MONTAGE, showing item immediately"));
+		// No equip montage - show item immediately (no AnimNotify to trigger visibility)
 		// Clear equipping state (may have been set during weapon switch)
 		IHoldableInterface::Execute_SetEquippingState(Item, false);
+
+		// Show item directly since there's no montage with AnimNotify_ShowEquippedItem
+		Item->SetActorHiddenInGame(false);
 	}
 
 	// Notify item that it's being equipped
