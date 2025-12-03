@@ -667,6 +667,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Animation")
 	TSubclassOf<UAnimInstance> DefaultAnimLayer;
 
+	// Currently linked item animation layer (LOCAL ONLY - not replicated)
+	// Tracked to ensure proper unlink before linking new layer during weapon switch
+	// Prevents animation layer conflicts where old and new layers are both active
+	UPROPERTY()
+	TSubclassOf<UAnimInstance> CurrentlyLinkedItemLayer = nullptr;
+
 	// Default crosshair widget class (shown when no active item)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
 	TSubclassOf<UUserWidget> DefaultCrossHair;
