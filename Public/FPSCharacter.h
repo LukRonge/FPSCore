@@ -520,6 +520,12 @@ public:
 	UFUNCTION(Server, Reliable)
 	void Server_SelectItem(int32 Index);
 
+	// Multicast RPC for weapon switch visual transition
+	// ATOMIC: All clients receive OldItem + NewItem in single packet
+	// Triggers: pre-link anim layer, play unequip montage
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_WeaponSwitch(AActor* OldItem, AActor* NewItem);
+
 	// Multicast RPC for physical drop setup (runs on ALL clients)
 	// Detaches from character, enables physics, places in world
 	UFUNCTION(NetMulticast, Reliable)
@@ -572,23 +578,31 @@ public:
 	void PlayEquipMontage(UAnimMontage* Montage, bool bBindEndDelegate = false);
 
 private:
-	// Item waiting to be equipped after current unequip completes (for weapon switching)
-	// Set when switching weapons - unequip plays, then this item gets equipped
-	UPROPERTY()
+	// ============================================
+	// WEAPON SWITCH STATE (LOCAL)
+	// ============================================
+	// HYBRID ARCHITECTURE:
+	// - ActiveItem = REPLICATED (gameplay state, single source of truth)
+	// - PendingEquipItem/UnequippingItem = LOCAL (visual transition state)
+	//
+	// FLOW:
+	// 1. Server calls Multicast_WeaponSwitch(OldItem, NewItem)
+	//    ALL MACHINES: Set local state, pre-link anim layer, play unequip montage
+	// 2. Server montage ends → ActiveItem = NewItem (triggers OnRep on clients)
+	// 3. OnRep_ActiveItem: EquipItem (layer already pre-linked)
+	//
+	// BENEFITS:
+	// - 1 Multicast + 1 OnRep (vs 6 OnRep calls)
+	// - ATOMIC data delivery (no race conditions)
+	// - Minimal bandwidth
+
+	// Item waiting to be equipped after current unequip completes
+	// LOCAL: Set by Multicast_WeaponSwitch, cleared after equip
 	AActor* PendingEquipItem = nullptr;
 
-	// Item currently being unequipped (for AnimNotify to know which item to holster)
-	// REPLICATED: Server sets this to trigger unequip flow on clients
-	UPROPERTY(ReplicatedUsing = OnRep_UnequippingItem)
+	// Item currently being unequipped
+	// LOCAL: Set by Multicast_WeaponSwitch, cleared after holster
 	AActor* UnequippingItem = nullptr;
-
-	// CLIENT ONLY: Tracks previous UnequippingItem to reset bIsUnequipping when OnRep receives nullptr
-	// Fixes timing issue where server sends nullptr before client montage finishes
-	UPROPERTY()
-	AActor* PreviousUnequippingItem = nullptr;
-
-	UFUNCTION()
-	void OnRep_UnequippingItem();
 
 	// Setup active item local visual state (LOCAL operation - runs on ALL machines)
 	void SetupActiveItemLocal();
