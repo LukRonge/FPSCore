@@ -1379,10 +1379,31 @@ void AFPSCharacter::OnRep_ActiveItem(AActor* OldActiveItem)
 	// WEAPON SWITCH WITH UNEQUIP MONTAGE:
 	// If unequip is in progress (either via UnequippingItem or via item's bIsUnequipping state),
 	// OnRep_UnequippingItem already started the unequip montage.
-	// OnUnequipMontageFinished (triggered by AnimNotify) will handle equipping the new item.
-	// We just need to set PendingEquipItem here.
+	// OnUnequipMontageBlendingOut (triggered by delegate) will handle equipping the new item.
+	// We just need to set PendingEquipItem here IF it's not already set or processed.
 	if ((UnequippingItem || bOldItemUnequipping) && ActiveItem)
 	{
+		// Check if this item is already being equipped or pending
+		// This prevents double-setting PendingEquipItem when OnRep arrives after BlendingOut processed
+		bool bAlreadyEquipping = false;
+		if (ActiveItem->Implements<UHoldableInterface>())
+		{
+			bAlreadyEquipping = IHoldableInterface::Execute_IsEquipping(ActiveItem);
+		}
+
+		if (bAlreadyEquipping)
+		{
+			UE_LOG(LogTemp, Log, TEXT("OnRep_ActiveItem - ActiveItem %s is already equipping, skipping PendingEquipItem set"), *ActiveItem->GetName());
+			return;
+		}
+
+		// Also skip if PendingEquipItem is already set to this item
+		if (PendingEquipItem == ActiveItem)
+		{
+			UE_LOG(LogTemp, Log, TEXT("OnRep_ActiveItem - PendingEquipItem already set to %s, skipping"), *ActiveItem->GetName());
+			return;
+		}
+
 		UE_LOG(LogTemp, Log, TEXT("OnRep_ActiveItem - Unequip in progress, setting PendingEquipItem=%s"), *ActiveItem->GetName());
 
 		PendingEquipItem = ActiveItem;
@@ -1392,7 +1413,7 @@ void AFPSCharacter::OnRep_ActiveItem(AActor* OldActiveItem)
 		{
 			IHoldableInterface::Execute_SetEquippingState(PendingEquipItem, true);
 		}
-		// EquipItem will be called from OnUnequipMontageFinished
+		// EquipItem will be called from OnUnequipMontageBlendingOut
 		return;
 	}
 
@@ -2081,20 +2102,41 @@ void AFPSCharacter::PlayEquipMontage(UAnimMontage* Montage, bool bBindEndDelegat
 {
 	if (!Montage) return;
 
-	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] PlayEquipMontage START - Montage=%s, Frame=%lld"),
-		*Montage->GetName(), GFrameCounter);
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] PlayEquipMontage START - Montage=%s, bBindEndDelegate=%s, Frame=%lld"),
+		*Montage->GetName(), bBindEndDelegate ? TEXT("true") : TEXT("false"), GFrameCounter);
 
-	// Play on Body mesh (with optional end delegate for fallback)
+	// Play on Body mesh (with optional delegates for unequip)
 	if (GetMesh() && GetMesh()->GetAnimInstance())
 	{
-		GetMesh()->GetAnimInstance()->Montage_Play(Montage);
+		UAnimInstance* BodyAnimInstance = GetMesh()->GetAnimInstance();
+		BodyAnimInstance->Montage_Play(Montage);
 		UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] PlayEquipMontage - Body montage started"));
 
 		if (bBindEndDelegate)
 		{
+			// ============================================
+			// DELEGATE HIERARCHY FOR UNEQUIP:
+			// ============================================
+			// PRIMARY: AnimNotify_UnequipFinished (placed in montage)
+			//          → Calls OnUnequipMontageFinished_Implementation
+			//
+			// BACKUP: BlendingOut delegate (if AnimNotify missing/fails)
+			//          → Calls OnUnequipMontageBlendingOut
+			//
+			// FALLBACK: End delegate (last resort safety net)
+			//          → Calls OnUnequipMontageEnded
+
+			// BlendingOut delegate (BACKUP - if AnimNotify missing)
+			FOnMontageBlendingOutStarted BlendingOutDelegate;
+			BlendingOutDelegate.BindUObject(this, &AFPSCharacter::OnUnequipMontageBlendingOut);
+			BodyAnimInstance->Montage_SetBlendingOutDelegate(BlendingOutDelegate, Montage);
+
+			// End delegate (FALLBACK - last resort)
 			FOnMontageEnded EndDelegate;
 			EndDelegate.BindUObject(this, &AFPSCharacter::OnUnequipMontageEnded);
-			GetMesh()->GetAnimInstance()->Montage_SetEndDelegate(EndDelegate, Montage);
+			BodyAnimInstance->Montage_SetEndDelegate(EndDelegate, Montage);
+
+			UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] PlayEquipMontage - BlendingOut and End delegates bound (as backup)"));
 		}
 	}
 
@@ -2129,12 +2171,63 @@ void AFPSCharacter::OnEquipMontageEnded(UAnimMontage* Montage, bool bInterrupted
 
 void AFPSCharacter::OnUnequipMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
-	// Fallback if AnimNotify_UnequipFinished wasn't placed in montage
-	// Only trigger if we still have an unequipping item (AnimNotify didn't fire)
+	// Fallback cleanup - BlendingOut should have handled the main logic
+	// This only fires if BlendingOut delegate didn't trigger (edge case)
+	UE_LOG(LogTemp, Log, TEXT("[EQUIP_FLOW] OnUnequipMontageEnded - Montage=%s, bInterrupted=%s, UnequippingItem=%s"),
+		Montage ? *Montage->GetName() : TEXT("nullptr"),
+		bInterrupted ? TEXT("true") : TEXT("false"),
+		UnequippingItem ? *UnequippingItem->GetName() : TEXT("nullptr"));
+
+	// If UnequippingItem is still set, BlendingOut didn't fire - use fallback
 	if (UnequippingItem)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] OnUnequipMontageEnded - BlendingOut didn't fire, using fallback"));
 		OnUnequipMontageFinished_Implementation();
 	}
+}
+
+void AFPSCharacter::OnUnequipMontageBlendingOut(UAnimMontage* Montage, bool bInterrupted)
+{
+	// ============================================
+	// BACKUP HANDLER FOR UNEQUIP COMPLETION
+	// ============================================
+	// PRIMARY: AnimNotify_UnequipFinished → OnUnequipMontageFinished_Implementation
+	// BACKUP:  This delegate (if AnimNotify missing or failed)
+	// FALLBACK: OnUnequipMontageEnded (if both above missed)
+	//
+	// This fires when montage starts blending out. If AnimNotify_UnequipFinished
+	// already processed the unequip, UnequippingItem will be nullptr and we skip.
+
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] OnUnequipMontageBlendingOut START - Montage=%s, bInterrupted=%s, UnequippingItem=%s, PendingEquipItem=%s, HasAuthority=%s, Frame=%lld"),
+		Montage ? *Montage->GetName() : TEXT("nullptr"),
+		bInterrupted ? TEXT("true") : TEXT("false"),
+		UnequippingItem ? *UnequippingItem->GetName() : TEXT("nullptr"),
+		PendingEquipItem ? *PendingEquipItem->GetName() : TEXT("nullptr"),
+		HasAuthority() ? TEXT("true") : TEXT("false"),
+		GFrameCounter);
+
+	// If interrupted (e.g., death, stun), skip
+	if (bInterrupted)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] OnUnequipMontageBlendingOut - Interrupted, skipping"));
+		return;
+	}
+
+	// Check if AnimNotify_UnequipFinished already processed this
+	// If UnequippingItem is nullptr, the notify already handled it
+	if (!UnequippingItem)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[EQUIP_FLOW] OnUnequipMontageBlendingOut - UnequippingItem is nullptr, AnimNotify already processed"));
+		return;
+	}
+
+	// AnimNotify didn't fire - we need to handle it here as backup
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] OnUnequipMontageBlendingOut - AnimNotify missed, processing as BACKUP"));
+
+	// Delegate to the main implementation
+	OnUnequipMontageFinished_Implementation();
+
+	UE_LOG(LogTemp, Warning, TEXT("[EQUIP_FLOW] OnUnequipMontageBlendingOut END - Frame=%lld"), GFrameCounter);
 }
 
 void AFPSCharacter::EquipItem(AActor* Item)

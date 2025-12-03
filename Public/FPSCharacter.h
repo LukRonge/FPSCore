@@ -600,6 +600,16 @@ private:
 	UFUNCTION()
 	void OnUnequipMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
+	/**
+	 * Called when unequip montage starts blending out
+	 * This is the KEY moment for smooth weapon switching:
+	 * - Anim layer changes during blend (not after)
+	 * - Equip montage starts while unequip is still blending out
+	 * - Prevents visual snap between montages
+	 */
+	UFUNCTION()
+	void OnUnequipMontageBlendingOut(UAnimMontage* Montage, bool bInterrupted);
+
 public:
 
 	// ============================================
