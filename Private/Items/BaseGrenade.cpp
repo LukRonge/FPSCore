@@ -178,20 +178,23 @@ bool ABaseGrenade::CanUse_Implementation(const FUseContext& Ctx) const
 
 void ABaseGrenade::UseStart_Implementation(const FUseContext& Ctx)
 {
-	UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::UseStart - %s - bHasThrown=%d, bIsThrowing=%d, bIsEquipping=%d, bIsUnequipping=%d"),
-		*GetName(), bHasThrown, bIsThrowing, bIsEquipping, bIsUnequipping);
+	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] UseStart - %s - bHasThrown=%d, bIsThrowing=%d, bIsEquipping=%d, bIsUnequipping=%d, Role=%s"),
+		*GetName(), bHasThrown, bIsThrowing, bIsEquipping, bIsUnequipping,
+		*UEnum::GetValueAsString(GetLocalRole()));
 
 	// LOCAL CHECK - prevents multiple Server RPCs for same throw
 	// This is optimistic local prediction - server will validate
 	if (bIsThrowing || bHasThrown)
 	{
-		UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::UseStart - Already throwing or thrown, skipping RPC"));
+		UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] UseStart - Already throwing or thrown, skipping RPC"));
 		return;
 	}
 
 	// Set local flag immediately (optimistic prediction)
 	// Server will authorize the actual throw via Server_StartThrow
 	bIsThrowing = true;
+
+	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] UseStart - Calling Server_StartThrow"));
 
 	// Client calls Server_StartThrow - server will validate and trigger multicast
 	// This follows the same pattern as BaseWeapon::UseStart → Server_Shoot
@@ -200,26 +203,28 @@ void ABaseGrenade::UseStart_Implementation(const FUseContext& Ctx)
 
 void ABaseGrenade::Server_StartThrow_Implementation()
 {
-	UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Server_StartThrow - %s - bHasThrown=%d, bIsThrowing=%d, bIsEquipping=%d, bIsUnequipping=%d, HasAuthority=%d"),
+	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_StartThrow - %s - bHasThrown=%d, bIsThrowing=%d, bIsEquipping=%d, bIsUnequipping=%d, HasAuthority=%d"),
 		*GetName(), bHasThrown, bIsThrowing, bIsEquipping, bIsUnequipping, HasAuthority());
 
 	// SERVER ONLY - validate state
-	if (bHasThrown || bIsThrowing)
+	// NOTE: Don't check bIsThrowing here! On Listen Server, UseStart sets bIsThrowing=true
+	// BEFORE this RPC executes (same frame, direct call). Only check bHasThrown (replicated).
+	if (bHasThrown)
 	{
-		UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Server_StartThrow - Already thrown or throwing, aborting"));
+		UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_StartThrow - Already thrown, aborting"));
 		return;
 	}
 
 	if (bIsEquipping || bIsUnequipping)
 	{
-		UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Server_StartThrow - Equip/Unequip in progress, aborting"));
+		UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_StartThrow - Equip/Unequip in progress, aborting"));
 		return;
 	}
 
-	// Mark as throwing (server sets this, NOT client)
+	// Mark as throwing on server (for remote clients via Multicast)
 	bIsThrowing = true;
 
-	UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Server_StartThrow - Calling Multicast_PlayThrowEffects from SERVER, ThrowMontage=%s"),
+	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_StartThrow - Calling Multicast_PlayThrowEffects, ThrowMontage=%s"),
 		ThrowMontage ? *ThrowMontage->GetName() : TEXT("NULL"));
 
 	// SERVER triggers multicast - this is the correct pattern
@@ -279,11 +284,13 @@ void ABaseGrenade::OnThrowRelease_Implementation()
 	// OwningPawn is set in OnEquipped but GetOwner() is the authoritative source
 	APawn* CurrentOwner = Cast<APawn>(GetOwner());
 
-	UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::OnThrowRelease - %s - Owner=%s, OwningPawn=%s, bHasThrown=%d, bIsThrowing=%d"),
+	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] OnThrowRelease - %s - Owner=%s, OwningPawn=%s, bHasThrown=%d, bIsThrowing=%d, Role=%s, HasAuthority=%d"),
 		*GetName(),
 		CurrentOwner ? *CurrentOwner->GetName() : TEXT("NULL"),
 		OwningPawn ? *OwningPawn->GetName() : TEXT("NULL"),
-		bHasThrown, bIsThrowing);
+		bHasThrown, bIsThrowing,
+		*UEnum::GetValueAsString(GetLocalRole()),
+		HasAuthority());
 
 	// Called from AnimNotify_ThrowRelease via IThrowableInterface
 	// Use CurrentOwner (from GetOwner()) as it's replicated and more reliable
@@ -352,7 +359,8 @@ void ABaseGrenade::OnThrowRelease_Implementation()
 			*ThrowDirection.ToString());
 	}
 
-	UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::OnThrowRelease - Calling Server_ExecuteThrow"));
+	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] OnThrowRelease - Calling Server_ExecuteThrow, SpawnLocation=%s, ThrowDirection=%s"),
+		*SpawnLocation.ToString(), *ThrowDirection.ToString());
 
 	// Request server to execute throw
 	Server_ExecuteThrow(SpawnLocation, ThrowDirection);
@@ -377,24 +385,24 @@ bool ABaseGrenade::CanThrow_Implementation() const
 
 void ABaseGrenade::Server_ExecuteThrow_Implementation(FVector SpawnLocation, FVector ThrowDirection)
 {
-	UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Server_ExecuteThrow - %s - SpawnLocation=%s, ThrowDirection=%s, HasAuthority=%d"),
-		*GetName(), *SpawnLocation.ToString(), *ThrowDirection.ToString(), HasAuthority());
+	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - %s - SpawnLocation=%s, ThrowDirection=%s, HasAuthority=%d, bHasThrown=%d"),
+		*GetName(), *SpawnLocation.ToString(), *ThrowDirection.ToString(), HasAuthority(), bHasThrown);
 
 	// SERVER ONLY
 	if (!HasAuthority())
 	{
-		UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Server_ExecuteThrow - Not authority, aborting"));
+		UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Not authority, aborting"));
 		return;
 	}
 
 	// Validate state
 	if (bHasThrown)
 	{
-		UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Server_ExecuteThrow - Already thrown"));
+		UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Already thrown, aborting"));
 		return;
 	}
 
-	UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Server_ExecuteThrow - Calling SpawnProjectile, ProjectileClass=%s"),
+	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Calling SpawnProjectile, ProjectileClass=%s"),
 		ProjectileClass ? *ProjectileClass->GetName() : TEXT("NULL"));
 
 	// Spawn projectile via interface
@@ -405,7 +413,7 @@ void ABaseGrenade::Server_ExecuteThrow_Implementation(FVector SpawnLocation, FVe
 		// Set replicated state - triggers OnRep on clients
 		bHasThrown = true;
 
-		UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Server_ExecuteThrow - Projectile spawned: %s"), *Projectile->GetName());
+		UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Projectile spawned: %s"), *Projectile->GetName());
 
 		// Remove grenade from character's inventory BEFORE destroying
 		// This triggers OnInventoryItemRemoved which:
@@ -414,20 +422,24 @@ void ABaseGrenade::Server_ExecuteThrow_Implementation(FVector SpawnLocation, FVe
 		// - Handles all cleanup properly
 		if (OwningPawn && OwningPawn->Implements<UItemCollectorInterface>())
 		{
-			UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Server_ExecuteThrow - Removing grenade from inventory via IItemCollectorInterface::Drop"));
+			UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Removing grenade from inventory via Drop"));
 			// Using Drop will call RemoveItem internally and handle all cleanup
 			// The grenade will be detached but we destroy it immediately after
 			IItemCollectorInterface::Execute_Drop(OwningPawn, this);
 		}
+		else
+		{
+			UE_LOG(LogFPSCore, Warning, TEXT("[GRENADE_THROW] Server_ExecuteThrow - OwningPawn is NULL or doesn't implement ItemCollectorInterface!"));
+		}
 
-		UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Server_ExecuteThrow - Destroying grenade actor"));
+		UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Destroying grenade actor"));
 
 		// Destroy grenade actor after successful throw (server handles replication)
 		Destroy();
 	}
 	else
 	{
-		UE_LOG(LogFPSCore, Error, TEXT("ABaseGrenade::Server_ExecuteThrow - Failed to spawn projectile! Check ProjectileClass and IProjectileInterface."));
+		UE_LOG(LogFPSCore, Error, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Failed to spawn projectile! Check ProjectileClass and IProjectileInterface."));
 		bIsThrowing = false;
 	}
 }
@@ -503,11 +515,12 @@ void ABaseGrenade::Multicast_PlayThrowEffects_Implementation()
 	APawn* OwnerPawn = GrenadeOwner ? Cast<APawn>(GrenadeOwner) : nullptr;
 	const bool bIsLocallyControlled = OwnerPawn && OwnerPawn->IsLocallyControlled();
 
-	UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Multicast_PlayThrowEffects - %s - Owner=%s, bIsLocallyControlled=%d, ThrowMontage=%s"),
+	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - %s - Owner=%s, bIsLocallyControlled=%d, ThrowMontage=%s, Role=%s"),
 		*GetName(),
 		GrenadeOwner ? *GrenadeOwner->GetName() : TEXT("NULL"),
 		bIsLocallyControlled,
-		ThrowMontage ? *ThrowMontage->GetName() : TEXT("NULL"));
+		ThrowMontage ? *ThrowMontage->GetName() : TEXT("NULL"),
+		*UEnum::GetValueAsString(GetLocalRole()));
 
 	// NOTE: bIsThrowing is set in UseStart (local) and Server_StartThrow (server)
 	// Remote clients receive this via multicast but don't need local state tracking
@@ -518,13 +531,15 @@ void ABaseGrenade::Multicast_PlayThrowEffects_Implementation()
 	// ============================================
 	if (!ThrowMontage || !GrenadeOwner)
 	{
-		UE_LOG(LogFPSCore, Warning, TEXT("ABaseGrenade::Multicast_PlayThrowEffects - Missing ThrowMontage or Owner"));
+		UE_LOG(LogFPSCore, Warning, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Missing ThrowMontage=%s or Owner=%s"),
+			ThrowMontage ? TEXT("OK") : TEXT("NULL"),
+			GrenadeOwner ? TEXT("OK") : TEXT("NULL"));
 		return;
 	}
 
 	if (!GrenadeOwner->Implements<UCharacterMeshProviderInterface>())
 	{
-		UE_LOG(LogFPSCore, Warning, TEXT("ABaseGrenade::Multicast_PlayThrowEffects - Owner doesn't implement CharacterMeshProviderInterface"));
+		UE_LOG(LogFPSCore, Warning, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Owner doesn't implement CharacterMeshProviderInterface"));
 		return;
 	}
 
@@ -544,8 +559,16 @@ void ABaseGrenade::Multicast_PlayThrowEffects_Implementation()
 			if (UAnimInstance* AnimInst = ArmsMesh->GetAnimInstance())
 			{
 				AnimInst->Montage_Play(ThrowMontage);
-				UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Multicast_PlayThrowEffects - Playing on Arms (FPS)"));
+				UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Playing ThrowMontage on Arms (FPS)"));
 			}
+			else
+			{
+				UE_LOG(LogFPSCore, Warning, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - No AnimInstance on Arms mesh"));
+			}
+		}
+		else
+		{
+			UE_LOG(LogFPSCore, Warning, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - No Arms mesh"));
 		}
 	}
 
@@ -558,7 +581,7 @@ void ABaseGrenade::Multicast_PlayThrowEffects_Implementation()
 		if (UAnimInstance* AnimInst = BodyMesh->GetAnimInstance())
 		{
 			AnimInst->Montage_Play(ThrowMontage);
-			UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Multicast_PlayThrowEffects - Playing on Body (TPS)"));
+			UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Playing ThrowMontage on Body (TPS)"));
 		}
 	}
 
@@ -568,7 +591,7 @@ void ABaseGrenade::Multicast_PlayThrowEffects_Implementation()
 		if (UAnimInstance* AnimInst = LegsMesh->GetAnimInstance())
 		{
 			AnimInst->Montage_Play(ThrowMontage);
-			UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::Multicast_PlayThrowEffects - Playing on Legs (TPS)"));
+			UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Playing ThrowMontage on Legs (TPS)"));
 		}
 	}
 }
