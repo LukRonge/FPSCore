@@ -168,11 +168,6 @@ void ABaseWeapon::PropagateOwnerToChildActors(AActor* NewOwner)
 
 void ABaseWeapon::UseStart_Implementation(const FUseContext& Ctx)
 {
-	UE_LOG(LogFPSCore, Warning, TEXT("[%s] UseStart_Implementation - Role=%s, Owner=%s, NetMode=%d"),
-		*GetName(),
-		*UEnum::GetValueAsString(GetLocalRole()),
-		GetOwner() ? *GetOwner()->GetName() : TEXT("NULL"),
-		(int32)GetNetMode());
 	Server_Shoot(true);
 }
 
@@ -182,37 +177,19 @@ void ABaseWeapon::UseTick_Implementation(const FUseContext& Ctx)
 
 void ABaseWeapon::UseStop_Implementation(const FUseContext& Ctx)
 {
-	UE_LOG(LogFPSCore, Warning, TEXT("[%s] UseStop_Implementation - Role=%s, Owner=%s, NetMode=%d"),
-		*GetName(),
-		*UEnum::GetValueAsString(GetLocalRole()),
-		GetOwner() ? *GetOwner()->GetName() : TEXT("NULL"),
-		(int32)GetNetMode());
 	Server_Shoot(false);
 }
 
 void ABaseWeapon::Server_Shoot_Implementation(bool bPressed)
 {
-	UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_Shoot_Implementation - Role=%s, bPressed=%d, FireComponent=%s, HasAuthority=%d"),
-		*GetName(),
-		*UEnum::GetValueAsString(GetLocalRole()),
-		bPressed,
-		FireComponent ? TEXT("Valid") : TEXT("NULL"),
-		HasAuthority());
-
-	if (!FireComponent)
-	{
-		UE_LOG(LogFPSCore, Error, TEXT("[%s] Server_Shoot - No FireComponent!"), *GetName());
-		return;
-	}
+	if (!FireComponent) return;
 
 	if (bPressed)
 	{
-		UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_Shoot - Calling FireComponent->TriggerPulled()"), *GetName());
 		FireComponent->TriggerPulled();
 	}
 	else
 	{
-		UE_LOG(LogFPSCore, Warning, TEXT("[%s] Server_Shoot - Calling FireComponent->TriggerReleased()"), *GetName());
 		FireComponent->TriggerReleased();
 	}
 }
@@ -798,33 +775,14 @@ bool ABaseWeapon::GetIsAiming_Implementation() const
 
 bool ABaseWeapon::CanBeUnequipped_Implementation() const
 {
-	// Block during equip/unequip montage
-	if (bIsEquipping || bIsUnequipping)
-	{
-		UE_LOG(LogFPSCore, Warning, TEXT("[%s] CanBeUnequipped - BLOCKED: bIsEquipping=%d, bIsUnequipping=%d"),
-			*GetName(), bIsEquipping, bIsUnequipping);
-		return false;
-	}
+	if (bIsEquipping || bIsUnequipping) return false;
+	if (ReloadComponent && ReloadComponent->bIsReloading) return false;
 
-	// Block during reload (delegate to component)
-	if (ReloadComponent && ReloadComponent->bIsReloading)
-	{
-		UE_LOG(LogFPSCore, Warning, TEXT("[%s] CanBeUnequipped - BLOCKED: ReloadComponent->bIsReloading=true"),
-			*GetName());
-		return false;
-	}
-
-	// Block during weapon montage (shoot, inspect, etc.)
 	if (FPSMesh)
 	{
 		if (UAnimInstance* AnimInst = FPSMesh->GetAnimInstance())
 		{
-			if (AnimInst->IsAnyMontagePlaying())
-			{
-				UE_LOG(LogFPSCore, Warning, TEXT("[%s] CanBeUnequipped - BLOCKED: FPSMesh montage playing"),
-					*GetName());
-				return false;
-			}
+			if (AnimInst->IsAnyMontagePlaying()) return false;
 		}
 	}
 
@@ -896,19 +854,7 @@ bool ABaseWeapon::CanReload_Implementation() const
 
 void ABaseWeapon::Reload_Implementation(const FUseContext& Ctx)
 {
-	UE_LOG(LogFPSCore, Warning, TEXT("[%s] Reload_Implementation - Role=%s, ReloadComponent=%s, Owner=%s"),
-		*GetName(),
-		*UEnum::GetValueAsString(GetLocalRole()),
-		ReloadComponent ? TEXT("Valid") : TEXT("NULL"),
-		GetOwner() ? *GetOwner()->GetName() : TEXT("NULL"));
-
-	if (!ReloadComponent)
-	{
-		UE_LOG(LogFPSCore, Error, TEXT("[%s] Reload_Implementation - No ReloadComponent!"), *GetName());
-		return;
-	}
-
-	UE_LOG(LogFPSCore, Warning, TEXT("[%s] Reload_Implementation - Calling ReloadComponent->Server_StartReload()"), *GetName());
+	if (!ReloadComponent) return;
 	ReloadComponent->Server_StartReload(Ctx);
 }
 
