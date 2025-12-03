@@ -508,6 +508,12 @@ public:
 	UFUNCTION(NetMulticast, Reliable)
 	void Multicast_PickupItem(AActor* Item);
 
+	// Multicast RPC for first item equip (when ActiveItem was nullptr)
+	// Pre-links anim layer BEFORE equip montage to prevent visual glitch
+	// Called from OnInventoryItemAdded when picking up first item
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_FirstItemEquip(AActor* Item);
+
 	// Physical pickup implementation (called by Multicast)
 	void PerformPickup(AActor* Item);
 

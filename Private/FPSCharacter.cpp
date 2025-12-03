@@ -2227,6 +2227,11 @@ void AFPSCharacter::OnInventoryItemAdded(AActor* Item)
 	// Auto-equip if first item
 	if (InventoryComp->GetItemCount() == 1)
 	{
+		// FIRST ITEM EQUIP:
+		// 1. Multicast pre-links anim layer on ALL machines (prevents visual glitch)
+		// 2. ActiveItem triggers OnRep on clients
+		// 3. EquipItem runs with layer already linked
+		Multicast_FirstItemEquip(Item);
 		ActiveItem = Item;  // Triggers OnRep on clients
 		EquipItem(ActiveItem);
 	}
@@ -2246,6 +2251,30 @@ void AFPSCharacter::OnInventoryItemAdded(AActor* Item)
 void AFPSCharacter::Multicast_PickupItem_Implementation(AActor* Item)
 {
 	PerformPickup(Item);
+}
+
+void AFPSCharacter::Multicast_FirstItemEquip_Implementation(AActor* Item)
+{
+	// ============================================
+	// Multicast_FirstItemEquip - RUNS ON ALL MACHINES
+	// ============================================
+	// Called when picking up FIRST item (ActiveItem was nullptr).
+	// Pre-links anim layer BEFORE equip montage to prevent visual glitch.
+	//
+	// TIMING:
+	// 1. Server: OnInventoryItemAdded → Multicast_FirstItemEquip
+	// 2. ALL MACHINES: UpdateItemAnimLayer (this function)
+	// 3. Server: ActiveItem = Item → OnRep on clients
+	// 4. ALL MACHINES: EquipItem (layer already linked)
+
+	UE_LOG(LogFPSCore, Log, TEXT("[FIRST_EQUIP] Multicast_FirstItemEquip - Item=%s, Role=%s"),
+		Item ? *Item->GetName() : TEXT("nullptr"),
+		*UEnum::GetValueAsString(GetLocalRole()));
+
+	if (!Item) return;
+
+	// Pre-link anim layer BEFORE equip montage
+	UpdateItemAnimLayer(Item);
 }
 
 void AFPSCharacter::Multicast_WeaponSwitch_Implementation(AActor* OldItem, AActor* NewItem)
