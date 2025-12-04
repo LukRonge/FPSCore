@@ -2739,8 +2739,23 @@ void AFPSCharacter::EnableRagdoll()
 		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 
+	// Hide FPS meshes (Arms, Legs) - they have OnlyOwnerSee=true
+	// so this only affects local player's view
+	if (Arms)
+	{
+		Arms->SetVisibility(false);
+	}
+	if (Legs)
+	{
+		Legs->SetVisibility(false);
+	}
+
 	if (GetMesh())
 	{
+		// Make Body mesh visible to local player (normally has OwnerNoSee=true)
+		// so they can see their own ragdoll
+		GetMesh()->SetOwnerNoSee(false);
+
 		GetMesh()->SetCollisionObjectType(ECC_PhysicsBody);
 		GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		GetMesh()->SetAllBodiesBelowSimulatePhysics(FName("pelvis"), true, true);
@@ -2754,8 +2769,21 @@ void AFPSCharacter::DisableRagdoll()
 		CMC->SetMovementMode(MOVE_Walking);
 	}
 
+	// Restore FPS meshes visibility (Arms, Legs)
+	if (Arms)
+	{
+		Arms->SetVisibility(true);
+	}
+	if (Legs)
+	{
+		Legs->SetVisibility(true);
+	}
+
 	if (GetMesh())
 	{
+		// Restore Body mesh OwnerNoSee (local player shouldn't see their own body in FPS)
+		GetMesh()->SetOwnerNoSee(true);
+
 		GetMesh()->SetCollisionProfileName(FName("CharacterMesh"), true);
 		GetMesh()->SetCollisionObjectType(ECC_Pawn);
 		GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
