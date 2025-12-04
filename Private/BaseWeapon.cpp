@@ -366,23 +366,14 @@ void ABaseWeapon::SpawnMuzzleFlashOnMesh(USkeletalMeshComponent* Mesh, bool bIsF
 		ENCPoolMethod::AutoRelease
 	);
 
-	// CRITICAL: Niagara components do NOT inherit visibility from parent mesh
-	// Must explicitly set visibility flags to match the mesh
-	if (NiagaraComp)
-	{
-		if (bIsFirstPerson)
-		{
-			// FPS: Only owner sees this
-			NiagaraComp->SetOnlyOwnerSee(true);
-			NiagaraComp->SetOwnerNoSee(false);
-		}
-		else
-		{
-			// TPS: Everyone except owner sees this
-			NiagaraComp->SetOnlyOwnerSee(false);
-			NiagaraComp->SetOwnerNoSee(true);
-		}
-	}
+	// Niagara visibility is handled by spawning on the correct mesh:
+	// - FPSMesh has OnlyOwnerSee=true (only local player sees)
+	// - TPSMesh has OwnerNoSee=true (only other players see)
+	// No need to set visibility flags on Niagara - it inherits from attachment context
+	//
+	// NOTE: SetOnlyOwnerSee on Niagara doesn't work correctly because the Owner
+	// of dynamically spawned components is the Weapon actor, not the Pawn.
+	(void)NiagaraComp;
 }
 
 void ABaseWeapon::Multicast_PlayShootEffects_Implementation()

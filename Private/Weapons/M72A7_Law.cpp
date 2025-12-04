@@ -8,7 +8,6 @@
 #include "Animation/AnimInstance.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "NiagaraFunctionLibrary.h"
-#include "NiagaraComponent.h"
 #include "Engine/World.h"
 
 AM72A7_Law::AM72A7_Law()
@@ -285,10 +284,12 @@ void AM72A7_Law::Multicast_PlayShootEffects_Implementation()
 		const bool bIsLocallyControlled = OwnerPawn && OwnerPawn->IsLocallyControlled();
 
 		// Use FPSMesh for owner, TPSMesh for others
+		// Niagara visibility is handled by the mesh it's attached to:
+		// - FPSMesh has OnlyOwnerSee=true, TPSMesh has OwnerNoSee=true
 		USkeletalMeshComponent* TargetMesh = bIsLocallyControlled ? FPSMesh : TPSMesh;
 		if (TargetMesh)
 		{
-			UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAttached(
+			UNiagaraFunctionLibrary::SpawnSystemAttached(
 				MuzzleFlashNiagara,
 				TargetMesh,
 				ProjectileSpawnSocket,  // M72A7-specific socket
@@ -299,20 +300,6 @@ void AM72A7_Law::Multicast_PlayShootEffects_Implementation()
 				true,
 				ENCPoolMethod::AutoRelease
 			);
-
-			if (NiagaraComp)
-			{
-				if (bIsLocallyControlled)
-				{
-					NiagaraComp->SetOnlyOwnerSee(true);
-					NiagaraComp->SetOwnerNoSee(false);
-				}
-				else
-				{
-					NiagaraComp->SetOnlyOwnerSee(false);
-					NiagaraComp->SetOwnerNoSee(true);
-				}
-			}
 		}
 
 		// Temporarily clear MuzzleFlashNiagara so Super doesn't spawn another one
