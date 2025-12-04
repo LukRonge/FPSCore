@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
+#include "Blueprint/UserWidget.h"
 #include "PlayerHUDInterface.generated.h"
 
 // This class does not need to be modified.
@@ -65,7 +66,7 @@ public:
 
 	// Set crosshair widget classes for normal and aim states
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "PlayerHUD|Crosshair")
-	void SetCrossHair(TSubclassOf<UUserWidget> CrossHairWidgetClass, TSubclassOf<UUserWidget> AimCrossHairWidgetClass);
+	void SetCrossHair(TSubclassOf<UUserWidget> CrossHairWidgetClass, TSubclassOf<UUserWidget> AimCrossHairWidgetClass = nullptr);
 
 	// ============================================
 	// UI VISIBILITY
