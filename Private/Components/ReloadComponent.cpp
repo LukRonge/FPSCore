@@ -7,8 +7,6 @@
 #include "Animation/AnimInstance.h"
 #include "Net/UnrealNetwork.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogFPSCore, Log, All);
-
 UReloadComponent::UReloadComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
@@ -31,20 +29,20 @@ bool UReloadComponent::CanReload_Internal() const
 	AActor* OwnerActor = GetOwner();
 	if (!OwnerActor)
 	{
-		UE_LOG(LogFPSCore, Warning, TEXT("[ReloadComponent] CanReload - BLOCKED: No owner"));
+		UE_LOG(LogTemp, Warning, TEXT("[ReloadComponent] CanReload - BLOCKED: No owner"));
 		return false;
 	}
 
 	if (!OwnerActor->Implements<UAmmoConsumerInterface>())
 	{
-		UE_LOG(LogFPSCore, Warning, TEXT("[%s] CanReload - BLOCKED: No IAmmoConsumerInterface"),
+		UE_LOG(LogTemp, Warning, TEXT("[%s] CanReload - BLOCKED: No IAmmoConsumerInterface"),
 			*OwnerActor->GetName());
 		return false;
 	}
 
 	if (bIsReloading)
 	{
-		UE_LOG(LogFPSCore, Warning, TEXT("[%s] CanReload - BLOCKED: bIsReloading=true"),
+		UE_LOG(LogTemp, Warning, TEXT("[%s] CanReload - BLOCKED: bIsReloading=true"),
 			*OwnerActor->GetName());
 		return false;
 	}
@@ -56,7 +54,7 @@ bool UReloadComponent::CanReload_Internal() const
 		bool bUnequipping = IHoldableInterface::Execute_IsUnequipping(OwnerActor);
 		if (bEquipping || bUnequipping)
 		{
-			UE_LOG(LogFPSCore, Warning, TEXT("[%s] CanReload - BLOCKED: bIsEquipping=%d, bIsUnequipping=%d"),
+			UE_LOG(LogTemp, Warning, TEXT("[%s] CanReload - BLOCKED: bIsEquipping=%d, bIsUnequipping=%d"),
 				*OwnerActor->GetName(), bEquipping, bUnequipping);
 			return false;
 		}
@@ -67,7 +65,7 @@ bool UReloadComponent::CanReload_Internal() const
 
 	if (CurrentAmmo >= MaxAmmo)
 	{
-		UE_LOG(LogFPSCore, Warning, TEXT("[%s] CanReload - BLOCKED: Magazine full (%d/%d)"),
+		UE_LOG(LogTemp, Warning, TEXT("[%s] CanReload - BLOCKED: Magazine full (%d/%d)"),
 			*OwnerActor->GetName(), CurrentAmmo, MaxAmmo);
 		return false;
 	}

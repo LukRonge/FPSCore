@@ -16,8 +16,6 @@
 #include "Interfaces/SightMeshProviderInterface.h"
 #include "NiagaraComponent.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogFPSCore, Log, All);
-
 ABaseWeapon::ABaseWeapon()
 {
 	PrimaryActorTick.bCanEverTick = false;

@@ -37,8 +37,6 @@
 #include "Kismet/KismetMaterialLibrary.h"
 #include "Engine/DamageEvents.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogFPSCore, Log, All);
-
 AFPSCharacter::AFPSCharacter()
 {
 	PrimaryActorTick.bCanEverTick = true;

@@ -8,8 +8,6 @@
 #include "Core/FPSGameplayTags.h"
 #include "Net/UnrealNetwork.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogFPSCore, Log, All);
-
 ABaseGrenade::ABaseGrenade()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -178,7 +176,7 @@ bool ABaseGrenade::CanUse_Implementation(const FUseContext& Ctx) const
 
 void ABaseGrenade::UseStart_Implementation(const FUseContext& Ctx)
 {
-	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] UseStart - %s - bHasThrown=%d, bIsThrowing=%d, bIsEquipping=%d, bIsUnequipping=%d, Role=%s"),
+	UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] UseStart - %s - bHasThrown=%d, bIsThrowing=%d, bIsEquipping=%d, bIsUnequipping=%d, Role=%s"),
 		*GetName(), bHasThrown, bIsThrowing, bIsEquipping, bIsUnequipping,
 		*UEnum::GetValueAsString(GetLocalRole()));
 
@@ -186,7 +184,7 @@ void ABaseGrenade::UseStart_Implementation(const FUseContext& Ctx)
 	// This is optimistic local prediction - server will validate
 	if (bIsThrowing || bHasThrown)
 	{
-		UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] UseStart - Already throwing or thrown, skipping RPC"));
+		UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] UseStart - Already throwing or thrown, skipping RPC"));
 		return;
 	}
 
@@ -194,7 +192,7 @@ void ABaseGrenade::UseStart_Implementation(const FUseContext& Ctx)
 	// Server will authorize the actual throw via Server_StartThrow
 	bIsThrowing = true;
 
-	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] UseStart - Calling Server_StartThrow"));
+	UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] UseStart - Calling Server_StartThrow"));
 
 	// Client calls Server_StartThrow - server will validate and trigger multicast
 	// This follows the same pattern as BaseWeapon::UseStart → Server_Shoot
@@ -203,7 +201,7 @@ void ABaseGrenade::UseStart_Implementation(const FUseContext& Ctx)
 
 void ABaseGrenade::Server_StartThrow_Implementation()
 {
-	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_StartThrow - %s - bHasThrown=%d, bIsThrowing=%d, bIsEquipping=%d, bIsUnequipping=%d, HasAuthority=%d"),
+	UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Server_StartThrow - %s - bHasThrown=%d, bIsThrowing=%d, bIsEquipping=%d, bIsUnequipping=%d, HasAuthority=%d"),
 		*GetName(), bHasThrown, bIsThrowing, bIsEquipping, bIsUnequipping, HasAuthority());
 
 	// SERVER ONLY - validate state
@@ -211,20 +209,20 @@ void ABaseGrenade::Server_StartThrow_Implementation()
 	// BEFORE this RPC executes (same frame, direct call). Only check bHasThrown (replicated).
 	if (bHasThrown)
 	{
-		UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_StartThrow - Already thrown, aborting"));
+		UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Server_StartThrow - Already thrown, aborting"));
 		return;
 	}
 
 	if (bIsEquipping || bIsUnequipping)
 	{
-		UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_StartThrow - Equip/Unequip in progress, aborting"));
+		UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Server_StartThrow - Equip/Unequip in progress, aborting"));
 		return;
 	}
 
 	// Mark as throwing on server (for remote clients via Multicast)
 	bIsThrowing = true;
 
-	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_StartThrow - Calling Multicast_PlayThrowEffects, ThrowMontage=%s"),
+	UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Server_StartThrow - Calling Multicast_PlayThrowEffects, ThrowMontage=%s"),
 		ThrowMontage ? *ThrowMontage->GetName() : TEXT("NULL"));
 
 	// SERVER triggers multicast - this is the correct pattern
@@ -284,7 +282,7 @@ void ABaseGrenade::OnThrowRelease_Implementation()
 	// OwningPawn is set in OnEquipped but GetOwner() is the authoritative source
 	APawn* CurrentOwner = Cast<APawn>(GetOwner());
 
-	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] OnThrowRelease - %s - Owner=%s, OwningPawn=%s, bHasThrown=%d, bIsThrowing=%d, Role=%s, HasAuthority=%d"),
+	UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] OnThrowRelease - %s - Owner=%s, OwningPawn=%s, bHasThrown=%d, bIsThrowing=%d, Role=%s, HasAuthority=%d"),
 		*GetName(),
 		CurrentOwner ? *CurrentOwner->GetName() : TEXT("NULL"),
 		OwningPawn ? *OwningPawn->GetName() : TEXT("NULL"),
@@ -296,7 +294,7 @@ void ABaseGrenade::OnThrowRelease_Implementation()
 	// Use CurrentOwner (from GetOwner()) as it's replicated and more reliable
 	if (!CurrentOwner)
 	{
-		UE_LOG(LogFPSCore, Warning, TEXT("ABaseGrenade::OnThrowRelease - No owner (GetOwner returned nullptr)"));
+		UE_LOG(LogTemp, Warning, TEXT("ABaseGrenade::OnThrowRelease - No owner (GetOwner returned nullptr)"));
 		return;
 	}
 
@@ -308,7 +306,7 @@ void ABaseGrenade::OnThrowRelease_Implementation()
 
 	if (bHasThrown)
 	{
-		UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::OnThrowRelease - Already thrown"));
+		UE_LOG(LogTemp, Verbose, TEXT("ABaseGrenade::OnThrowRelease - Already thrown"));
 		return;
 	}
 
@@ -322,14 +320,14 @@ void ABaseGrenade::OnThrowRelease_Implementation()
 		if (ArmsMesh && ArmsMesh->DoesSocketExist(CharacterAttachSocket))
 		{
 			SpawnLocation = ArmsMesh->GetSocketLocation(CharacterAttachSocket);
-			UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::OnThrowRelease - SpawnLocation from Arms socket %s: %s"),
+			UE_LOG(LogTemp, Verbose, TEXT("ABaseGrenade::OnThrowRelease - SpawnLocation from Arms socket %s: %s"),
 				*CharacterAttachSocket.ToString(), *SpawnLocation.ToString());
 		}
 		else
 		{
 			// Fallback to actor location
 			SpawnLocation = GetActorLocation();
-			UE_LOG(LogFPSCore, Warning, TEXT("ABaseGrenade::OnThrowRelease - Socket %s not found on Arms mesh, using actor location: %s"),
+			UE_LOG(LogTemp, Warning, TEXT("ABaseGrenade::OnThrowRelease - Socket %s not found on Arms mesh, using actor location: %s"),
 				*CharacterAttachSocket.ToString(), *SpawnLocation.ToString());
 		}
 	}
@@ -337,7 +335,7 @@ void ABaseGrenade::OnThrowRelease_Implementation()
 	{
 		// Fallback to actor location
 		SpawnLocation = GetActorLocation();
-		UE_LOG(LogFPSCore, Warning, TEXT("ABaseGrenade::OnThrowRelease - Pawn doesn't implement CharacterMeshProviderInterface, using actor location: %s"),
+		UE_LOG(LogTemp, Warning, TEXT("ABaseGrenade::OnThrowRelease - Pawn doesn't implement CharacterMeshProviderInterface, using actor location: %s"),
 			*SpawnLocation.ToString());
 	}
 
@@ -349,17 +347,17 @@ void ABaseGrenade::OnThrowRelease_Implementation()
 		FRotator CameraRotation;
 		IViewPointProviderInterface::Execute_GetShootingViewPoint(CurrentOwner, CameraLocation, CameraRotation);
 		ThrowDirection = CameraRotation.Vector();
-		UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::OnThrowRelease - ThrowDirection from camera: %s"), *ThrowDirection.ToString());
+		UE_LOG(LogTemp, Verbose, TEXT("ABaseGrenade::OnThrowRelease - ThrowDirection from camera: %s"), *ThrowDirection.ToString());
 	}
 	else
 	{
 		// Fallback to pawn forward
 		ThrowDirection = CurrentOwner->GetActorForwardVector();
-		UE_LOG(LogFPSCore, Warning, TEXT("ABaseGrenade::OnThrowRelease - Pawn doesn't implement ViewPointProviderInterface, using forward: %s"),
+		UE_LOG(LogTemp, Warning, TEXT("ABaseGrenade::OnThrowRelease - Pawn doesn't implement ViewPointProviderInterface, using forward: %s"),
 			*ThrowDirection.ToString());
 	}
 
-	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] OnThrowRelease - Calling Server_ExecuteThrow, SpawnLocation=%s, ThrowDirection=%s"),
+	UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] OnThrowRelease - Calling Server_ExecuteThrow, SpawnLocation=%s, ThrowDirection=%s"),
 		*SpawnLocation.ToString(), *ThrowDirection.ToString());
 
 	// Request server to execute throw
@@ -385,24 +383,24 @@ bool ABaseGrenade::CanThrow_Implementation() const
 
 void ABaseGrenade::Server_ExecuteThrow_Implementation(FVector SpawnLocation, FVector ThrowDirection)
 {
-	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - %s - SpawnLocation=%s, ThrowDirection=%s, HasAuthority=%d, bHasThrown=%d"),
+	UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - %s - SpawnLocation=%s, ThrowDirection=%s, HasAuthority=%d, bHasThrown=%d"),
 		*GetName(), *SpawnLocation.ToString(), *ThrowDirection.ToString(), HasAuthority(), bHasThrown);
 
 	// SERVER ONLY
 	if (!HasAuthority())
 	{
-		UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Not authority, aborting"));
+		UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Not authority, aborting"));
 		return;
 	}
 
 	// Validate state
 	if (bHasThrown)
 	{
-		UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Already thrown, aborting"));
+		UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Already thrown, aborting"));
 		return;
 	}
 
-	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Calling SpawnProjectile, ProjectileClass=%s"),
+	UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Calling SpawnProjectile, ProjectileClass=%s"),
 		ProjectileClass ? *ProjectileClass->GetName() : TEXT("NULL"));
 
 	// Spawn projectile via interface
@@ -413,7 +411,7 @@ void ABaseGrenade::Server_ExecuteThrow_Implementation(FVector SpawnLocation, FVe
 		// Set replicated state - triggers OnRep on clients
 		bHasThrown = true;
 
-		UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Projectile spawned: %s"), *Projectile->GetName());
+		UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Projectile spawned: %s"), *Projectile->GetName());
 
 		// Remove grenade from character's inventory BEFORE destroying
 		// This triggers OnInventoryItemRemoved which:
@@ -422,50 +420,50 @@ void ABaseGrenade::Server_ExecuteThrow_Implementation(FVector SpawnLocation, FVe
 		// - Handles all cleanup properly
 		if (OwningPawn && OwningPawn->Implements<UItemCollectorInterface>())
 		{
-			UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Removing grenade from inventory via Drop"));
+			UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Removing grenade from inventory via Drop"));
 			// Using Drop will call RemoveItem internally and handle all cleanup
 			// The grenade will be detached but we destroy it immediately after
 			IItemCollectorInterface::Execute_Drop(OwningPawn, this);
 		}
 		else
 		{
-			UE_LOG(LogFPSCore, Warning, TEXT("[GRENADE_THROW] Server_ExecuteThrow - OwningPawn is NULL or doesn't implement ItemCollectorInterface!"));
+			UE_LOG(LogTemp, Warning, TEXT("[GRENADE_THROW] Server_ExecuteThrow - OwningPawn is NULL or doesn't implement ItemCollectorInterface!"));
 		}
 
-		UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Destroying grenade actor"));
+		UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Destroying grenade actor"));
 
 		// Destroy grenade actor after successful throw (server handles replication)
 		Destroy();
 	}
 	else
 	{
-		UE_LOG(LogFPSCore, Error, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Failed to spawn projectile! Check ProjectileClass and IProjectileInterface."));
+		UE_LOG(LogTemp, Error, TEXT("[GRENADE_THROW] Server_ExecuteThrow - Failed to spawn projectile! Check ProjectileClass and IProjectileInterface."));
 		bIsThrowing = false;
 	}
 }
 
 AActor* ABaseGrenade::SpawnProjectile(FVector SpawnLocation, FVector ThrowDirection)
 {
-	UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::SpawnProjectile - %s - Location=%s, Direction=%s"),
+	UE_LOG(LogTemp, Verbose, TEXT("ABaseGrenade::SpawnProjectile - %s - Location=%s, Direction=%s"),
 		*GetName(), *SpawnLocation.ToString(), *ThrowDirection.ToString());
 
 	// SERVER ONLY
 	if (!HasAuthority())
 	{
-		UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::SpawnProjectile - Not authority"));
+		UE_LOG(LogTemp, Verbose, TEXT("ABaseGrenade::SpawnProjectile - Not authority"));
 		return nullptr;
 	}
 
 	if (!ProjectileClass)
 	{
-		UE_LOG(LogFPSCore, Error, TEXT("ABaseGrenade::SpawnProjectile - No ProjectileClass set! Configure ProjectileClass in Blueprint defaults."));
+		UE_LOG(LogTemp, Error, TEXT("ABaseGrenade::SpawnProjectile - No ProjectileClass set! Configure ProjectileClass in Blueprint defaults."));
 		return nullptr;
 	}
 
 	// Verify projectile class implements IProjectileInterface
 	if (!ProjectileClass->ImplementsInterface(UProjectileInterface::StaticClass()))
 	{
-		UE_LOG(LogFPSCore, Error, TEXT("ABaseGrenade::SpawnProjectile - ProjectileClass %s does not implement IProjectileInterface!"),
+		UE_LOG(LogTemp, Error, TEXT("ABaseGrenade::SpawnProjectile - ProjectileClass %s does not implement IProjectileInterface!"),
 			*ProjectileClass->GetName());
 		return nullptr;
 	}
@@ -478,7 +476,7 @@ AActor* ABaseGrenade::SpawnProjectile(FVector SpawnLocation, FVector ThrowDirect
 	SpawnParams.Instigator = OwningPawn;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
-	UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::SpawnProjectile - Spawning %s at %s with rotation %s"),
+	UE_LOG(LogTemp, Verbose, TEXT("ABaseGrenade::SpawnProjectile - Spawning %s at %s with rotation %s"),
 		*ProjectileClass->GetName(), *SpawnLocation.ToString(), *ThrowDirection.Rotation().ToString());
 
 	// Spawn projectile actor
@@ -491,14 +489,14 @@ AActor* ABaseGrenade::SpawnProjectile(FVector SpawnLocation, FVector ThrowDirect
 
 	if (Projectile)
 	{
-		UE_LOG(LogFPSCore, Verbose, TEXT("ABaseGrenade::SpawnProjectile - Spawned %s, calling InitializeProjectile"), *Projectile->GetName());
+		UE_LOG(LogTemp, Verbose, TEXT("ABaseGrenade::SpawnProjectile - Spawned %s, calling InitializeProjectile"), *Projectile->GetName());
 		// Initialize projectile via IProjectileInterface (NO DIRECT CLASS REFERENCE)
 		// Projectile uses its rotation and ProjectileMovementComponent::InitialSpeed
 		IProjectileInterface::Execute_InitializeProjectile(Projectile, OwningPawn);
 	}
 	else
 	{
-		UE_LOG(LogFPSCore, Error, TEXT("ABaseGrenade::SpawnProjectile - SpawnActor returned nullptr!"));
+		UE_LOG(LogTemp, Error, TEXT("ABaseGrenade::SpawnProjectile - SpawnActor returned nullptr!"));
 	}
 
 	return Projectile;
@@ -515,7 +513,7 @@ void ABaseGrenade::Multicast_PlayThrowEffects_Implementation()
 	APawn* OwnerPawn = GrenadeOwner ? Cast<APawn>(GrenadeOwner) : nullptr;
 	const bool bIsLocallyControlled = OwnerPawn && OwnerPawn->IsLocallyControlled();
 
-	UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - %s - Owner=%s, bIsLocallyControlled=%d, ThrowMontage=%s, Role=%s"),
+	UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - %s - Owner=%s, bIsLocallyControlled=%d, ThrowMontage=%s, Role=%s"),
 		*GetName(),
 		GrenadeOwner ? *GrenadeOwner->GetName() : TEXT("NULL"),
 		bIsLocallyControlled,
@@ -531,7 +529,7 @@ void ABaseGrenade::Multicast_PlayThrowEffects_Implementation()
 	// ============================================
 	if (!ThrowMontage || !GrenadeOwner)
 	{
-		UE_LOG(LogFPSCore, Warning, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Missing ThrowMontage=%s or Owner=%s"),
+		UE_LOG(LogTemp, Warning, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Missing ThrowMontage=%s or Owner=%s"),
 			ThrowMontage ? TEXT("OK") : TEXT("NULL"),
 			GrenadeOwner ? TEXT("OK") : TEXT("NULL"));
 		return;
@@ -539,7 +537,7 @@ void ABaseGrenade::Multicast_PlayThrowEffects_Implementation()
 
 	if (!GrenadeOwner->Implements<UCharacterMeshProviderInterface>())
 	{
-		UE_LOG(LogFPSCore, Warning, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Owner doesn't implement CharacterMeshProviderInterface"));
+		UE_LOG(LogTemp, Warning, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Owner doesn't implement CharacterMeshProviderInterface"));
 		return;
 	}
 
@@ -559,16 +557,16 @@ void ABaseGrenade::Multicast_PlayThrowEffects_Implementation()
 			if (UAnimInstance* AnimInst = ArmsMesh->GetAnimInstance())
 			{
 				AnimInst->Montage_Play(ThrowMontage);
-				UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Playing ThrowMontage on Arms (FPS)"));
+				UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Playing ThrowMontage on Arms (FPS)"));
 			}
 			else
 			{
-				UE_LOG(LogFPSCore, Warning, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - No AnimInstance on Arms mesh"));
+				UE_LOG(LogTemp, Warning, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - No AnimInstance on Arms mesh"));
 			}
 		}
 		else
 		{
-			UE_LOG(LogFPSCore, Warning, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - No Arms mesh"));
+			UE_LOG(LogTemp, Warning, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - No Arms mesh"));
 		}
 	}
 
@@ -581,7 +579,7 @@ void ABaseGrenade::Multicast_PlayThrowEffects_Implementation()
 		if (UAnimInstance* AnimInst = BodyMesh->GetAnimInstance())
 		{
 			AnimInst->Montage_Play(ThrowMontage);
-			UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Playing ThrowMontage on Body (TPS)"));
+			UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Playing ThrowMontage on Body (TPS)"));
 		}
 	}
 
@@ -591,7 +589,7 @@ void ABaseGrenade::Multicast_PlayThrowEffects_Implementation()
 		if (UAnimInstance* AnimInst = LegsMesh->GetAnimInstance())
 		{
 			AnimInst->Montage_Play(ThrowMontage);
-			UE_LOG(LogFPSCore, Log, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Playing ThrowMontage on Legs (TPS)"));
+			UE_LOG(LogTemp, Log, TEXT("[GRENADE_THROW] Multicast_PlayThrowEffects - Playing ThrowMontage on Legs (TPS)"));
 		}
 	}
 }
