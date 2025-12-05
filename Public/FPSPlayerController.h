@@ -5,12 +5,13 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "Interfaces/PlayerHUDInterface.h"
+#include "Interfaces/PlayerDeathHandlerInterface.h"
 #include "FPSPlayerController.generated.h"
 
 class UInputMappingContext;
 
 UCLASS()
-class FPSCORE_API AFPSPlayerController : public APlayerController, public IPlayerHUDInterface
+class FPSCORE_API AFPSPlayerController : public APlayerController, public IPlayerHUDInterface, public IPlayerDeathHandlerInterface
 {
 	GENERATED_BODY()
 
@@ -48,4 +49,10 @@ public:
 	virtual void SetCrossHair_Implementation(TSubclassOf<UUserWidget> CrossHairWidgetClass, TSubclassOf<UUserWidget> AimCrossHairWidgetClass) override;
 	virtual void SetHUDVisibility_Implementation(bool Visibility) override;
 	virtual void UpdateItemInfo_Implementation(const FString& Info) override;
+
+	// ============================================
+	// PLAYER DEATH HANDLER INTERFACE IMPLEMENTATION
+	// ============================================
+
+	virtual void OnControlledPawnDeath_Implementation(APawn* DeadPawn, AActor* Killer) override;
 };

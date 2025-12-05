@@ -99,6 +99,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Grenade|Explosion")
 	float MinDamageMultiplier = 0.1f;
 
+	/** Radial impulse strength applied to physics objects and ragdolls */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Grenade|Explosion")
+	float ExplosionImpulse = 500.0f;
+
 	/** Delay after explosion before destroying actor (seconds) */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Grenade|Explosion")
 	float DestroyDelay = 10.0f;

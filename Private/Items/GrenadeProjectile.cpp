@@ -3,8 +3,10 @@
 #include "Items/GrenadeProjectile.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/OverlapResult.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
@@ -197,43 +199,46 @@ void AGrenadeProjectile::ApplyExplosionDamage()
 		ECollisionChannel::ECC_Visibility  // DamagePreventionChannel
 	);
 
-	UE_LOG(LogTemp, Log, TEXT("AGrenadeProjectile::ApplyExplosionDamage - Damage: %.1f, Radius: %.1f"), ExplosionDamage, ExplosionRadius);
+	// Apply radial impulse to physics objects
+	TArray<FOverlapResult> Overlaps;
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(this);
+
+	if (GetWorld()->OverlapMultiByChannel(Overlaps, ExplosionOrigin, FQuat::Identity, ECC_PhysicsBody, FCollisionShape::MakeSphere(ExplosionRadius), QueryParams))
+	{
+		for (const FOverlapResult& Overlap : Overlaps)
+		{
+			UPrimitiveComponent* Component = Overlap.GetComponent();
+			if (Component && Component->IsSimulatingPhysics())
+			{
+				Component->AddRadialImpulse(ExplosionOrigin, ExplosionRadius, ExplosionImpulse, ERadialImpulseFalloff::RIF_Linear, true);
+			}
+		}
+	}
+
 }
 
 void AGrenadeProjectile::Multicast_PlayExplosionEffects_Implementation()
 {
-	UE_LOG(LogGrenadeProjectile, Log, TEXT("Multicast_PlayExplosionEffects - %s - Location=%s, ExplosionVFX=%s"),
-		*GetName(), *GetActorLocation().ToString(),
-		ExplosionVFX ? *ExplosionVFX->GetName() : TEXT("NULL"));
-
-	// Play VFX
 	if (ExplosionVFX)
 	{
-		UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 			GetWorld(),
 			ExplosionVFX,
 			GetActorLocation(),
 			FRotator::ZeroRotator,
-			FVector(1.0f),             // Scale
-			true,                      // bAutoDestroy
-			true,                      // bAutoActivate
-			ENCPoolMethod::AutoRelease // Pooling
+			FVector(1.0f),
+			true,
+			true,
+			ENCPoolMethod::AutoRelease
 		);
-		UE_LOG(LogGrenadeProjectile, Log, TEXT("Multicast_PlayExplosionEffects - Spawned VFX: %s"),
-			NiagaraComp ? TEXT("SUCCESS") : TEXT("FAILED"));
-	}
-	else
-	{
-		UE_LOG(LogGrenadeProjectile, Warning, TEXT("Multicast_PlayExplosionEffects - No ExplosionVFX set!"));
 	}
 
-	// Hide mesh after explosion
 	if (MeshComponent)
 	{
 		MeshComponent->SetVisibility(false);
 	}
 
-	// Disable collision
 	if (CollisionComponent)
 	{
 		CollisionComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);

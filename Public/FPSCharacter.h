@@ -9,6 +9,7 @@
 #include "Interfaces/ItemCollectorInterface.h"
 #include "Interfaces/RecoilHandlerInterface.h"
 #include "Interfaces/CharacterMeshProviderInterface.h"
+#include "Interfaces/DamageableInterface.h"
 #include "FPSCharacter.generated.h"
 
 class UInputAction;
@@ -23,7 +24,7 @@ enum class EFPSMovementMode : uint8
 };
 
 UCLASS()
-class FPSCORE_API AFPSCharacter : public ACharacter, public IViewPointProviderInterface, public IItemCollectorInterface, public IRecoilHandlerInterface, public ICharacterMeshProviderInterface
+class FPSCORE_API AFPSCharacter : public ACharacter, public IViewPointProviderInterface, public IItemCollectorInterface, public IRecoilHandlerInterface, public ICharacterMeshProviderInterface, public IDamageableInterface
 {
 	GENERATED_BODY()
 
@@ -53,6 +54,13 @@ public:
 	virtual USkeletalMeshComponent* GetBodyMesh_Implementation() const override;
 	virtual USkeletalMeshComponent* GetArmsMesh_Implementation() const override;
 	virtual USkeletalMeshComponent* GetLegsMesh_Implementation() const override;
+
+	// IDamageableInterface implementation
+	virtual TArray<UPrimitiveComponent*> GetDamageableComponents_Implementation() override;
+	virtual float GetHealth_Implementation() override;
+	virtual float GetMaxHealth_Implementation() override;
+	virtual bool IsDead_Implementation() override;
+	virtual void ResetAfterDeath_Implementation() override;
 
 protected:
 	virtual void PostInitializeComponents() override;
@@ -265,34 +273,21 @@ public:
 	// DEATH SYSTEM
 	// ============================================
 
-	/**
-	 * Client RPC for death processing on owning client
-	 * Handles client-side death effects (death camera, UI updates)
-	 */
 	UFUNCTION(Client, Reliable)
 	void Client_ProcessDeath();
 
-	/**
-	 * Multicast RPC for death effects on all clients
-	 * Handles ragdoll activation on all clients
-	 */
 	UFUNCTION(NetMulticast, Reliable)
 	void Multicast_ProcessDeath();
 
-	// ============================================
-	// RECOIL SYSTEM
-	// ============================================
+	UFUNCTION(BlueprintCallable, Category = "Death")
+	void ResetCharacterState();
 
-	/**
-	 * Multicast RPC for recoil visual feedback on all clients
-	 * Called from ApplyRecoilKick_Implementation() on SERVER
-	 * Executes on ALL clients (owning + remote)
-	 *
-	 * Owning client: Camera kick (UpdatePitch + AddControllerYawInput)
-	 * Remote clients: Weapon animation (TPS mesh)
-	 *
-	 * @param RecoilScale - Recoil multiplier from FireComponent
-	 */
+	UFUNCTION(Client, Reliable)
+	void Client_ProcessReset();
+
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_ProcessReset();
+
 	UFUNCTION(NetMulticast, Reliable)
 	void Multicast_ApplyRecoil(float RecoilScale);
 

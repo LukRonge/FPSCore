@@ -15,6 +15,7 @@
 #include "Interfaces/UsableInterface.h"
 #include "Interfaces/SightInterface.h"
 #include "Interfaces/PlayerHUDInterface.h"
+#include "Interfaces/PlayerDeathHandlerInterface.h"
 #include "Interfaces/ReloadableInterface.h"
 #include "BaseWeapon.h"
 #include "Core/FPSGameplayTags.h"
@@ -2574,15 +2575,17 @@ void AFPSCharacter::OnHealthComponentDamaged()
 
 void AFPSCharacter::OnHealthComponentDeath()
 {
-	// Called on SERVER (ApplyDamage) and CLIENTS (OnRep_IsDeath)
-	// Handle death visual effects
-
 	if (HasAuthority())
 	{
-		// SERVER: Drop active item on death
 		if (IsValid(ActiveItem) && InventoryComp)
 		{
 			InventoryComp->RemoveItem(ActiveItem);
+		}
+
+		AController* PC = GetController();
+		if (PC && PC->Implements<UPlayerDeathHandlerInterface>())
+		{
+			IPlayerDeathHandlerInterface::Execute_OnControlledPawnDeath(PC, this, nullptr);
 		}
 
 		Multicast_ProcessDeath();
@@ -2659,6 +2662,86 @@ void AFPSCharacter::Client_ProcessDeath_Implementation()
 void AFPSCharacter::Multicast_ProcessDeath_Implementation()
 {
 	EnableRagdoll();
+}
+
+// ============================================
+// RESET/RESPAWN SYSTEM
+// ============================================
+
+void AFPSCharacter::ResetCharacterState()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (HealthComp)
+	{
+		HealthComp->ResetHealthState();
+	}
+
+	bIsAiming = false;
+	Pitch = 0.0f;
+
+	Multicast_ProcessReset();
+	Client_ProcessReset();
+}
+
+void AFPSCharacter::Client_ProcessReset_Implementation()
+{
+	if (Camera)
+	{
+		Camera->PostProcessSettings.bOverride_ColorSaturation = false;
+		Camera->PostProcessSettings.ColorSaturation = FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+		Camera->SetFieldOfView(DefaultFOV);
+		Camera->SetRelativeLocation(BaseCameraLocation);
+		Camera->SetRelativeRotation(FRotator::ZeroRotator);
+	}
+
+	if (Controller && Controller->Implements<UPlayerHUDInterface>())
+	{
+		IPlayerHUDInterface::Execute_SetHUDVisibility(Controller, true);
+
+		if (!ActiveItem)
+		{
+			IPlayerHUDInterface::Execute_SetCrossHair(Controller, DefaultCrossHair, nullptr);
+		}
+	}
+
+	ArmsOffset = DefaultArmsOffset;
+	InterpolatedArmsOffset = DefaultArmsOffset;
+	if (Arms)
+	{
+		Arms->SetRelativeLocation(DefaultArmsOffset);
+		Arms->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
+	}
+
+	AimingAlpha = 0.0f;
+	bAimingCrosshairSet = false;
+	LocalPitchAccumulator = 0.0f;
+
+	LeanState_CurrentLean = FVector::ZeroVector;
+	LeanState_WalkCycleTime = 0.0f;
+	LeanState_PreviousControlRotation = GetControlRotation();
+	LeanState_MouseLagOffset = FVector2D::ZeroVector;
+	LeanState_RawMouseDelta = 0.0f;
+
+	BreathingState_CurrentBreathing = FVector::ZeroVector;
+	BreathingState_IdleSwayTime = 0.0f;
+	BreathingState_IdleActivation = 0.0f;
+
+	HipLeaningScale = 1.0f;
+	HipBreathingScale = 1.0f;
+	CurrentLeaningScale = 1.0f;
+	CurrentBreathingScale = 1.0f;
+}
+
+void AFPSCharacter::Multicast_ProcessReset_Implementation()
+{
+	DisableRagdoll();
+
+	CurrentMovementMode = EFPSMovementMode::Jog;
+	UpdateMovementSpeed(CurrentMovementMode);
 }
 
 // ============================================
@@ -2739,8 +2822,6 @@ void AFPSCharacter::EnableRagdoll()
 		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 
-	// Hide FPS meshes (Arms, Legs) - they have OnlyOwnerSee=true
-	// so this only affects local player's view
 	if (Arms)
 	{
 		Arms->SetVisibility(false);
@@ -2752,10 +2833,7 @@ void AFPSCharacter::EnableRagdoll()
 
 	if (GetMesh())
 	{
-		// Make Body mesh visible to local player (normally has OwnerNoSee=true)
-		// so they can see their own ragdoll
 		GetMesh()->SetOwnerNoSee(false);
-
 		GetMesh()->SetCollisionObjectType(ECC_PhysicsBody);
 		GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		GetMesh()->SetAllBodiesBelowSimulatePhysics(FName("pelvis"), true, true);
@@ -2769,7 +2847,6 @@ void AFPSCharacter::DisableRagdoll()
 		CMC->SetMovementMode(MOVE_Walking);
 	}
 
-	// Restore FPS meshes visibility (Arms, Legs)
 	if (Arms)
 	{
 		Arms->SetVisibility(true);
@@ -2777,17 +2854,24 @@ void AFPSCharacter::DisableRagdoll()
 	if (Legs)
 	{
 		Legs->SetVisibility(true);
+		Legs->SetRelativeLocation(FVector::ZeroVector);
+		Legs->SetRelativeRotation(FRotator::ZeroRotator);
 	}
 
 	if (GetMesh())
 	{
-		// Restore Body mesh OwnerNoSee (local player shouldn't see their own body in FPS)
+		GetMesh()->SetAllBodiesSimulatePhysics(false);
 		GetMesh()->SetOwnerNoSee(true);
-
+		GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -88.0f));
+		GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
 		GetMesh()->SetCollisionProfileName(FName("CharacterMesh"), true);
 		GetMesh()->SetCollisionObjectType(ECC_Pawn);
 		GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-		GetMesh()->SetAllBodiesSimulatePhysics(false);
+	}
+
+	if (Spine_03)
+	{
+		Spine_03->SetRelativeLocation(OriginalSpineLocation);
 	}
 
 	if (GetCapsuleComponent())
@@ -2798,12 +2882,8 @@ void AFPSCharacter::DisableRagdoll()
 		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Ignore);
 	}
 
-	if (DefaultAnimLayer)
-	{
-		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
-		Legs->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
-		Arms->GetAnimInstance()->LinkAnimClassLayers(DefaultAnimLayer);
-	}
+	CurrentlyLinkedItemLayer = nullptr;
+	UpdateItemAnimLayer(ActiveItem);
 }
 
 // ============================================
@@ -2812,20 +2892,50 @@ void AFPSCharacter::DisableRagdoll()
 
 USkeletalMeshComponent* AFPSCharacter::GetBodyMesh_Implementation() const
 {
-	// Return character's primary mesh (Body, visible to all players)
-	// This is the ACharacter::GetMesh() default mesh component
 	return GetMesh();
 }
 
 USkeletalMeshComponent* AFPSCharacter::GetArmsMesh_Implementation() const
 {
-	// Return first-person arms mesh (visible only to owner)
 	return Arms;
 }
 
 USkeletalMeshComponent* AFPSCharacter::GetLegsMesh_Implementation() const
 {
-	// Return first-person legs mesh (visible only to owner)
 	return Legs;
+}
+
+// ============================================
+// IDamageableInterface IMPLEMENTATION
+// ============================================
+
+TArray<UPrimitiveComponent*> AFPSCharacter::GetDamageableComponents_Implementation()
+{
+	TArray<UPrimitiveComponent*> Components;
+	if (GetMesh())
+	{
+		Components.Add(GetMesh());
+	}
+	return Components;
+}
+
+float AFPSCharacter::GetHealth_Implementation()
+{
+	return HealthComp ? HealthComp->Health : 0.0f;
+}
+
+float AFPSCharacter::GetMaxHealth_Implementation()
+{
+	return HealthComp ? HealthComp->MaxHealth : 100.0f;
+}
+
+bool AFPSCharacter::IsDead_Implementation()
+{
+	return HealthComp ? HealthComp->bIsDeath : false;
+}
+
+void AFPSCharacter::ResetAfterDeath_Implementation()
+{
+	ResetCharacterState();
 }
 

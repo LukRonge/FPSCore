@@ -1,10 +1,11 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "FPSPlayerController.h"
-#include "FPSCharacter.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 #include "GameFramework/HUD.h"
+#include "GameFramework/GameModeBase.h"
+#include "Interfaces/GameModeDeathInterface.h"
 
 AFPSPlayerController::AFPSPlayerController()
 {
@@ -14,8 +15,6 @@ AFPSPlayerController::AFPSPlayerController()
 void AFPSPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
-
-	// Input mapping context is set up in OnPossess() only
 }
 
 void AFPSPlayerController::SetupInputMapping()
@@ -64,11 +63,6 @@ void AFPSPlayerController::OnPossess(APawn* InPawn)
 	if (InPawn && IsLocalController())
 	{
 		SetViewTarget(InPawn);
-
-		if (AFPSCharacter* FPSChar = Cast<AFPSCharacter>(InPawn))
-		{
-			FPSChar->UpdateItemAnimLayer(nullptr);
-		}
 	}
 }
 
@@ -83,7 +77,6 @@ void AFPSPlayerController::OnUnPossess()
 
 void AFPSPlayerController::UpdateHealth_Implementation(float Health)
 {
-	// Delegate to HUD widget if it implements PlayerHUDInterface
 	AHUD* HUD = GetHUD();
 	if (HUD && HUD->Implements<UPlayerHUDInterface>())
 	{
@@ -93,19 +86,16 @@ void AFPSPlayerController::UpdateHealth_Implementation(float Health)
 
 float AFPSPlayerController::GetHealth_Implementation()
 {
-	// Delegate to HUD widget if it implements PlayerHUDInterface
 	AHUD* HUD = GetHUD();
 	if (HUD && HUD->Implements<UPlayerHUDInterface>())
 	{
 		return IPlayerHUDInterface::Execute_GetHealth(HUD);
 	}
-
 	return 0.0f;
 }
 
 void AFPSPlayerController::AddDamageEffect_Implementation()
 {
-	// Delegate to HUD widget if it implements PlayerHUDInterface
 	AHUD* HUD = GetHUD();
 	if (HUD && HUD->Implements<UPlayerHUDInterface>())
 	{
@@ -115,7 +105,6 @@ void AFPSPlayerController::AddDamageEffect_Implementation()
 
 void AFPSPlayerController::UpdateActiveItem_Implementation(AActor* ActiveItem)
 {
-	// Delegate to HUD widget if it implements PlayerHUDInterface
 	AHUD* HUD = GetHUD();
 	if (HUD && HUD->Implements<UPlayerHUDInterface>())
 	{
@@ -125,7 +114,6 @@ void AFPSPlayerController::UpdateActiveItem_Implementation(AActor* ActiveItem)
 
 void AFPSPlayerController::UpdateInventory_Implementation(const TArray<AActor*>& Items)
 {
-	// Delegate to HUD widget if it implements PlayerHUDInterface
 	AHUD* HUD = GetHUD();
 	if (HUD && HUD->Implements<UPlayerHUDInterface>())
 	{
@@ -135,7 +123,6 @@ void AFPSPlayerController::UpdateInventory_Implementation(const TArray<AActor*>&
 
 void AFPSPlayerController::UpdateCrossHair_Implementation(bool IsAim, float LeanAlpha)
 {
-	// Delegate to HUD widget if it implements PlayerHUDInterface
 	AHUD* HUD = GetHUD();
 	if (HUD && HUD->Implements<UPlayerHUDInterface>())
 	{
@@ -145,7 +132,6 @@ void AFPSPlayerController::UpdateCrossHair_Implementation(bool IsAim, float Lean
 
 void AFPSPlayerController::SetCrossHair_Implementation(TSubclassOf<UUserWidget> CrossHairWidgetClass, TSubclassOf<UUserWidget> AimCrossHairWidgetClass)
 {
-	// Delegate to HUD widget if it implements PlayerHUDInterface
 	AHUD* HUD = GetHUD();
 	if (HUD && HUD->Implements<UPlayerHUDInterface>())
 	{
@@ -155,7 +141,6 @@ void AFPSPlayerController::SetCrossHair_Implementation(TSubclassOf<UUserWidget> 
 
 void AFPSPlayerController::SetHUDVisibility_Implementation(bool Visibility)
 {
-	// Delegate to HUD widget if it implements PlayerHUDInterface
 	AHUD* HUD = GetHUD();
 	if (HUD && HUD->Implements<UPlayerHUDInterface>())
 	{
@@ -165,10 +150,27 @@ void AFPSPlayerController::SetHUDVisibility_Implementation(bool Visibility)
 
 void AFPSPlayerController::UpdateItemInfo_Implementation(const FString& Info)
 {
-	// Delegate to HUD widget if it implements PlayerHUDInterface
 	AHUD* HUD = GetHUD();
 	if (HUD && HUD->Implements<UPlayerHUDInterface>())
 	{
 		IPlayerHUDInterface::Execute_UpdateItemInfo(HUD, Info);
+	}
+}
+
+// ============================================
+// PLAYER DEATH HANDLER INTERFACE IMPLEMENTATION
+// ============================================
+
+void AFPSPlayerController::OnControlledPawnDeath_Implementation(APawn* DeadPawn, AActor* Killer)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	AGameModeBase* GM = GetWorld()->GetAuthGameMode();
+	if (GM && GM->Implements<UGameModeDeathInterface>())
+	{
+		IGameModeDeathInterface::Execute_OnPlayerDeath(GM, this, DeadPawn, Killer);
 	}
 }
